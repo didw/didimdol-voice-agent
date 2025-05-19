@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+openai
+google-cloud-speech
+google-cloud-texttospeech
+langchain
+langgraph
+langchain-openai
+# langchain-openai (langchain >= 0.1.0 에서는 openai 패키지에 통합됨)
+# pydantic < 2  # Langchain 특정 버전과 호환성 이슈 있을 수 있음, 필요시 버전 명시
