@@ -5,6 +5,7 @@ import os
 import asyncio
 import base64
 from typing import Callable, Optional, AsyncGenerator, Union # Union 추가
+import queue # 스레드 안전 큐
 
 from ..core.config import GOOGLE_APPLICATION_CREDENTIALS
 
@@ -119,36 +120,37 @@ class StreamSTTService:
         self.on_error = on_error
         self.on_epd_detected = on_epd_detected
         self.session_id = session_id
-        self._audio_queue = asyncio.Queue()
+        self._audio_queue = queue.Queue()
         self._processing_task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
         self._stop_event = asyncio.Event() # 스트림 종료를 위한 이벤트
 
         print(f"StreamSTTService ({session_id}) initialized. Encoding: {audio_encoding.name}, Sample Rate: {sample_rate_hertz}")
 
-    async def _request_generator(self):
+    def _request_generator(self): # 동기 제너레이터로 변경
         yield speech.StreamingRecognizeRequest(streaming_config=self.streaming_config)
         while not self._stop_event.is_set():
             try:
-                # 큐에서 데이터를 가져오되, stop_event가 설정되면 즉시 종료
-                chunk = await asyncio.wait_for(self._audio_queue.get(), timeout=0.1)
-                if chunk is None: # 명시적 종료 신호
+                # 동기 큐에서 데이터를 가져옴 (타임아웃 사용)
+                chunk = self._audio_queue.get(block=True, timeout=0.1)
+                if chunk is None: # 종료 신호
                     self._stop_event.set()
                     break
                 yield speech.StreamingRecognizeRequest(audio_content=chunk)
                 self._audio_queue.task_done()
-            except asyncio.TimeoutError:
-                continue # 타임아웃 발생 시 다시 루프 시작 (stop_event 체크)
-            except asyncio.CancelledError:
+            except queue.Empty: # 타임아웃 발생 시 다시 루프 시작
+                continue
+            except Exception as e:
+                # 로그 기록 또는 에러 처리
+                print(f"Error in STT request generator: {e}")
                 self._stop_event.set()
                 break
-
 
     def _process_responses_sync(self):
         """동기 방식으로 응답을 처리하는 내부 함수 (run_in_executor에서 실행됨)"""
         if not self._is_available: return
 
-        requests = self._request_generator_sync_wrapper() # 동기 제너레이터 사용
+        requests = self._request_generator()
         try:
             print(f"STT stream ({self.session_id}): Starting to listen for responses (sync).")
             responses = self.client.streaming_recognize(self.streaming_config, requests)
@@ -176,7 +178,7 @@ class StreamSTTService:
             loop.call_soon_threadsafe(self.on_error, error_msg)
         finally:
             print(f"STT stream ({self.session_id}): Response listening loop (sync) ended.")
-            self._stop_event.set() # 루프 종료 시 stop_event 설정 보장
+            self._stop_event.set()
 
 
     def _request_generator_sync_wrapper(self):
@@ -257,13 +259,20 @@ class StreamSTTService:
 
     async def process_audio_chunk(self, chunk: bytes):
         if not self._is_available or self._stop_event.is_set(): return
+
         if not self._processing_task or self._processing_task.done():
             print(f"STT stream ({self.session_id}): Stream not active. Attempting to start.")
             await self.start_stream()
             await asyncio.sleep(0.1) # 스트림 시작 대기
 
         if self._processing_task and not self._processing_task.done() and not self._stop_event.is_set():
-            await self._audio_queue.put(chunk)
+            # 비동기 컨텍스트에서 동기 큐에 데이터 삽입 (run_in_executor 사용 가능하나, 직접 put도 가능)
+            try:
+                self._audio_queue.put_nowait(chunk) # 큐가 가득차면 예외 발생 가능
+            except queue.Full:
+                print(f"STT audio queue full for session {self.session_id}. Dropping chunk.")
+            except Exception as e:
+                print(f"Error putting audio chunk to queue: {e}")
         else:
             print(f"STT stream ({self.session_id}): Dropping audio chunk, stream task not healthy or stopping.")
 
@@ -272,8 +281,13 @@ class StreamSTTService:
         async with self._lock:
             if not self._stop_event.is_set():
                 print(f"STT stream ({self.session_id}): Attempting to stop.")
-                self._stop_event.set() # 루프 및 제너레이터 종료 신호
-                await self._audio_queue.put(None) # 제너레이터 종료를 위한 None 추가 (선택적)
+                self._stop_event.set()
+                try:
+                    self._audio_queue.put_nowait(None) # 제너레이터 종료 신호 (None)
+                except queue.Full:
+                    print(f"STT audio queue full while trying to send stop signal for session {self.session_id}.")
+                except Exception as e:
+                    print(f"Error sending stop signal to STT queue: {e}")
 
             if self._processing_task and not self._processing_task.done():
                 try:

@@ -3,6 +3,7 @@
 import base64
 import json
 import yaml
+import asyncio
 from pathlib import Path
 from typing import Dict, Optional, Sequence, Literal, Any, List, Union, cast, AsyncGenerator
 
@@ -589,84 +590,108 @@ async def run_agent_streaming(
     print(f"\n--- [{session_id}] Agent Turn 시작 ---")
     print(f"초기 입력 상태 (요약): stage='{initial_input_for_turn['current_scenario_stage_id']}', text='{user_input_text}', audio_present={bool(user_input_audio_b64)}")
 
-    graph_output_state: AgentState = await app_graph.ainvoke(initial_input_for_turn)
-    
-    print(f"LangGraph 실행 완료. 최종 결정된 다음 단계: '{graph_output_state.get('current_scenario_stage_id')}', 라우팅: '{graph_output_state.get('main_agent_routing_decision')}'")
+    try: # 전체 로직을 try로 감싸서 최종 상태 반환 보장
+        graph_output_state: AgentState = await app_graph.ainvoke(initial_input_for_turn)
+        
+        print(f"LangGraph 실행 완료. 최종 결정된 다음 단계: '{graph_output_state.get('current_scenario_stage_id')}', 라우팅: '{graph_output_state.get('main_agent_routing_decision')}'")
 
-    # 3. 스트리밍 결정 및 실행
-    full_response_text_streamed = ""
-    final_state_to_yield: Optional[AgentState] = None
+        # 3. 스트리밍 결정 및 실행
+        full_response_text_streamed = ""
+        final_state_to_yield: Optional[AgentState] = None
 
-    # Main Agent가 QA를 호출하도록 결정한 경우
-    if graph_output_state.get("main_agent_routing_decision") == "invoke_qa_agent":
-        user_question = graph_output_state.get("stt_result", "")
-        if user_question: # STT 결과가 있어야 QA 가능
-            scenario_name = graph_output_state.get("loan_scenario_data", {}).get("scenario_name", "디딤돌 대출")
-            print(f"QA 스트리밍 시작 (세션: {session_id}, 질문: '{user_question[:50]}...')")
+        # Main Agent가 QA를 호출하도록 결정한 경우
+        if graph_output_state.get("main_agent_routing_decision") == "invoke_qa_agent":
+            user_question = graph_output_state.get("stt_result", "")
+            if user_question: # STT 결과가 있어야 QA 가능
+                scenario_name = graph_output_state.get("loan_scenario_data", {}).get("scenario_name", "디딤돌 대출")
+                print(f"QA 스트리밍 시작 (세션: {session_id}, 질문: '{user_question[:50]}...')")
+                
+                yield {"type": "stream_start", "stream_type": "qa_answer"}
+                async for chunk in invoke_qa_agent_streaming_logic(user_question, scenario_name):
+                    yield chunk # 텍스트 청크 yield
+                    full_response_text_streamed += chunk
+                
+                updated_messages_qa = list(graph_output_state.get("messages", [])) + [AIMessage(content=full_response_text_streamed)]
+                final_state_to_yield = {
+                    **graph_output_state, "final_response_text_for_tts": full_response_text_streamed,
+                    "messages": updated_messages_qa, "is_final_turn_response": True, # QA 후 턴 종료
+                    # QA의 경우, 다음 시나리오 단계는 보통 'qa_listen' 또는 현재 단계 유지
+                    "current_scenario_stage_id": graph_output_state.get("loan_scenario_data",{}).get("stages",{}).get(graph_output_state.get("current_scenario_stage_id"),{}).get("qa_next_stage_id", graph_output_state.get("current_scenario_stage_id","qa_listen"))
+                }
+            else: # QA를 하려 했으나 STT 결과가 없는 경우 (예: 음성인식 실패)
+                err_msg_qa_no_stt = graph_output_state.get("error_message") or "질문을 인식하지 못했습니다. 다시 질문해주시겠어요?"
+                print(f"QA 스트리밍 불가 (세션: {session_id}): STT 결과 없음. 오류 메시지 전송.")
+                yield {"type": "stream_start", "stream_type": "error_message"}
+                for char_chunk in err_msg_qa_no_stt: yield char_chunk; await asyncio.sleep(0.01)
+                full_response_text_streamed = err_msg_qa_no_stt
+                final_state_to_yield = {
+                    **graph_output_state, "final_response_text_for_tts": full_response_text_streamed,
+                    "error_message": err_msg_qa_no_stt, "is_final_turn_response": True,
+                    "messages": list(graph_output_state.get("messages", [])) + [AIMessage(content=full_response_text_streamed)]
+                }
+
+        # 그 외, 그래프가 최종 응답 텍스트를 생성한 경우 (시나리오 진행, 직접 답변, 폴백 등)
+        elif graph_output_state.get("final_response_text_for_tts"):
+            text_to_stream = graph_output_state["final_response_text_for_tts"]
+            print(f"일반 응답 스트리밍 시작 (세션: {session_id}, 내용: '{text_to_stream[:50]}...')")
             
-            yield {"type": "stream_start", "stream_type": "qa_answer"}
-            async for chunk in invoke_qa_agent_streaming_logic(user_question, scenario_name):
-                yield chunk # 텍스트 청크 yield
+            yield {"type": "stream_start", "stream_type": "general_response"}
+            # "가짜" 스트리밍: 전체 텍스트를 작은 청크로 나누어 보냄
+            # (실제 토큰 스트리밍을 위해서는 main_agent_scenario_processing_node 등에서 streaming_llm.astream 사용 필요)
+            chunk_size = 20 # 예: 20 글자씩 (실제로는 더 유동적으로 조절 가능)
+            for i in range(0, len(text_to_stream), chunk_size):
+                chunk = text_to_stream[i:i+chunk_size]
+                yield chunk
+                await asyncio.sleep(0.02) # 너무 빠르지 않게 조절
                 full_response_text_streamed += chunk
-            
-            updated_messages_qa = list(graph_output_state.get("messages", [])) + [AIMessage(content=full_response_text_streamed)]
-            final_state_to_yield = {
-                **graph_output_state, "final_response_text_for_tts": full_response_text_streamed,
-                "messages": updated_messages_qa, "is_final_turn_response": True, # QA 후 턴 종료
-                # QA의 경우, 다음 시나리오 단계는 보통 'qa_listen' 또는 현재 단계 유지
-                "current_scenario_stage_id": graph_output_state.get("loan_scenario_data",{}).get("stages",{}).get(graph_output_state.get("current_scenario_stage_id"),{}).get("qa_next_stage_id", graph_output_state.get("current_scenario_stage_id","qa_listen"))
-            }
-        else: # QA를 하려 했으나 STT 결과가 없는 경우 (예: 음성인식 실패)
-            err_msg_qa_no_stt = graph_output_state.get("error_message") or "질문을 인식하지 못했습니다. 다시 질문해주시겠어요?"
-            print(f"QA 스트리밍 불가 (세션: {session_id}): STT 결과 없음. 오류 메시지 전송.")
+            final_state_to_yield = graph_output_state # 상태는 이미 그래프에서 최종 결정됨
+
+        # 응답할 텍스트가 없는 예외적인 경우 (그래프 오류 등)
+        else:
+            error_message_to_yield = graph_output_state.get("error_message", "응답을 생성하지 못했습니다. 죄송합니다.")
+            print(f"응답 스트리밍 불가 (세션: {session_id}): 생성된 응답 텍스트 없음. 오류 메시지 전송.")
             yield {"type": "stream_start", "stream_type": "error_message"}
-            for char_chunk in err_msg_qa_no_stt: yield char_chunk; await asyncio.sleep(0.01)
-            full_response_text_streamed = err_msg_qa_no_stt
+            for char_chunk in error_message_to_yield: yield char_chunk; await asyncio.sleep(0.01)
+            full_response_text_streamed = error_message_to_yield
             final_state_to_yield = {
                 **graph_output_state, "final_response_text_for_tts": full_response_text_streamed,
-                "error_message": err_msg_qa_no_stt, "is_final_turn_response": True,
+                "error_message": error_message_to_yield, "is_final_turn_response": True,
                 "messages": list(graph_output_state.get("messages", [])) + [AIMessage(content=full_response_text_streamed)]
             }
 
-    # 그 외, 그래프가 최종 응답 텍스트를 생성한 경우 (시나리오 진행, 직접 답변, 폴백 등)
-    elif graph_output_state.get("final_response_text_for_tts"):
-        text_to_stream = graph_output_state["final_response_text_for_tts"]
-        print(f"일반 응답 스트리밍 시작 (세션: {session_id}, 내용: '{text_to_stream[:50]}...')")
+        # 4. 스트리밍 완료 후, 최종 AgentState를 Dict 형태로 한번 더 yield
+        yield {"type": "stream_end", "full_text": full_response_text_streamed}
         
-        yield {"type": "stream_start", "stream_type": "general_response"}
-        # "가짜" 스트리밍: 전체 텍스트를 작은 청크로 나누어 보냄
-        # (실제 토큰 스트리밍을 위해서는 main_agent_scenario_processing_node 등에서 streaming_llm.astream 사용 필요)
-        chunk_size = 20 # 예: 20 글자씩 (실제로는 더 유동적으로 조절 가능)
-        for i in range(0, len(text_to_stream), chunk_size):
-            chunk = text_to_stream[i:i+chunk_size]
-            yield chunk
-            await asyncio.sleep(0.02) # 너무 빠르지 않게 조절
-            full_response_text_streamed += chunk
-        final_state_to_yield = graph_output_state # 상태는 이미 그래프에서 최종 결정됨
+        # 최종 상태에서 messages 필드가 BaseMessage 객체 리스트이므로, 필요시 직렬화
+        # 예: final_state_to_yield["messages"] = [msg.dict() for msg in final_state_to_yield.get("messages", [])]
+        # 여기서는 AgentState 타입 그대로 반환 (chat.py에서 필요시 처리)
+        
+        # TTS 관련 필드는 AgentState에 포함하지 않음 (chat.py에서 별도 처리)
+        if final_state_to_yield and "tts_audio_b64" in final_state_to_yield:
+            del final_state_to_yield["tts_audio_b64"]
 
-    # 응답할 텍스트가 없는 예외적인 경우 (그래프 오류 등)
-    else:
-        error_message_to_yield = graph_output_state.get("error_message", "응답을 생성하지 못했습니다. 죄송합니다.")
-        print(f"응답 스트리밍 불가 (세션: {session_id}): 생성된 응답 텍스트 없음. 오류 메시지 전송.")
-        yield {"type": "stream_start", "stream_type": "error_message"}
-        for char_chunk in error_message_to_yield: yield char_chunk; await asyncio.sleep(0.01)
-        full_response_text_streamed = error_message_to_yield
-        final_state_to_yield = {
-            **graph_output_state, "final_response_text_for_tts": full_response_text_streamed,
-            "error_message": error_message_to_yield, "is_final_turn_response": True,
-            "messages": list(graph_output_state.get("messages", [])) + [AIMessage(content=full_response_text_streamed)]
-        }
+        yield {"type": "final_state", "session_id": session_id, "data": final_state_to_yield}
+        print(f"--- [{session_id}] Agent Turn 종료 (최종 텍스트 길이: {len(full_response_text_streamed)}) ---")
 
-    # 4. 스트리밍 완료 후, 최종 AgentState를 Dict 형태로 한번 더 yield
-    yield {"type": "stream_end", "full_text": full_response_text_streamed}
-    
-    # 최종 상태에서 messages 필드가 BaseMessage 객체 리스트이므로, 필요시 직렬화
-    # 예: final_state_to_yield["messages"] = [msg.dict() for msg in final_state_to_yield.get("messages", [])]
-    # 여기서는 AgentState 타입 그대로 반환 (chat.py에서 필요시 처리)
-    
-    # TTS 관련 필드는 AgentState에 포함하지 않음 (chat.py에서 별도 처리)
-    if final_state_to_yield and "tts_audio_b64" in final_state_to_yield:
-        del final_state_to_yield["tts_audio_b64"]
+    except Exception as e:
+        print(f"CRITICAL error in run_agent_streaming for session {session_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        error_response = f"죄송합니다, 에이전트 처리 중 심각한 오류가 발생했습니다: {e}"
+        yield {"type": "stream_start", "stream_type": "critical_error"}
+        for char_chunk in error_response: yield char_chunk; await asyncio.sleep(0.01)
+        yield {"type": "stream_end", "full_text": error_response}
+        
+        # 예외 발생 시 최종 상태를 구성하여 반환
+        final_state_to_yield = initial_input_for_turn.copy() # 초기 상태 기반으로 오류 상태 구성
+        final_state_to_yield["error_message"] = error_response
+        final_state_to_yield["final_response_text_for_tts"] = error_response
+        final_state_to_yield["is_final_turn_response"] = True
+        final_state_to_yield["messages"] = list(initial_input_for_turn.get("messages", [])) + [AIMessage(content=error_response)]
 
-    yield {"type": "final_state", "session_id": session_id, "data": final_state_to_yield}
-    print(f"--- [{session_id}] Agent Turn 종료 (최종 텍스트 길이: {len(full_response_text_streamed)}) ---")
+    finally:
+        # TTS 관련 필드는 AgentState에 포함하지 않음 (chat.py에서 별도 처리)
+        if final_state_to_yield and "tts_audio_b64" in final_state_to_yield:
+            del final_state_to_yield["tts_audio_b64"]
+        yield {"type": "final_state", "session_id": session_id, "data": final_state_to_yield}
+        print(f"--- [{session_id}] Agent Turn 종료 (최종 텍스트 길이: {len(full_response_text_streamed if 'full_response_text_streamed' in locals() else '')}) ---")
