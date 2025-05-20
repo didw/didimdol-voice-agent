@@ -1,144 +1,186 @@
-from fastapi import APIRouter, HTTPException, Depends
-from fastapi.responses import StreamingResponse, JSONResponse
+# backend/app/api/v1/chat.py
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends
+from fastapi.responses import StreamingResponse # TTS 스트리밍 URL 방식 시 사용 가능
 import base64
-from typing import Dict, Optional # Optional, Dict 임포트 추가
+import json
+from typing import Dict, Optional, Any
 
-# 상대 경로 수정: .... -> ...
-from ...schemas.chat_schemas import UserMessage, AIMessage
-from ...graph.agent import run_agent, AgentState # AgentState 타입 임포트 (type hinting용)
-from ...services.google_services import synthesize_text_to_audio_bytes # 임포트 주석 해제 및 경로 수정
+from ...schemas.chat_schemas import UserMessage, AIMessage # 기존 스키마 활용 가능
+from ...graph.agent import run_agent_streaming, AgentState # 스트리밍 지원하는 agent 함수로 변경 가정
+from ...services.google_services import (
+    synthesize_text_to_audio_bytes, # 단건 TTS 용 (필요시)
+    # stream_synthesize_text_to_audio, # TTS 스트리밍 생성 함수 (새로 만들어야 함)
+    # stream_speech_to_text # STT 스트리밍 함수 (새로 만들어야 함)
+)
+from ...services.google_services import StreamSTTService, StreamTTSService # 예시: STT 스트리밍 서비스 클래스
+
 
 router = APIRouter()
 
-# --- 세션 상태 저장소 (데모용 인메모리 딕셔너리) ---
-# 프로덕션에서는 Redis, DB 등을 사용해야 합니다.
-SESSION_STATES: Dict[str, AgentState] = {}
+# --- 세션 상태 저장소 (프로덕션에서는 Redis 등 권장) ---
+SESSION_STATES: Dict[str, AgentState] = {} # 기존 AgentState 또는 확장된 상태 관리
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, WebSocket] = {} # session_id: WebSocket
+
+    async def connect(self, websocket: WebSocket, session_id: str):
+        await websocket.accept()
+        self.active_connections[session_id] = websocket
+        print(f"WebSocket connected: {session_id}")
+
+    def disconnect(self, session_id: str):
+        if session_id in self.active_connections:
+            del self.active_connections[session_id]
+            print(f"WebSocket disconnected: {session_id}")
+
+    async def send_json_to_client(self, session_id: str, data: dict):
+        if session_id in self.active_connections:
+            await self.active_connections[session_id].send_json(data)
+
+    async def broadcast_json(self, data: dict): # 모든 연결에 브로드캐스트 (필요시)
+        for session_id in self.active_connections:
+            await self.send_json_to_client(session_id, data)
+
+manager = ConnectionManager()
+
+# (주석처리) 기존 HTTP 엔드포인트 - WebSocket으로 기능 이전 또는 병행 운영 가능
+# @router.post("/process_message", response_model=AIMessage) ...
+
+# @router.post("/stream_tts") ... # WebSocket 내에서 TTS 스트리밍 처리 권장
 
 
-@router.post("/process_message", response_model=AIMessage)
-async def process_user_message(message: UserMessage):
-    print(f"수신 메시지: 세션 ID({message.session_id}), 텍스트({message.text is not None}), 오디오({message.audio_bytes_str is not None})")
+@router.websocket("/ws/{session_id}")
+async def websocket_endpoint(websocket: WebSocket, session_id: str):
+    await manager.connect(websocket, session_id)
 
-    if not message.text and not message.audio_bytes_str:
-        raise HTTPException(status_code=400, detail="텍스트 또는 오디오 입력이 필요합니다.")
+    # 세션 상태 초기화 또는 로드
+    if session_id not in SESSION_STATES:
+        # 새로운 AgentState를 만들거나, 초기 상태를 정의합니다.
+        # 예를 들어, AgentState가 TypedDict라면:
+        # SESSION_STATES[session_id] = AgentState(history=[], collected_loan_info={}, ...)
+        # 또는 이전처럼 None으로 시작하고 run_agent 내부에서 처리할 수도 있습니다.
+        SESSION_STATES[session_id] = {} # 혹은 적절한 초기 AgentState
+        print(f"New session initialized for {session_id}")
+        await manager.send_json_to_client(session_id, {
+            "type": "session_initialized",
+            "message": "안녕하세요! 디딤돌 대출 상담을 시작합니다. 무엇을 도와드릴까요?"
+        })
+    else:
+        print(f"Existing session loaded for {session_id}")
+        # 필요시 이전 대화 요약 등을 클라이언트에게 전달 가능
 
-    session_id = message.session_id or "default_session" # 세션 ID가 없으면 기본값 사용
+    # STT 서비스 인스턴스 (세션별 또는 공유)
+    stt_service = StreamSTTService(
+        session_id=session_id,
+        on_interim_result=lambda transcript: manager.send_json_to_client(session_id, {"type": "stt_interim_result", "transcript": transcript}),
+        on_final_result=lambda transcript: handle_stt_final_result(session_id, transcript),
+        on_error=lambda error_msg: manager.send_json_to_client(session_id, {"type": "error", "message": f"STT Error: {error_msg}"}),
+        on_epd_detected=lambda: manager.send_json_to_client(session_id, {"type": "epd_detected"})
+    )
 
-    # 이전 대화 상태 로드 (데모용)
-    # current_state_dict의 타입을 AgentState의 모든 필드가 Optional인 형태로 정의하거나,
-    # run_agent 호출 시 필요한 최소한의 정보만 넘기고 나머지는 AgentState 내부에서 None으로 처리하도록 할 수 있습니다.
-    # 여기서는 AgentState의 부분집합을 나타내는 Dict로 처리합니다.
-    previous_state_dict: Optional[Dict] = SESSION_STATES.get(session_id)
-    print(f"세션 [{session_id}] 이전 상태 로드: {bool(previous_state_dict)}")
+    # TTS 서비스 인스턴스
+    tts_service = StreamTTSService(
+        session_id=session_id,
+        on_audio_chunk=lambda audio_chunk_b64: manager.send_json_to_client(session_id, {"type": "tts_audio_chunk", "audio_chunk_base64": audio_chunk_b64}),
+        on_error=lambda error_msg: manager.send_json_to_client(session_id, {"type": "error", "message": f"TTS Error: {error_msg}"}),
+        # 만약 스트리밍 URL 방식을 쓴다면 on_stream_url 콜백도 가능
+        # on_stream_url=lambda url: manager.send_json_to_client(session_id, {"type": "tts_stream_url", "url": url})
+    )
 
     try:
-        final_state: AgentState = await run_agent( # 반환 타입을 AgentState로 명시
-            user_input_text=message.text,
-            user_input_audio_b64=message.audio_bytes_str,
-            session_id=session_id,
-            current_state_dict=previous_state_dict # 이전 상태 전달
-        )
+        while True:
+            data = await websocket.receive()
+            if "text" in data: # 텍스트 메시지 (JSON 형식 가정)
+                message_data = json.loads(data["text"])
+                print(f"WebSocket text received from {session_id}: {message_data}")
 
-        # 현재 턴의 최종 상태를 다음 턴을 위해 저장 (데모용)
-        # final_state는 AgentState 타입의 딕셔너리입니다.
-        # agent.py에서 반환되는 final_state가 AgentState 타입의 TypedDict이므로 바로 저장 가능
-        SESSION_STATES[session_id] = final_state.copy() # 다음 사용을 위해 상태 저장 (복사본 저장)
-        print(f"세션 [{session_id}] 현재 상태 저장 완료.")
+                if message_data.get("type") == "process_text":
+                    user_text = message_data.get("text")
+                    if user_text:
+                        await handle_text_input(session_id, user_text, tts_service)
 
-        if final_state.get("error_message") and not final_state.get("is_final_turn_response"):
-             return AIMessage(
-                session_id=session_id,
-                text=f"처리 중 오류: {final_state.get('error_message')}",
-                tts_audio_base64=None, # 오류 시 오디오는 없음
-                is_final=True,
-                debug_info={
-                    "current_stage": final_state.get("current_scenario_stage_id"),
-                    "error_details": final_state.get("error_message")
-                    # "full_graph_state": final_state # 필요시
-                }
-            )
+                elif message_data.get("type") == "stop_tts": # 클라이언트가 TTS 중단 요청
+                    await tts_service.stop_tts_stream() # TTS 서비스에 중단 요청
 
-        response_text = final_state.get("llm_response_text", "응답을 생성하지 못했습니다.")
-        tts_audio_base64 = final_state.get("tts_audio_b64")
+                # 기타 제어 메시지 처리 ...
 
-        return AIMessage(
-            session_id=session_id,
-            text=response_text,
-            tts_audio_base64=tts_audio_base64,
-            debug_info={
-                "current_stage": final_state.get("current_scenario_stage_id"),
-                "collected_info": final_state.get("collected_loan_info"),
-            },
-            is_final=True
-        )
+            elif "bytes" in data: # 오디오 청크 (Blob 직접 수신)
+                audio_chunk = data["bytes"]
+                # print(f"WebSocket audio chunk received from {session_id}, size: {len(audio_chunk)}")
+                await stt_service.process_audio_chunk(audio_chunk)
 
+    except WebSocketDisconnect:
+        print(f"WebSocket disconnected by client: {session_id}")
     except Exception as e:
-        print(f"메시지 처리 중 심각한 API 레벨 오류 발생: {e}")
+        print(f"WebSocket Error for session {session_id}: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"서버 내부 오류: {str(e)}")
+        await manager.send_json_to_client(session_id, {"type": "error", "message": f"Server error: {str(e)}"})
+    finally:
+        await stt_service.finalize_stream() # STT 리소스 정리
+        await tts_service.stop_tts_stream() # TTS 리소스 정리
+        manager.disconnect(session_id)
+        if session_id in SESSION_STATES: # 세션 상태 정리 (정책에 따라)
+            # del SESSION_STATES[session_id]
+            pass
 
 
-@router.post("/stream_tts")
-async def stream_text_to_speech(message: UserMessage):
-    if not message.text:
-        raise HTTPException(status_code=400, detail="TTS로 변환할 텍스트가 없습니다.")
-
-    async def tts_audio_streamer(text_to_speak: str):
-        try:
-            audio_bytes = await synthesize_text_to_audio_bytes(text_to_speak)
-            yield audio_bytes
-        except Exception as e:
-            print(f"TTS 스트리밍 중 오류: {e}")
-            error_message = f'{{"error": "TTS 생성 중 오류 발생: {str(e)}"}}'
-            yield error_message.encode('utf-8')
-
-    return StreamingResponse(tts_audio_streamer(message.text), media_type="audio/mpeg")
+async def handle_stt_final_result(session_id: str, transcript: str):
+    """STT 최종 결과가 나오면 호출되는 함수. LLM 처리를 시작."""
+    await manager.send_json_to_client(session_id, {"type": "stt_final_result", "transcript": transcript})
+    # TTS 서비스 인스턴스를 가져오거나 새로 생성 (위 websocket_endpoint의 tts_service를 어떻게 전달할지 고려)
+    # 여기서는 간단히 전역 manager를 통해 websocket 객체를 가져와 tts_service를 다시 찾는다고 가정하거나,
+    # websocket_endpoint 내에서 이 함수를 호출하며 tts_service를 넘겨줘야 함.
+    # 아래는 임시로 new tts_service를 만듦. 실제로는 websocket_endpoint의 tts_service 사용
+    temp_tts_service = StreamTTSService(
+        session_id=session_id,
+        on_audio_chunk=lambda audio_chunk_b64: manager.send_json_to_client(session_id, {"type": "tts_audio_chunk", "audio_chunk_base64": audio_chunk_b64}),
+        on_error=lambda error_msg: manager.send_json_to_client(session_id, {"type": "error", "message": f"TTS Error: {error_msg}"})
+    )
+    await handle_text_input(session_id, transcript, temp_tts_service)
 
 
-# --- WebSocket 엔드포인트 (고급 기능, 양방향 스트리밍) ---
-# WebSocket을 사용하면 STT, LLM, TTS 전체를 스트리밍으로 주고받을 수 있어 반응성이 극대화됩니다.
-# 구현 복잡도는 증가합니다.
-# class ConnectionManager:
-#     def __init__(self):
-#         self.active_connections: list[WebSocket] = []
-#
-#     async def connect(self, websocket: WebSocket):
-#         await websocket.accept()
-#         self.active_connections.append(websocket)
-#
-#     def disconnect(self, websocket: WebSocket):
-#         self.active_connections.remove(websocket)
-#
-#     async def broadcast_text(self, message: str, websocket: WebSocket):
-#         await websocket.send_text(message)
+async def handle_text_input(session_id: str, user_text: str, tts_service: StreamTTSService):
+    """사용자 텍스트 입력(STT 결과 포함)을 받아 LLM을 호출하고 결과를 스트리밍하는 함수."""
+    if not user_text:
+        return
 
-# manager = ConnectionManager()
+    previous_state_dict = SESSION_STATES.get(session_id)
+    full_ai_response_text = ""
 
-# @router.websocket("/ws/{session_id}")
-# async def websocket_endpoint(websocket: WebSocket, session_id: str):
-#     await manager.connect(websocket)
-#     try:
-#         while True:
-#             data = await websocket.receive() # json, text, bytes 모두 가능
-#             # data_type = data.get("type")
-#             # if data_type == "audio_chunk":
-#             #   # STT 스트리밍 처리
-#             # elif data_type == "text_message":
-#             #   # LLM 처리 -> TTS 스트리밍
-#
-#             # 예시: 받은 텍스트 에코
-#             if "text" in data:
-#                 await manager.broadcast_text(f"Session {session_id} says: {data['text']}", websocket)
-#             elif "bytes" in data: # 음성 데이터 처리 (예시)
-#                 # audio_bytes = data["bytes"]
-#                 # stt_result = await transcribe_audio_bytes(audio_bytes)
-#                 # await manager.broadcast_text(f"STT: {stt_result}", websocket)
-#                 pass
+    try:
+        # run_agent_streaming은 텍스트 청크를 비동기적으로 yield해야 함
+        async for llm_chunk in run_agent_streaming(
+            user_input_text=user_text,
+            session_id=session_id,
+            current_state_dict=previous_state_dict
+        ):
+            if isinstance(llm_chunk, str): # 텍스트 청크인 경우
+                await manager.send_json_to_client(session_id, {"type": "llm_response_chunk", "chunk": llm_chunk})
+                full_ai_response_text += llm_chunk
+            elif isinstance(llm_chunk, dict) and llm_chunk.get("type") == "final_state_update":
+                # LLM 처리 중 Agent의 최종 상태가 업데이트되면 저장
+                SESSION_STATES[session_id] = llm_chunk.get("state", {}) # 혹은 필요한 부분만 업데이트
 
-#     except WebSocketDisconnect:
-#         manager.disconnect(websocket)
-#         print(f"WebSocket disconnected: {session_id}")
-#     except Exception as e:
-#         print(f"WebSocket Error for {session_id}: {e}")
-#         await websocket.close(code=1011) # Internal server error
+        await manager.send_json_to_client(session_id, {"type": "llm_response_end"})
+
+        # LLM 응답 완료 후 TTS 시작
+        if full_ai_response_text:
+            # 여기서 SESSION_STATES[session_id]를 업데이트 할 수도 있음 (예: final_response_text)
+            # SESSION_STATES[session_id]["final_response_text_for_tts"] = full_ai_response_text
+            # SESSION_STATES[session_id]["collected_loan_info"] = ... (run_agent_streaming에서 반환된 정보)
+
+            # 만약 TTS 서비스가 전체 텍스트를 받아 스트리밍한다면:
+            await tts_service.start_tts_stream(full_ai_response_text)
+            # 또는 tts_service가 문장 단위로 스트리밍을 지원하고,
+            # run_agent_streaming이 문장 단위로 yield 한다면, 그 때마다 tts_service.speak_sentence(sentence) 호출 가능
+
+    except Exception as e:
+        error_msg = f"LLM 또는 Agent 처리 중 오류: {e}"
+        print(error_msg)
+        import traceback
+        traceback.print_exc()
+        await manager.send_json_to_client(session_id, {"type": "error", "message": error_msg})
+        # 오류 발생 시에도 빈 LLM 응답 종료 메시지 전송 (클라이언트가 대기 상태 풀도록)
+        await manager.send_json_to_client(session_id, {"type": "llm_response_end"})

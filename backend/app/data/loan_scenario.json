@@ -14,12 +14,27 @@
       "input_type": "yes_no",
       "transitions": [
         {
-          "keywords": ["네", "예", "좋아요", "시작", "응"],
-          "next_stage_id": "ask_loan_purpose"
+          "next_stage_id": "ask_loan_purpose",
+          "condition_description": "사용자가 상담 시작에 긍정적으로 답변한 경우.",
+          "example_phrases": [
+            "네",
+            "예",
+            "좋아요",
+            "시작해주세요",
+            "응",
+            "시작할래요"
+          ]
         },
         {
-          "keywords": ["아니요", "아니오", "나중에", "취소", "괜찮아요"],
-          "next_stage_id": "farewell_early"
+          "next_stage_id": "farewell_early",
+          "condition_description": "사용자가 상담 시작에 부정적으로 답변하거나 거절한 경우.",
+          "example_phrases": [
+            "아니요",
+            "아니오",
+            "나중에요",
+            "취소할게요",
+            "괜찮습니다"
+          ]
         }
       ],
       "default_next_stage_id": "greeting_reprompt"
@@ -31,12 +46,14 @@
       "input_type": "yes_no",
       "transitions": [
         {
-          "keywords": ["네", "예", "좋아요", "시작", "응"],
-          "next_stage_id": "ask_loan_purpose"
+          "next_stage_id": "ask_loan_purpose",
+          "condition_description": "사용자가 상담 시작에 긍정적으로 답변한 경우.",
+          "example_phrases": ["네", "예", "시작"]
         },
         {
-          "keywords": ["아니요", "아니오", "나중에", "취소", "괜찮아요"],
-          "next_stage_id": "farewell_early"
+          "next_stage_id": "farewell_early",
+          "condition_description": "사용자가 상담 시작에 부정적으로 답변하거나 거절한 경우.",
+          "example_phrases": ["아니요", "괜찮아요"]
         }
       ],
       "default_next_stage_id": "farewell_early"
@@ -55,12 +72,14 @@
       "expected_info_key": "loan_purpose_confirmed",
       "transitions": [
         {
-          "keywords": ["네", "예", "맞아요", "구입", "구매"],
-          "next_stage_id": "ask_marital_status"
+          "next_stage_id": "ask_marital_status",
+          "condition_description": "사용자가 주택 구입 목적임을 확인한 경우.",
+          "example_phrases": ["네", "맞아요", "주택 구입입니다", "구매하려고요"]
         },
         {
-          "keywords": ["아니요", "아니오", "다른 목적"],
-          "next_stage_id": "explain_didimdol_purpose"
+          "next_stage_id": "explain_didimdol_purpose",
+          "condition_description": "사용자가 주택 구입 목적이 아니라고 답변하거나 다른 목적을 언급한 경우.",
+          "example_phrases": ["아니요", "다른 건데요", "전세자금인데요"]
         }
       ],
       "default_next_stage_id": "ask_loan_purpose_reprompt"
@@ -72,12 +91,14 @@
       "input_type": "yes_no",
       "transitions": [
         {
-          "keywords": ["네", "예", "맞아요", "구입", "구매"],
-          "next_stage_id": "ask_marital_status"
+          "next_stage_id": "ask_marital_status",
+          "condition_description": "사용자가 주택 구입 목적임을 확인한 경우.",
+          "example_phrases": ["네", "맞아요"]
         },
         {
-          "keywords": ["아니요", "아니오", "다른 목적"],
-          "next_stage_id": "explain_didimdol_purpose"
+          "next_stage_id": "explain_didimdol_purpose",
+          "condition_description": "사용자가 주택 구입 목적이 아니라고 답변한 경우.",
+          "example_phrases": ["아니요"]
         }
       ],
       "default_next_stage_id": "farewell_early"
@@ -89,12 +110,14 @@
       "input_type": "yes_no",
       "transitions": [
         {
-          "keywords": ["네", "예", "다시 상담"],
-          "next_stage_id": "ask_marital_status"
+          "next_stage_id": "ask_marital_status",
+          "condition_description": "사용자가 주택 구입 목적으로 상담을 계속 진행하길 원하는 경우.",
+          "example_phrases": ["네", "다시 상담할게요", "구입 목적으로 할래요"]
         },
         {
-          "keywords": ["아니요", "아니오", "괜찮아요"],
-          "next_stage_id": "farewell_early"
+          "next_stage_id": "farewell_early",
+          "condition_description": "사용자가 주택 구입 목적 상담을 원하지 않는 경우.",
+          "example_phrases": ["아니요", "괜찮습니다", "다른 상품 알아볼게요"]
         }
       ],
       "default_next_stage_id": "farewell_early"
@@ -107,11 +130,20 @@
       "choices": ["미혼", "기혼", "예비부부"],
       "expected_info_key": "marital_status",
       "transitions": [
-        { "keywords": ["미혼"], "next_stage_id": "ask_home_ownership" },
-        { "keywords": ["기혼"], "next_stage_id": "ask_home_ownership" },
         {
-          "keywords": ["예비부부", "결혼 예정"],
-          "next_stage_id": "ask_home_ownership"
+          "next_stage_id": "ask_home_ownership",
+          "condition_description": "사용자가 '미혼'이라고 답변한 경우.",
+          "example_phrases": ["미혼", "싱글입니다"]
+        },
+        {
+          "next_stage_id": "ask_home_ownership",
+          "condition_description": "사용자가 '기혼'이라고 답변한 경우.",
+          "example_phrases": ["기혼", "결혼했어요"]
+        },
+        {
+          "next_stage_id": "ask_home_ownership",
+          "condition_description": "사용자가 '예비부부' 또는 결혼 예정이라고 답변한 경우.",
+          "example_phrases": ["예비부부", "결혼 예정입니다", "곧 결혼해요"]
         }
       ],
       "default_next_stage_id": "ask_marital_status_reprompt"
@@ -124,11 +156,17 @@
       "choices": ["미혼", "기혼", "예비부부"],
       "expected_info_key": "marital_status",
       "transitions": [
-        { "keywords": ["미혼"], "next_stage_id": "ask_home_ownership" },
-        { "keywords": ["기혼"], "next_stage_id": "ask_home_ownership" },
         {
-          "keywords": ["예비부부", "결혼 예정"],
-          "next_stage_id": "ask_home_ownership"
+          "next_stage_id": "ask_home_ownership",
+          "condition_description": "사용자가 '미혼'이라고 답변한 경우."
+        },
+        {
+          "next_stage_id": "ask_home_ownership",
+          "condition_description": "사용자가 '기혼'이라고 답변한 경우."
+        },
+        {
+          "next_stage_id": "ask_home_ownership",
+          "condition_description": "사용자가 '예비부부' 또는 결혼 예정이라고 답변한 경우."
         }
       ],
       "default_next_stage_id": "farewell_early"
@@ -141,12 +179,14 @@
       "expected_info_key": "has_home",
       "transitions": [
         {
-          "keywords": ["아니요", "없어요", "무주택"],
-          "next_stage_id": "ask_annual_income"
+          "next_stage_id": "ask_annual_income",
+          "condition_description": "사용자가 현재 소유 주택이 없다고 답변한 경우 (무주택).",
+          "example_phrases": ["아니요", "없어요", "무주택입니다"]
         },
         {
-          "keywords": ["네", "있어요", "유주택"],
-          "next_stage_id": "check_home_ownership_details"
+          "next_stage_id": "check_home_ownership_details",
+          "condition_description": "사용자가 현재 소유 주택이 있다고 답변한 경우 (유주택).",
+          "example_phrases": ["네", "있어요", "집 한 채 있습니다"]
         }
       ],
       "default_next_stage_id": "ask_home_ownership_reprompt"
@@ -158,12 +198,12 @@
       "input_type": "yes_no",
       "transitions": [
         {
-          "keywords": ["아니요", "없어요", "무주택"],
-          "next_stage_id": "ask_annual_income"
+          "next_stage_id": "ask_annual_income",
+          "condition_description": "사용자가 현재 소유 주택이 없다고 답변한 경우 (무주택)."
         },
         {
-          "keywords": ["네", "있어요", "유주택"],
-          "next_stage_id": "check_home_ownership_details"
+          "next_stage_id": "check_home_ownership_details",
+          "condition_description": "사용자가 현재 소유 주택이 있다고 답변한 경우 (유주택)."
         }
       ],
       "default_next_stage_id": "farewell_early"
@@ -175,19 +215,21 @@
       "input_type": "yes_no",
       "transitions": [
         {
-          "keywords": ["네", "예", "계속"],
-          "next_stage_id": "ask_annual_income"
+          "next_stage_id": "ask_annual_income",
+          "condition_description": "사용자가 다른 기본 조건에 대한 안내를 계속 받기를 원하는 경우.",
+          "example_phrases": ["네", "계속해주세요", "알려주세요"]
         },
         {
-          "keywords": ["아니요", "아니오", "괜찮아요"],
-          "next_stage_id": "farewell_early"
+          "next_stage_id": "farewell_early",
+          "condition_description": "사용자가 추가 안내를 원하지 않는 경우.",
+          "example_phrases": ["아니요", "괜찮습니다", "그만할래요"]
         }
       ],
       "default_next_stage_id": "ask_annual_income"
     },
     "ask_annual_income": {
       "id": "ask_annual_income",
-      "prompt": "고객님의 세전 연소득(부부 합산인 경우 합산 소득)은 대략 얼마이신가요? (예: 5000만원)",
+      "prompt": "고객님의 세전 연소득(부부 합산인 경우 합산 소득)은 대략 얼마이신가요? (예: 5000만원 또는 5천)",
       "is_question": true,
       "input_type": "number_text",
       "expected_info_key": "annual_income",
@@ -203,7 +245,7 @@
     },
     "preliminary_summary": {
       "id": "preliminary_summary",
-      "prompt": "네, 고객님. 지금까지 말씀해주신 내용을 바탕으로 간단히 정리해드리면, %{marital_status}% 상태이시고, 연소득은 약 %{annual_income}%만원, 구입 예정 주택 가격은 약 %{target_home_price}%만원으로 이해했습니다. 디딤돌 대출은 소득, 주택 가격, 무주택 여부 등 여러 조건에 따라 한도와 금리가 달라질 수 있습니다. 현재까지의 정보로는 대략적인 가능성만 확인할 수 있으며, 정확한 내용은 추가 서류 확인 및 심사가 필요합니다.",
+      "prompt": "네, 고객님. 지금까지 말씀해주신 내용을 바탕으로 간단히 정리해드리면, 혼인 상태는 %{marital_status}% 이시고, 세전 연소득은 약 %{annual_income}%만원, 구입 예정 주택 가격은 약 %{target_home_price}%만원으로 이해했습니다. 디딤돌 대출은 소득, 주택 가격, 무주택 여부 등 여러 조건에 따라 한도와 금리가 달라질 수 있습니다. 현재까지의 정보로는 대략적인 가능성만 확인할 수 있으며, 정확한 내용은 추가 서류 확인 및 심사가 필요합니다.",
       "is_question": false,
       "default_next_stage_id": "offer_further_assistance"
     },
@@ -214,12 +256,18 @@
       "input_type": "choice",
       "transitions": [
         {
-          "keywords": ["궁금", "질문", "더 알고 싶어요"],
-          "next_stage_id": "additional_qa_prompt"
+          "next_stage_id": "additional_qa_prompt",
+          "condition_description": "사용자가 추가 질문이 있거나 더 알고 싶은 내용이 있다고 표현한 경우.",
+          "example_phrases": [
+            "궁금한 점 있어요",
+            "질문해도 되나요?",
+            "더 알고 싶어요"
+          ]
         },
         {
-          "keywords": ["마칠래요", "종료", "됐어요", "없어요"],
-          "next_stage_id": "closing_thank_you"
+          "next_stage_id": "closing_thank_you",
+          "condition_description": "사용자가 상담을 마치기를 원하거나 더 이상 궁금한 점이 없다고 표현한 경우.",
+          "example_phrases": ["마칠래요", "종료해주세요", "됐어요", "없습니다"]
         }
       ],
       "default_next_stage_id": "closing_thank_you"
