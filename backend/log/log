@@ -119,3 +119,109 @@ Google Cloud Credentials가 성공적으로 로드되었습니다.
 --- 모든 에이전트 프롬프트 로드 완료 ---
 Google Cloud Credentials가 성공적으로 로드되었습니다.
 --- 모든 에이전트 프롬프트 로드 완료 ---
+Google Cloud Credentials가 성공적으로 로드되었습니다: ../key/shinhan-460305-2d7940d76c74.json
+Google Cloud Credentials가 성공적으로 로드되었습니다: ../key/shinhan-460305-2d7940d76c74.json
+Google Cloud Credentials가 성공적으로 로드되었습니다: ../key/shinhan-460305-2d7940d76c74.json
+Google Cloud Credentials가 성공적으로 로드되었습니다: ../key/shinhan-460305-2d7940d76c74.json
+--- 모든 에이전트 프롬프트 로드 완료 ---
+--- 대출 시나리오 데이터 로드 완료 ---
+--- LangGraph 컴파일 완료 ---
+애플리케이션 시작...
+Google Cloud Credentials 로드됨: ../key/shinhan-460305-2d7940d76c74.json
+API V1 라우터 로드 중...
+WebSocket connected: 5a01fe60-f8e6-4aca-886e-a4d4e25a46b0
+New session initialized for 5a01fe60-f8e6-4aca-886e-a4d4e25a46b0
+StreamTTSService (5a01fe60-f8e6-4aca-886e-a4d4e25a46b0) initialized. Voice: ko-KR-Wavenet-D, Encoding: MP3
+StreamSTTService (5a01fe60-f8e6-4aca-886e-a4d4e25a46b0) initialized. Encoding: WEBM_OPUS, Sample Rate: 48000
+STT stream (5a01fe60-f8e6-4aca-886e-a4d4e25a46b0): Starting processing task.
+STT stream (5a01fe60-f8e6-4aca-886e-a4d4e25a46b0): Starting to listen for responses.
+STT stream error (5a01fe60-f8e6-4aca-886e-a4d4e25a46b0): PermissionDenied - 403 Cloud Speech-to-Text API has not been used in project 491074950336 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/speech.googleapis.com/overview?project=491074950336 then retry. If you enabled this API recently, wait a few minutes for the action to propagate to our systems and retry. [reason: "SERVICE_DISABLED"
+domain: "googleapis.com"
+metadata {
+  key: "service"
+  value: "speech.googleapis.com"
+}
+metadata {
+  key: "serviceTitle"
+  value: "Cloud Speech-to-Text API"
+}
+metadata {
+  key: "containerInfo"
+  value: "491074950336"
+}
+metadata {
+  key: "consumer"
+  value: "projects/491074950336"
+}
+metadata {
+  key: "activationUrl"
+  value: "https://console.developers.google.com/apis/api/speech.googleapis.com/overview?project=491074950336"
+}
+, locale: "en-US"
+message: "Cloud Speech-to-Text API has not been used in project 491074950336 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/speech.googleapis.com/overview?project=491074950336 then retry. If you enabled this API recently, wait a few minutes for the action to propagate to our systems and retry."
+, links {
+  description: "Google developers console API activation"
+  url: "https://console.developers.google.com/apis/api/speech.googleapis.com/overview?project=491074950336"
+}
+]
+STT stream (5a01fe60-f8e6-4aca-886e-a4d4e25a46b0): Response listening loop ended.
+STT request generator (5a01fe60-f8e6-4aca-886e-a4d4e25a46b0) stopping.
+WebSocket text received from 5a01fe60-f8e6-4aca-886e-a4d4e25a46b0: process_text - {'type': 'process_text', 'text': '안녕'}
+
+--- [5a01fe60-f8e6-4aca-886e-a4d4e25a46b0] Agent Turn 시작 ---
+초기 입력 상태 (요약): stage='greeting', text='안녕'
+--- 노드: Entry Point ---
+--- 노드: Main Agent Router ---
+Main Agent 결정: answer_directly_chit_chat, 직접 답변: 안녕하세요! 반갑습니다. 오늘 하루는 어떻게 보내고 계신가요? 혹시 신한은행 디딤돌 주택담보대출 상담에 대해 궁금한 점이 있으신가요?, 추출값: None
+Main Agent 라우팅 결정: answer_directly_chit_chat
+--- 노드: 직접 응답 준비 (칫챗 등) ---
+LangGraph 실행 완료. 라우팅: 'answer_directly_chit_chat', 다음 단계 ID: 'greeting'
+Session state for 5a01fe60-f8e6-4aca-886e-a4d4e25a46b0 updated. Final AI response for TTS: '안녕하세요! 반갑습니다. 오늘 하루는 어떻게 보내고 계신가요? 혹시 신한은행 디딤돌 주택담...'
+--- [5a01fe60-f8e6-4aca-886e-a4d4e25a46b0] Agent Turn 종료 (최종 AI 응답 텍스트 길이: 74) ---
+[5a01fe60-f8e6-4aca-886e-a4d4e25a46b0] Starting TTS for: 안녕하세요! 반갑습니다. 오늘 하루는 어떻게 보내고 계신가요? 혹시 신한은행 디딤돌 주택담...
+TTS stream (5a01fe60-f8e6-4aca-886e-a4d4e25a46b0): Queueing TTS task for text: '안녕하세요! 반갑습니다. 오늘 하루는 어떻게 보내고 계신가요? 혹시 신한은행 디딤돌 주택담...'
+TTS stream (5a01fe60-f8e6-4aca-886e-a4d4e25a46b0): Synthesizing for text: '안녕하세요! 반갑습니다. 오늘 하루는 어떻게 보내고 계신가요? 혹시 신한은행 디딤돌 주택담...'
+TTS synthesis/streaming error for session 5a01fe60-f8e6-4aca-886e-a4d4e25a46b0: AttributeError - module 'google.cloud.texttospeech' has no attribute 'StreamingSynthesizeSpeechRequest'
+TTS stream (5a01fe60-f8e6-4aca-886e-a4d4e25a46b0): Audio generation/streaming loop finished.
+WebSocket text received from 5a01fe60-f8e6-4aca-886e-a4d4e25a46b0: process_text - {'type': 'process_text', 'text': '\n반가워'}
+
+--- [5a01fe60-f8e6-4aca-886e-a4d4e25a46b0] Agent Turn 시작 ---
+초기 입력 상태 (요약): stage='greeting', text='
+반가워'
+--- 노드: Entry Point ---
+--- 노드: Main Agent Router ---
+Main Agent 결정: answer_directly_chit_chat, 직접 답변: 반갑습니다! 저도 이렇게 인사해 주셔서 기쁩니다. 오늘 하루는 어떻게 보내고 계신가요? 혹시 신한은행 디딤돌 주택담보대출 상담에 대해 궁금한 점이 있으신가요?, 추출값: None
+Main Agent 라우팅 결정: answer_directly_chit_chat
+--- 노드: 직접 응답 준비 (칫챗 등) ---
+LangGraph 실행 완료. 라우팅: 'answer_directly_chit_chat', 다음 단계 ID: 'greeting'
+Session state for 5a01fe60-f8e6-4aca-886e-a4d4e25a46b0 updated. Final AI response for TTS: '반갑습니다! 저도 이렇게 인사해 주셔서 기쁩니다. 오늘 하루는 어떻게 보내고 계신가요? 혹...'
+--- [5a01fe60-f8e6-4aca-886e-a4d4e25a46b0] Agent Turn 종료 (최종 AI 응답 텍스트 길이: 88) ---
+[5a01fe60-f8e6-4aca-886e-a4d4e25a46b0] Starting TTS for: 반갑습니다! 저도 이렇게 인사해 주셔서 기쁩니다. 오늘 하루는 어떻게 보내고 계신가요? 혹...
+TTS stream (5a01fe60-f8e6-4aca-886e-a4d4e25a46b0): Queueing TTS task for text: '반갑습니다! 저도 이렇게 인사해 주셔서 기쁩니다. 오늘 하루는 어떻게 보내고 계신가요? 혹...'
+TTS stream (5a01fe60-f8e6-4aca-886e-a4d4e25a46b0): Synthesizing for text: '반갑습니다! 저도 이렇게 인사해 주셔서 기쁩니다. 오늘 하루는 어떻게 보내고 계신가요? 혹...'
+TTS synthesis/streaming error for session 5a01fe60-f8e6-4aca-886e-a4d4e25a46b0: AttributeError - module 'google.cloud.texttospeech' has no attribute 'StreamingSynthesizeSpeechRequest'
+TTS stream (5a01fe60-f8e6-4aca-886e-a4d4e25a46b0): Audio generation/streaming loop finished.
+WebSocket text received from 5a01fe60-f8e6-4aca-886e-a4d4e25a46b0: process_text - {'type': 'process_text', 'text': '\n음.. 그게 말이지 미혼은 가입조건이 어떻게 되지?\n'}
+
+--- [5a01fe60-f8e6-4aca-886e-a4d4e25a46b0] Agent Turn 시작 ---
+초기 입력 상태 (요약): stage='greeting', text='
+음.. 그게 말이지 미혼은 가입조건이 어떻게 되지?
+'
+--- 노드: Entry Point ---
+--- 노드: Main Agent Router ---
+Main Agent 결정: invoke_qa_agent, 직접 답변: None, 추출값: None
+Main Agent 라우팅 결정: invoke_qa_agent
+--- 노드: QA Agent 호출 준비 (스트리밍은 run_agent_streaming에서 직접 처리) ---
+LangGraph 실행 완료. 라우팅: 'invoke_qa_agent', 다음 단계 ID: 'greeting'
+QA 스트리밍 시작 (세션: 5a01fe60-f8e6-4aca-886e-a4d4e25a46b0, 질문: '
+음.. 그게 말이지 미혼은 가입조건이 어떻게 되지?
+...')
+--- QA Agent 스트리밍 호출 (질문: '
+음.. 그게 말이지 미혼은 가입조건이 어떻게 되지?
+') ---
+--- QA Agent: 지식베이스 (didimdol.md) 로딩 중... ---
+--- QA Agent: 지식베이스 (didimdol.md) 로딩 완료 (8036 자) ---
+Session state for 5a01fe60-f8e6-4aca-886e-a4d4e25a46b0 updated. Final AI response for TTS: '죄송하지만 문의주신 내용에 대해서는 현재 제공된 정보 내에서는 정확한 답변을 드리기 어렵습...'
+--- [5a01fe60-f8e6-4aca-886e-a4d4e25a46b0] Agent Turn 종료 (최종 AI 응답 텍스트 길이: 97) ---
+[5a01fe60-f8e6-4aca-886e-a4d4e25a46b0] Starting TTS for: 죄송하지만 문의주신 내용에 대해서는 현재 제공된 정보 내에서는 정확한 답변을 드리기 어렵습...
+TTS stream (5a01fe60-f8e6-4aca-886e-a4d4e25a46b0): Queueing TTS task for text: '죄송하지만 문의주신 내용에 대해서는 현재 제공된 정보 내에서는 정확한 답변을 드리기 어렵습...'

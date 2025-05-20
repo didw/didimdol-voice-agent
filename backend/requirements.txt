@@ -8,5 +8,5 @@ langchain
 langgraph
 langchain-openai
 PyYAML
-# langchain-openai (langchain >= 0.1.0 에서는 openai 패키지에 통합됨)
-# pydantic < 2  # Langchain 특정 버전과 호환성 이슈 있을 수 있음, 필요시 버전 명시
+websockets # WebSocket 직접 사용하는 경우 또는 FastAPI 의존성으로 포함될 수 있음
+# pydantic (FastAPI의 핵심 의존성으로 보통 함께 설치됨)
