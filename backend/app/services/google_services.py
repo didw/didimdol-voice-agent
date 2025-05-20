@@ -293,28 +293,27 @@ class StreamTTSService:
         try:
             print(f"TTS stream ({self.session_id}): Synthesizing for text: '{text[:50]}...'")
             synthesis_input = tts.SynthesisInput(text=text)
-            
-            # Google TTS는 StreamingSynthesizeSpeech API를 제공함
-            request = tts.StreamingSynthesizeSpeechRequest(
-                input=synthesis_input,
-                voice=self.voice_params,
-                audio_config=self.audio_config
+            # 단건 API 호출
+            response = await self.client.synthesize_speech(
+                request={"input": synthesis_input, "voice": self.voice_params, "audio_config": self.audio_config}
             )
-            
-            stream = await self.client.streaming_synthesize_speech(request=request)
-            
-            async for response_chunk in stream:
+            audio_content = response.audio_content
+            print(f"TTS stream ({self.session_id}): Synthesis complete, size: {len(audio_content)} bytes.")
+
+            # 수동으로 청크 분할 및 전송
+            for i in range(0, len(audio_content), self.simulated_chunk_size_bytes):
                 if self._current_tts_task and self._current_tts_task.cancelled():
                     print(f"TTS stream ({self.session_id}): Cancelled during chunking.")
                     break
-                if response_chunk.audio_content:
-                    encoded_chunk = base64.b64encode(response_chunk.audio_content).decode('utf-8')
-                    if self.on_audio_chunk: # 콜백 존재 여부 확인 후 호출
-                        await self.on_audio_chunk(encoded_chunk) # <<< await 추가
+                chunk = audio_content[i:i + self.simulated_chunk_size_bytes]
+                encoded_chunk = base64.b64encode(chunk).decode('utf-8')
+                if self.on_audio_chunk: # await 추가 (이전 답변 내용 반영)
+                    await self.on_audio_chunk(encoded_chunk)
+                await asyncio.sleep(0.05) # 클라이언트 처리 시간 확보 및 너무 빠른 전송 방지
             
             if not (self._current_tts_task and self._current_tts_task.cancelled()):
-                if self.on_stream_complete: # 콜백 존재 여부 확인 후 호출
-                    await self.on_stream_complete() # <<< await 추가
+                 if self.on_stream_complete: # await 추가 (이전 답변 내용 반영)
+                    await self.on_stream_complete()
 
         except asyncio.CancelledError:
             print(f"TTS generation task ({self.session_id}): Was cancelled.")
