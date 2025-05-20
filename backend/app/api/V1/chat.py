@@ -1,7 +1,7 @@
 # backend/app/api/v1/chat.py
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import json
-from typing import Dict
+from typing import Dict, Optional
 
 from ...graph.agent import run_agent_streaming, AgentState
 from ...services.google_services import StreamSTTService, StreamTTSService, GOOGLE_SERVICES_AVAILABLE
@@ -47,31 +47,52 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         print(f"Existing session loaded for {session_id}")
         # TODO: 이전 대화 이력 요약 등을 클라이언트에 전달하여 대화 이어가기 기능 구현 가능
 
-    stt_service = None
-    tts_service = None
+    stt_service: Optional[StreamSTTService] = None # 타입 명시
+    tts_service: Optional[StreamTTSService] = None # 타입 명시
 
     if GOOGLE_SERVICES_AVAILABLE:
+        # TTS 콜백 함수들 (async def로 정의)
+        async def _on_tts_audio_chunk(audio_chunk_b64: str):
+            await manager.send_json_to_client(session_id, {"type": "tts_audio_chunk", "audio_chunk_base64": audio_chunk_b64})
+
+        async def _on_tts_stream_complete():
+            await manager.send_json_to_client(session_id, {"type": "tts_stream_end"})
+
+        async def _on_tts_error(error_msg: str):
+            await manager.send_json_to_client(session_id, {"type": "error", "message": f"TTS Error: {error_msg}"})
+
         tts_service = StreamTTSService(
             session_id=session_id,
-            on_audio_chunk=lambda audio_chunk_b64: manager.send_json_to_client(session_id, {"type": "tts_audio_chunk", "audio_chunk_base64": audio_chunk_b64}),
-            on_stream_complete=lambda: manager.send_json_to_client(session_id, {"type": "tts_stream_end"}),
-            on_error=lambda error_msg: manager.send_json_to_client(session_id, {"type": "error", "message": f"TTS Error: {error_msg}"})
+            on_audio_chunk=_on_tts_audio_chunk,
+            on_stream_complete=_on_tts_stream_complete,
+            on_error=_on_tts_error
         )
 
+        # STT 콜백 함수들 (async def로 정의)
+        async def _on_stt_interim_result(transcript: str):
+            await manager.send_json_to_client(session_id, {"type": "stt_interim_result", "transcript": transcript})
+        
+        # 이 함수는 이미 async def
         async def handle_stt_final_result_with_tts(transcript: str):
             await manager.send_json_to_client(session_id, {"type": "stt_final_result", "transcript": transcript})
-            if tts_service: # tts_service가 초기화 되었는지 확인
+            # tts_service Null 체크 강화
+            if GOOGLE_SERVICES_AVAILABLE and tts_service:
                 await handle_text_input(session_id, transcript, tts_service)
-            else: # tts_service가 없는 경우 (Google 서비스 비활성화 등)
+            else:
                 await handle_text_input_without_tts(session_id, transcript)
 
+        async def _on_stt_error(error_msg: str):
+            await manager.send_json_to_client(session_id, {"type": "error", "message": f"STT Error: {error_msg}"})
+
+        async def _on_epd_detected():
+            await manager.send_json_to_client(session_id, {"type": "epd_detected"})
 
         stt_service = StreamSTTService(
             session_id=session_id,
-            on_interim_result=lambda transcript: manager.send_json_to_client(session_id, {"type": "stt_interim_result", "transcript": transcript}),
-            on_final_result=handle_stt_final_result_with_tts,
-            on_error=lambda error_msg: manager.send_json_to_client(session_id, {"type": "error", "message": f"STT Error: {error_msg}"}),
-            on_epd_detected=lambda: manager.send_json_to_client(session_id, {"type": "epd_detected"})
+            on_interim_result=_on_stt_interim_result,
+            on_final_result=handle_stt_final_result_with_tts, # 이 함수는 이미 async
+            on_error=_on_stt_error,
+            on_epd_detected=_on_epd_detected
         )
         await stt_service.start_stream()
     else:
@@ -149,11 +170,13 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         traceback.print_exc()
         await manager.send_json_to_client(session_id, {"type": "error", "message": f"Server error: {str(e)}"})
     finally:
-        if stt_service: await stt_service.stop_stream()
-        if tts_service: await tts_service.stop_tts_stream()
+        if stt_service: 
+            await stt_service.stop_stream()
+        if tts_service: 
+            await tts_service.stop_tts_stream()
         manager.disconnect(session_id)
         if session_id in SESSION_STATES:
-            del SESSION_STATES[session_id] # 세션 정리
+            del SESSION_STATES[session_id]
             print(f"Session state for {session_id} cleared.")
 
 

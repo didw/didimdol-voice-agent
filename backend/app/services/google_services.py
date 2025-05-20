@@ -78,24 +78,64 @@ class StreamSTTService:
         print(f"StreamSTTService ({self.session_id}) initialized. Encoding: {audio_encoding.name}, Sample Rate: {sample_rate_hertz}")
 
     async def _request_generator(self):
-        yield speech.StreamingRecognizeRequest(streaming_config=self.streaming_config)
-        while not self._stop_event.is_set():
-            try:
-                chunk = await asyncio.wait_for(self._audio_queue.get(), timeout=0.1)
-                if chunk is None: # 종료 신호
+        if not GOOGLE_SERVICES_AVAILABLE: # 추가된 방어 코드
+            print(f"STT request generator ({self.session_id}): Google 서비스 사용 불가, 생성기 중단.")
+            return
+
+        try:
+            yield speech.StreamingRecognizeRequest(streaming_config=self.streaming_config)
+            
+            first_chunk_received = False
+            while not self._stop_event.is_set():
+                try:
+                    current_timeout = 2.0 if not first_chunk_received else 0.1 # 첫 청크는 2초, 이후는 0.1초 대기
+
+                    if not first_chunk_received:
+                        print(f"STT request generator ({self.session_id}): 첫 번째 오디오 청크 대기 중 (최대 {current_timeout}초)...")
+                    
+                    chunk = await asyncio.wait_for(self._audio_queue.get(), timeout=current_timeout)
+                    
+                    if not first_chunk_received:
+                        print(f"STT request generator ({self.session_id}): 첫 번째 오디오 청크 수신 완료.")
+                        first_chunk_received = True
+
+                    if chunk is None: # 종료 신호
+                        self._stop_event.set()
+                        print(f"STT request generator ({self.session_id}): 종료 신호 수신.")
+                        break
+                    
+                    yield speech.StreamingRecognizeRequest(audio_content=chunk)
+                    self._audio_queue.task_done()
+
+                except asyncio.TimeoutError:
+                    if not first_chunk_received:
+                        # 첫 번째 청크를 기다리다가 지정된 시간(예: 2초) 동안 받지 못한 경우
+                        print(f"STT request generator ({self.session_id}): 첫 번째 오디오 청크 대기 시간 초과. 스트림 중단 시도.")
+                        if self.on_error: # on_error 콜백이 있다면 호출
+                            await self.on_error("음성 데이터가 수신되지 않아 STT를 시작할 수 없습니다.")
+                        self._stop_event.set() # 생성기 중단
+                        break 
+                    # 이후 청크에 대한 타임아웃은 정상적인 상황일 수 있음 (클라이언트가 잠시 말을 멈춘 경우 등)
+                    # print(f"STT request generator ({self.session_id}): 오디오 큐 비어있음 (일시적 타임아웃).") # 너무 많은 로그 방지
+                    continue 
+                except asyncio.CancelledError: # 명시적인 작업 취소 처리
+                    print(f"STT request generator ({self.session_id}): 작업 취소됨.")
                     self._stop_event.set()
                     break
-                yield speech.StreamingRecognizeRequest(audio_content=chunk)
-                self._audio_queue.task_done()
-            except asyncio.TimeoutError:
-                continue
-            except Exception as e:
-                print(f"STT request generator error ({self.session_id}): {e}")
-                self._stop_event.set()
-                self.on_error(f"STT 스트림 요청 생성 중 오류: {e}")
-                break
-        print(f"STT request generator ({self.session_id}) stopping.")
-
+                except Exception as e:
+                    print(f"STT request generator ({self.session_id}) 내부 루프 오류: {type(e).__name__} - {e}")
+                    if self.on_error: # on_error 콜백이 있다면 호출
+                         await self.on_error(f"STT 스트림 요청 생성 중 내부 오류: {e}")
+                    self._stop_event.set()
+                    break
+            print(f"STT request generator ({self.session_id}) 루프 종료됨. (stop_event: {self._stop_event.is_set()})")
+        except Exception as e: # yield streaming_config 에서 발생할 수 있는 예외 처리
+            print(f"STT request generator ({self.session_id}) 초기 설정 오류: {type(e).__name__} - {e}")
+            if self.on_error:
+                await self.on_error(f"STT 스트림 초기 설정 중 오류: {e}")
+            self._stop_event.set() # 확실히 중단
+        finally:
+            print(f"STT request generator ({self.session_id}) 완전히 종료됨.")
 
     async def _process_responses(self):
         if not GOOGLE_SERVICES_AVAILABLE or not self._is_active: return
@@ -123,19 +163,22 @@ class StreamSTTService:
 
                 if result.is_final:
                     print(f"STT Final ({self.session_id}): {transcript}")
-                    self.on_final_result(transcript)
-                    if self.on_epd_detected: # is_final을 EPD로 간주 (single_utterance=False)
-                         self.on_epd_detected()
+                    if self.on_final_result: # 콜백 존재 여부 확인 후 호출
+                        await self.on_final_result(transcript)
+                    if self.on_epd_detected:
+                         if self.on_epd_detected: # 콜백 존재 여부 확인 후 호출
+                            await self.on_epd_detected()
                 else:
-                    # print(f"STT Interim ({self.session_id}): {transcript}") # 너무 많은 로그 방지
-                    self.on_interim_result(transcript)
+                    if self.on_interim_result: # 콜백 존재 여부 확인 후 호출
+                        await self.on_interim_result(transcript)
         
         except asyncio.CancelledError:
             print(f"STT response processing task ({self.session_id}) was cancelled.")
         except Exception as e:
             error_msg = f"STT stream error ({self.session_id}): {type(e).__name__} - {e}"
             print(error_msg)
-            self.on_error(error_msg)
+            if self.on_error: # 콜백 존재 여부 확인 후 호출
+                await self.on_error(error_msg)
         finally:
             self._is_active = False
             self._stop_event.set() # 확실히 종료
@@ -266,19 +309,24 @@ class StreamTTSService:
                     break
                 if response_chunk.audio_content:
                     encoded_chunk = base64.b64encode(response_chunk.audio_content).decode('utf-8')
-                    self.on_audio_chunk(encoded_chunk)
+                    if self.on_audio_chunk: # 콜백 존재 여부 확인 후 호출
+                        await self.on_audio_chunk(encoded_chunk) # <<< await 추가
             
             if not (self._current_tts_task and self._current_tts_task.cancelled()):
-                self.on_stream_complete()
+                if self.on_stream_complete: # 콜백 존재 여부 확인 후 호출
+                    await self.on_stream_complete() # <<< await 추가
 
         except asyncio.CancelledError:
             print(f"TTS generation task ({self.session_id}): Was cancelled.")
-            self.on_stream_complete() # 취소 시에도 완료 알림
+            if self.on_stream_complete: # 콜백 존재 여부 확인 후 호출
+                await self.on_stream_complete() # <<< await 추가
         except Exception as e:
             error_msg = f"TTS synthesis/streaming error for session {self.session_id}: {type(e).__name__} - {e}"
             print(error_msg)
-            self.on_error(error_msg)
-            self.on_stream_complete() # 오류 시에도 완료 알림
+            if self.on_error: # 콜백 존재 여부 확인 후 호출
+                await self.on_error(error_msg) # <<< await 추가
+            if self.on_stream_complete: # 콜백 존재 여부 확인 후 호출
+                await self.on_stream_complete() # <<< await 추가
         finally:
              print(f"TTS stream ({self.session_id}): Audio generation/streaming loop finished.")
 
