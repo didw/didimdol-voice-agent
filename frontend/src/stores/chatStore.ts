@@ -153,16 +153,18 @@ const WEBSOCKET_URL_BASE =
               this.isSynthesizingTTS = false // Server finished sending this TTS segment
               // playNextTtsAudioFromQueue will continue if there are more chunks or segments
               break
+
             case 'epd_detected': // Server (Google STT) detected end of user's utterance
-              console.log('EPD detected by server (Google STT)')
-              this.isEPDDetectedByServer = true
-              // This can be a signal for barge-in if TTS is playing.
-              if (this.isPlayingTTS) {
-                console.log('Barge-in: EPD detected during TTS. Stopping client TTS.')
-                this.stopClientSideTTSPlayback(false) // Stop client playback, don't tell server yet as STT->LLM is processing
+              console.log('EPD detected by server (Google STT for previous user utterance)');
+              this.isEPDDetectedByServer = true; // Mark that server noted EPD
+      
+              if (this.isPlayingTTS && this.isVoiceModeActive) {
+                console.log('Server EPD received while AI TTS playing in voice mode. Client-side VAD handles barge-in. No action on TTS here.');
+              } else if (this.isPlayingTTS && !this.isVoiceModeActive) {
+                console.log('Server EPD received while AI TTS playing (NOT in voice mode). Stopping client TTS playback locally.');
+                this.stopClientSideTTSPlayback(false); // Stop local playback, don't notify server
               }
-              // If voice mode is on, client continues sending audio until explicitly stopped.
-              break
+              break;
             case 'voice_activated':
               console.log('Voice mode activated by server confirmation.')
               // UI can reflect this if needed, actual recording started by client action
