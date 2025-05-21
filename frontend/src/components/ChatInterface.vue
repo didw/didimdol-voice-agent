@@ -371,10 +371,6 @@ watch(isVoiceModeActive, (newValue) => {
   color: #777;
   font-style: italic;
 }
-.message.interim-stt-finalized p {
-  /* Style for user message that was from STT */
-  /* No specific style for now, but class is available */
-}
 
 .streaming-cursor::after {
   /* From original */
