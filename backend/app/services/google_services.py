@@ -83,107 +83,124 @@ class StreamSTTService:
             return
 
         try:
+            # Configuration should be sent first.
             yield speech.StreamingRecognizeRequest(streaming_config=self.streaming_config)
             
             first_chunk_received = False
+            # Timeout for the very first audio chunk if no audio is coming
+            # This helps to release the stream if client connects but sends no audio
+            # For subsequent silences, Google's API EPD or client-side VAD should handle it.
+            initial_audio_timeout = 5.0 # seconds to wait for the first audio chunk
+
             while not self._stop_event.is_set():
                 try:
-                    current_timeout = 2.0 if not first_chunk_received else 0.1 # 첫 청크는 2초, 이후는 0.1초 대기
+                    # Adjust timeout based on whether we've received the first chunk
+                    # For the first chunk, wait longer. For subsequent, shorter or no timeout if queue is expected to fill.
+                    current_timeout = initial_audio_timeout if not first_chunk_received else 0.2 # short timeout for subsequent chunks
 
                     if not first_chunk_received:
-                        print(f"STT request generator ({self.session_id}): 첫 번째 오디오 청크 대기 중 (최대 {current_timeout}초)...")
+                        print(f"STT request generator ({self.session_id}): Waiting for first audio chunk (max {current_timeout}s)...")
                     
                     chunk = await asyncio.wait_for(self._audio_queue.get(), timeout=current_timeout)
                     
                     if not first_chunk_received:
-                        print(f"STT request generator ({self.session_id}): 첫 번째 오디오 청크 수신 완료.")
+                        print(f"STT request generator ({self.session_id}): First audio chunk received.")
                         first_chunk_received = True
 
-                    if chunk is None: # 종료 신호
-                        self._stop_event.set()
-                        print(f"STT request generator ({self.session_id}): 종료 신호 수신.")
-                        break
+                    if chunk is None: # Termination signal for the queue
+                        self._stop_event.set() # Signal to stop processing
+                        print(f"STT request generator ({self.session_id}): Termination signal received from queue.")
+                        break # Exit the loop
                     
                     yield speech.StreamingRecognizeRequest(audio_content=chunk)
                     self._audio_queue.task_done()
 
                 except asyncio.TimeoutError:
                     if not first_chunk_received:
-                        # 첫 번째 청크를 기다리다가 지정된 시간(예: 2초) 동안 받지 못한 경우
-                        print(f"STT request generator ({self.session_id}): 첫 번째 오디오 청크 대기 시간 초과. 스트림 중단 시도.")
-                        if self.on_error: # on_error 콜백이 있다면 호출
-                            await self.on_error("음성 데이터가 수신되지 않아 STT를 시작할 수 없습니다.")
-                        self._stop_event.set() # 생성기 중단
-                        break 
-                    # 이후 청크에 대한 타임아웃은 정상적인 상황일 수 있음 (클라이언트가 잠시 말을 멈춘 경우 등)
-                    # print(f"STT request generator ({self.session_id}): 오디오 큐 비어있음 (일시적 타임아웃).") # 너무 많은 로그 방지
+                        # Timeout waiting for the very first audio chunk
+                        print(f"STT request generator ({self.session_id}): Timeout waiting for the first audio chunk. Stopping stream.")
+                        if self.on_error: # Ensure on_error is awaitable if it's an async def
+                            await self.on_error("음성 데이터가 수신되지 않아 STT를 시작할 수 없습니다 (초기 타임아웃).")
+                        self._stop_event.set() # Ensure the stream stops
+                        break # Exit the loop
+                    # For subsequent timeouts (silence in between speech), just continue waiting for more audio
+                    # print(f"STT request generator ({self.session_id}): Audio queue empty (timeout), continuing...")
                     continue 
-                except asyncio.CancelledError: # 명시적인 작업 취소 처리
-                    print(f"STT request generator ({self.session_id}): 작업 취소됨.")
+                except asyncio.CancelledError:
+                    print(f"STT request generator ({self.session_id}): Task was cancelled.")
                     self._stop_event.set()
-                    break
+                    break # Exit the loop
                 except Exception as e:
-                    print(f"STT request generator ({self.session_id}) 내부 루프 오류: {type(e).__name__} - {e}")
-                    if self.on_error: # on_error 콜백이 있다면 호출
-                         await self.on_error(f"STT 스트림 요청 생성 중 내부 오류: {e}")
+                    print(f"STT request generator ({self.session_id}) error in loop: {type(e).__name__} - {e}")
+                    if self.on_error:
+                         await self.on_error(f"STT 스트림 요청 생성 중 오류: {e}")
                     self._stop_event.set()
-                    break
-            print(f"STT request generator ({self.session_id}) 루프 종료됨. (stop_event: {self._stop_event.is_set()})")
-        except Exception as e: # yield streaming_config 에서 발생할 수 있는 예외 처리
-            print(f"STT request generator ({self.session_id}) 초기 설정 오류: {type(e).__name__} - {e}")
+                    break # Exit the loop
+            
+            print(f"STT request generator ({self.session_id}) loop finished. Stop event: {self._stop_event.is_set()}")
+
+        except Exception as e: # Catch errors from initial yield (e.g., config issues)
+            print(f"STT request generator ({self.session_id}) initial setup error: {type(e).__name__} - {e}")
             if self.on_error:
-                await self.on_error(f"STT 스트림 초기 설정 중 오류: {e}")
-            self._stop_event.set() # 확실히 중단
+                await self.on_error(f"STT 스트림 초기 설정 오류: {e}")
+            self._stop_event.set() # Ensure stop on setup failure
         finally:
-            print(f"STT request generator ({self.session_id}) 완전히 종료됨.")
+            print(f"STT request generator ({self.session_id}) fully terminated.")
 
     async def _process_responses(self):
-        if not GOOGLE_SERVICES_AVAILABLE or not self._is_active: return
+        if not GOOGLE_SERVICES_AVAILABLE or not self._is_active:
+            print(f"STT response processing ({self.session_id}): Not starting, Google services unavailable or not active.")
+            return
 
         print(f"STT stream ({self.session_id}): Starting to listen for responses.")
         try:
+            # Ensure the request generator is robust and handles its own lifecycle
+            # The client.streaming_recognize call itself might raise if misconfigured
+            if not hasattr(self, 'client') or not hasattr(self, 'streaming_config'):
+                 if self.on_error: await self.on_error("STT 서비스가 올바르게 초기화되지 않았습니다.")
+                 return
+
             responses = await self.client.streaming_recognize(
-                requests=self._request_generator(),
-                # timeout=300 # 전체 스트리밍 타임아웃 (선택적)
+                requests=self._request_generator(), # This needs to be running
             )
             async for response in responses:
-                if self._stop_event.is_set(): break
+                if self._stop_event.is_set(): # Check if stop was signaled
+                    print(f"STT response processing ({self.session_id}): Stop event detected, breaking loop.")
+                    break 
                 if not response.results: continue
 
                 result = response.results[0]
                 if not result.alternatives: continue
                 transcript = result.alternatives[0].transcript
 
-                # # EPD (End of Single Utterance) 감지 - single_utterance=True 일 때 유효
-                # if response.speech_event_type == speech.StreamingRecognizeResponse.SpeechEventType.END_OF_SINGLE_UTTERANCE:
-                #     print(f"EPD detected by Google STT API ({self.session_id})")
-                #     if self.on_epd_detected:
-                #         self.on_epd_detected()
-                #     # single_utterance=False 일때는 is_final로 EPD 판단.
-
                 if result.is_final:
                     print(f"STT Final ({self.session_id}): {transcript}")
-                    if self.on_final_result: # 콜백 존재 여부 확인 후 호출
+                    if self.on_final_result:
                         await self.on_final_result(transcript)
-                    if self.on_epd_detected:
-                         if self.on_epd_detected: # 콜백 존재 여부 확인 후 호출
-                            await self.on_epd_detected()
+                    # After a final result, Google STT often implies an EPD for that utterance.
+                    # The explicit EPD event might be more for single_utterance=true or VAD events.
+                    # For continuous mode, `is_final` is a strong EPD indicator for the current phrase.
+                    if self.on_epd_detected: 
+                        await self.on_epd_detected()
                 else:
-                    if self.on_interim_result: # 콜백 존재 여부 확인 후 호출
+                    if self.on_interim_result:
                         await self.on_interim_result(transcript)
         
         except asyncio.CancelledError:
             print(f"STT response processing task ({self.session_id}) was cancelled.")
-        except Exception as e:
-            error_msg = f"STT stream error ({self.session_id}): {type(e).__name__} - {e}"
+        except Exception as e: # Catch errors specific to streaming_recognize
+            error_msg = f"STT stream API error ({self.session_id}): {type(e).__name__} - {e}"
             print(error_msg)
-            if self.on_error: # 콜백 존재 여부 확인 후 호출
+            # Log more details for specific Google API errors if available (e.g. e.details())
+            # Example: if isinstance(e, google.api_core.exceptions.GoogleAPIError):
+            #    print(f"Google API Error Details: {e.details()}")
+            if self.on_error:
                 await self.on_error(error_msg)
         finally:
-            self._is_active = False
-            self._stop_event.set() # 확실히 종료
-            print(f"STT stream ({self.session_id}): Response listening loop ended.")
-
+            self._is_active = False # Mark as no longer active
+            if not self._stop_event.is_set():
+                self._stop_event.set() # Ensure stop event is set if loop exited unexpectedly
+            print(f"STT stream ({self.session_id}): Response listening loop fully ended.")
 
     async def start_stream(self):
         if not GOOGLE_SERVICES_AVAILABLE:
