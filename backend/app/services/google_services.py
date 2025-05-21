@@ -278,8 +278,7 @@ class StreamTTSService:
                  on_stream_complete: Callable[[], None],
                  on_error: Callable[[str], None],
                  language_code: str = "ko-KR",
-                 voice_name: str = "ko-KR-Wavenet-D", # 표준 여성
-                 # voice_name: str = "ko-KR-Wavenet-C", # 표준 남성
+                 voice_name: str = "ko-KR-Chirp3-HD-Orus",
                  audio_encoding: tts.AudioEncoding = tts.AudioEncoding.MP3, # MP3 또는 LINEAR16 (Opus는 직접 지원 안함)
                  speaking_rate: float = 1.0,
                  pitch: float = 0.0):
@@ -412,7 +411,7 @@ async def synthesize_text_to_audio_bytes_non_streaming(text: str) -> bytes:
     synthesis_input = tts.SynthesisInput(text=text)
     voice = tts.VoiceSelectionParams(
         language_code="ko-KR",
-        name="ko-KR-Wavenet-D",
+        name="ko-KR-Chirp3-HD-Orus",
     )
     audio_config = tts.AudioConfig(
         audio_encoding=tts.AudioEncoding.MP3
