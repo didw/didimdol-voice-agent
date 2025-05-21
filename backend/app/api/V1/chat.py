@@ -1,16 +1,17 @@
 # backend/app/api/v1/chat.py
 
-# ... (기존 import 및 ConnectionManager, SESSION_STATES는 동일) ...
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException, status # WebSocketException 추가
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException, status
 import json
-from typing import Dict, Optional
+from typing import Dict, Optional, cast
 
-from ...graph.agent import run_agent_streaming, AgentState
+from ...graph.agent import run_agent_streaming, AgentState # AgentState 임포트
 from ...services.google_services import StreamSTTService, StreamTTSService, GOOGLE_SERVICES_AVAILABLE
 from ...core.config import LLM_MODEL_NAME
 
 router = APIRouter()
-SESSION_STATES: Dict[str, AgentState] = {}
+# SESSION_STATES는 이제 AgentState 전체를 저장하거나, 필요한 주요 필드(current_loan_type, current_scenario_stage_id, messages, collected_loan_info)를 저장
+SESSION_STATES: Dict[str, AgentState] = {} # AgentState 타입으로 변경
+
 
 class ConnectionManager:
     def __init__(self):
@@ -30,16 +31,14 @@ class ConnectionManager:
         if session_id in self.active_connections:
             try:
                 await self.active_connections[session_id].send_json(data)
-            except WebSocketException as e: # Handle cases where client might have abruptly closed
+            except WebSocketException as e:
                 print(f"Error sending to client {session_id} (possibly closed): {e}")
-                self.disconnect(session_id) # Clean up
-            except RuntimeError as e: # Handle "WebSocket is closed" runtime error
+                self.disconnect(session_id)
+            except RuntimeError as e:
                  print(f"RuntimeError sending to client {session_id} (WebSocket is closed): {e}")
                  self.disconnect(session_id)
 
-
 manager = ConnectionManager()
-
 
 @router.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
@@ -49,13 +48,40 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     tts_service: Optional[StreamTTSService] = None
 
     if session_id not in SESSION_STATES:
-        SESSION_STATES[session_id] = {} 
+        # 초기 AgentState 설정 (필수 필드 위주로)
+        SESSION_STATES[session_id] = {
+            "session_id": session_id,
+            "user_input_text": None,
+            "user_input_audio_b64": None,
+            "stt_result": None,
+            "current_loan_type": None, # 초기에는 대출 유형 미정
+            "available_loan_types": ["didimdol", "jeonse"],
+            "main_agent_routing_decision": None,
+            "main_agent_direct_response": None,
+            "scenario_agent_output": None,
+            "messages": [], # 초기 메시지는 비우거나, run_agent_streaming에서 시스템 프롬프트 추가
+            "current_scenario_stage_id": None, # 대출 유형 선택 후 설정됨
+            "collected_loan_info": {},
+            "active_scenario_data": None,
+            "active_knowledge_base_content": None,
+            "active_scenario_name": "미정",
+            "final_response_text_for_tts": None,
+            "error_message": None,
+            "is_final_turn_response": False
+        }
         print(f"New session initialized for {session_id}")
+        # 초기 안내 메시지는 첫 번째 run_agent_streaming 호출 시 Main Agent가 생성하도록 유도
+        # 또는 여기서 더 일반적인 메시지 전송
+        initial_greeting_message = "안녕하세요! 신한은행 AI 금융 상담 서비스입니다. 어떤 도움이 필요하신가요? (예: 디딤돌 대출, 전세자금 대출 문의)"
         await manager.send_json_to_client(session_id, {
             "type": "session_initialized",
-            "message": "안녕하세요! 디딤돌 대출 음성 상담 서비스입니다. 채팅으로 입력하시거나 마이크 버튼을 눌러 말씀해주세요."
+            "message": initial_greeting_message
+            # "message": "안녕하세요! 신한은행 AI 금융 상담 서비스입니다. 어떤 대출 상품에 대해 알아보고 싶으신가요? (예: 디딤돌 대출, 전세자금 대출)"
         })
-    # ... (tts_service, stt_service 콜백 및 초기화는 이전과 동일하게 유지) ...
+        # 첫 번째 사용자 입력 후 run_agent_streaming이 호출되면, current_loan_type이 없으므로
+        # main_agent_router_node에서 initial_task_selection_prompt를 사용하여 대출 유형을 결정하게 됨.
+    
+    # STT/TTS 서비스 콜백 및 초기화 (기존과 유사)
     if GOOGLE_SERVICES_AVAILABLE:
         async def _on_tts_audio_chunk(audio_chunk_b64: str):
             await manager.send_json_to_client(session_id, {"type": "tts_audio_chunk", "audio_chunk_base64": audio_chunk_b64})
@@ -70,48 +96,37 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         
         async def handle_stt_final_result_with_tts_wrapper(transcript: str):
             await manager.send_json_to_client(session_id, {"type": "stt_final_result", "transcript": transcript})
-            if GOOGLE_SERVICES_AVAILABLE and tts_service:
-                await handle_text_input(session_id, transcript, tts_service, input_mode="voice") # 명시적으로 input_mode 전달
-            else:
-                await handle_text_input_without_tts(session_id, transcript, input_mode="voice") # 명시적으로 input_mode 전달
+            # STT 최종 결과를 받으면 LangGraph 에이전트 실행
+            await process_input_through_agent(session_id, transcript, tts_service, input_mode="voice")
+
         async def _on_stt_error(error_msg: str):
             await manager.send_json_to_client(session_id, {"type": "error", "message": f"STT Error: {error_msg}"})
         async def _on_epd_detected():
             print(f"EPD detected by Google STT for session {session_id}")
             await manager.send_json_to_client(session_id, {"type": "epd_detected"})
         stt_service = StreamSTTService(session_id=session_id, on_interim_result=_on_stt_interim_result, on_final_result=handle_stt_final_result_with_tts_wrapper, on_error=_on_stt_error, on_epd_detected=_on_epd_detected)
-    else: # GOOGLE_SERVICES_AVAILABLE is False
+    else:
         print(f"[{session_id}] Google STT/TTS 서비스가 비활성화되어 음성 관련 기능이 제한됩니다.")
         await manager.send_json_to_client(session_id, { "type": "warning", "message": "음성 인식 및 합성이 현재 지원되지 않습니다. 텍스트로 입력해주세요."})
 
     try:
         while True:
             data = await websocket.receive()
-            # ... (메시지 파싱 로직은 이전과 동일하게 유지) ...
             message_type = None; payload_dict = None; raw_payload = None
             if "text" in data:
                 try:
                     message_data = json.loads(data["text"]); message_type = message_data.get("type"); payload_dict = message_data
-                    # print(f"WS text from {session_id}: {message_type} - {payload_dict}") # 상세 로깅
                 except json.JSONDecodeError:
                     print(f"Invalid JSON from {session_id}: {data['text']}")
                     await manager.send_json_to_client(session_id, {"type": "error", "message": "Invalid JSON format."}); continue
             elif "bytes" in data:
                 message_type = "audio_chunk"; raw_payload = data["bytes"]
-                # print(f"WS audio chunk from {session_id}, size: {len(raw_payload)}") # 상세 로깅
 
             if message_type == "process_text":
                 user_text = payload_dict.get("text")
-                input_mode = payload_dict.get("input_mode", "text") 
                 if user_text:
-                    if input_mode == "text":
-                        await handle_text_input_without_tts(session_id, user_text, input_mode="text")
-                    else: # "voice" 또는 명시되지 않은 경우, STT 경로를 타는 것이 정상
-                        print(f"Warning: 'process_text' received with input_mode='{input_mode}'. Treating as voice for TTS.")
-                        if tts_service and GOOGLE_SERVICES_AVAILABLE:
-                             await handle_text_input(session_id, user_text, tts_service, input_mode="voice")
-                        else:
-                             await handle_text_input_without_tts(session_id, user_text, input_mode="voice")
+                    # 텍스트 입력 시 input_mode="text"로 LangGraph 에이전트 실행
+                    await process_input_through_agent(session_id, user_text, tts_service, input_mode="text")
                 else: await manager.send_json_to_client(session_id, {"type": "error", "message": "No text provided."})
 
             elif message_type == "audio_chunk":
@@ -129,8 +144,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     print(f"[{session_id}] Deactivating voice. Stopping STT stream.")
                     await stt_service.stop_stream()
                     await manager.send_json_to_client(session_id, {"type": "voice_deactivated"})
-                else: await manager.send_json_to_client(session_id, {"type": "voice_deactivated", "message": "음성 인식이 이미 비활성화 상태일 수 있습니다."})
-
+                # else: await manager.send_json_to_client(session_id, {"type": "voice_deactivated", "message": "음성 인식이 이미 비활성화 상태일 수 있습니다."}) # 클라이언트 상태와 다를 수 있으므로 메시지 제거
+            
             elif message_type == "stop_tts": 
                 if tts_service and GOOGLE_SERVICES_AVAILABLE:
                     print(f"[{session_id}] Client requested server to stop TTS stream generation.")
@@ -141,36 +156,36 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     except Exception as e:
         print(f"WebSocket Error for session {session_id}: {e}")
         import traceback; traceback.print_exc()
-        await manager.send_json_to_client(session_id, {"type": "error", "message": f"Server error: {str(e)}"})
+        try: # 연결이 아직 유효하다면 클라이언트에게 에러 메시지 전송 시도
+            await manager.send_json_to_client(session_id, {"type": "error", "message": f"Server error: {str(e)}"})
+        except Exception: pass # 전송 실패 시 무시
     finally:
-        # ... (finally 블록은 이전과 동일하게 유지, stt/tts 서비스 중지 및 세션 정리) ...
         if stt_service: await stt_service.stop_stream()
-        if tts_service: await tts_service.stop_tts_stream()
+        if tts_service: await tts_service.stop_tts_stream() # TTS도 확실히 중지
         manager.disconnect(session_id)
         if session_id in SESSION_STATES: del SESSION_STATES[session_id]; print(f"Session state for {session_id} cleared.")
 
-async def handle_text_input_common(session_id: str, user_text: str, input_mode: str) -> Dict:
-    """LLM 호출 및 상태 업데이트 공통 로직. input_mode를 AgentState에 추가 가능성 고려."""
-    if not user_text: return {}
-    previous_state_dict = SESSION_STATES.get(session_id, {})
-    
-    # AgentState에 input_mode를 포함시켜 LangGraph 내부에서 활용 가능하도록 할 수 있습니다.
-    # 예: initial_input_for_graph['input_mode'] = input_mode
-    # 여기서는 로깅 및 TTS 결정에만 사용합니다.
-    print(f"handle_text_input_common called for session {session_id}, mode: {input_mode}, text: '{user_text[:30]}...'")
 
+async def process_input_through_agent(session_id: str, user_text: str, tts_service: Optional[StreamTTSService], input_mode: str):
+    """사용자 입력(텍스트 또는 STT 최종 결과)을 받아 LangGraph 에이전트를 실행하고 응답을 처리하는 함수"""
+    print(f"process_input_through_agent called for session {session_id}, mode: {input_mode}, text: '{user_text[:30]}...'")
+    
+    current_session_state = SESSION_STATES.get(session_id)
+    if not current_session_state:
+        # 이 경우는 발생해서는 안되지만, 방어적으로 처리
+        print(f"Error: Session state for {session_id} not found during agent processing.")
+        await manager.send_json_to_client(session_id, {"type": "error", "message": "세션 정보를 찾을 수 없습니다. 다시 시도해주세요."})
+        return
 
     full_ai_response_text = ""
-    final_agent_state_data = None
     try:
+        # run_agent_streaming 호출
         async for agent_output_chunk in run_agent_streaming(
-            user_input_text=user_text,
+            user_input_text=user_text, # 텍스트 입력 또는 STT 결과
             session_id=session_id,
-            current_state_dict=previous_state_dict
-            # 만약 agent.py의 run_agent_streaming이 input_mode를 필요로 한다면 여기서 전달합니다.
-            # custom_params={"input_mode": input_mode} 
+            current_state_dict=current_session_state # 현재 세션 상태 전달
         ):
-            if isinstance(agent_output_chunk, str):  
+            if isinstance(agent_output_chunk, str):  # LLM 응답 스트리밍 청크
                 await manager.send_json_to_client(session_id, {"type": "llm_response_chunk", "chunk": agent_output_chunk})
                 full_ai_response_text += agent_output_chunk
             elif isinstance(agent_output_chunk, dict):
@@ -178,51 +193,47 @@ async def handle_text_input_common(session_id: str, user_text: str, input_mode: 
                     await manager.send_json_to_client(session_id, agent_output_chunk)
                 elif agent_output_chunk.get("type") == "stream_end":
                     await manager.send_json_to_client(session_id, {"type": "llm_response_end", "full_text": full_ai_response_text})
+                    # TTS는 voice 모드에서만, 그리고 에러가 없을 때
+                    if input_mode == "voice" and tts_service and GOOGLE_SERVICES_AVAILABLE and full_ai_response_text and not current_session_state.get("error_message"):
+                        print(f"[{session_id}] Starting TTS for (mode: {input_mode}): {full_ai_response_text[:50]}...")
+                        await tts_service.start_tts_stream(full_ai_response_text)
+                    elif input_mode != "voice":
+                         print(f"[{session_id}] Text input mode (mode: {input_mode}), TTS skipped.")
+                    elif not full_ai_response_text:
+                         print(f"[{session_id}] No text from LLM, TTS skipped.")
+
+
                 elif agent_output_chunk.get("type") == "final_state":
                     final_agent_state_data = agent_output_chunk.get("data")
                     if final_agent_state_data:
-                        SESSION_STATES[session_id] = final_agent_state_data
-                        full_ai_response_text = final_agent_state_data.get("final_response_text_for_tts", full_ai_response_text)
-                        print(f"Session state for {session_id} updated via final_state. Final AI response: '{full_ai_response_text[:50]}...'")
-        
-        # 최종적으로 LLM 응답이 있었는지 확인 (final_state 이후 full_ai_response_text가 채워졌을 수 있음)
-        if not full_ai_response_text and final_agent_state_data:
-            full_ai_response_text = final_agent_state_data.get("final_response_text_for_tts", "")
+                        # AgentState 전체를 업데이트
+                        SESSION_STATES[session_id] = cast(AgentState, final_agent_state_data)
+                        # final_response_text_for_tts는 AgentState 내부에 이미 설정되어 있을 것
+                        tts_candidate_text = final_agent_state_data.get("final_response_text_for_tts", full_ai_response_text)
+                        if not full_ai_response_text and tts_candidate_text : # 스트리밍 없이 바로 final_state로 온 경우
+                            full_ai_response_text = tts_candidate_text
+                            # 이 경우 LLM 응답을 클라이언트에 한 번에 보내줘야 함
+                            await manager.send_json_to_client(session_id, {"type": "llm_response_chunk", "chunk": full_ai_response_text}) # stream_start 없이 바로 chunk
+                            await manager.send_json_to_client(session_id, {"type": "llm_response_end", "full_text": full_ai_response_text})
 
-        return {"full_ai_response_text": full_ai_response_text, "final_agent_state": final_agent_state_data}
+                            if input_mode == "voice" and tts_service and GOOGLE_SERVICES_AVAILABLE and full_ai_response_text and not final_agent_state_data.get("error_message"):
+                                print(f"[{session_id}] Starting TTS for final_state (mode: {input_mode}): {full_ai_response_text[:50]}...")
+                                await tts_service.start_tts_stream(full_ai_response_text)
 
-    except Exception as e: # ... (오류 처리 로직은 이전과 동일) ...
-        error_msg = f"LLM 또는 Agent 처리 중 오류: {e}"; print(error_msg)
+
+                        print(f"Session state for {session_id} updated via final_state.")
+                elif agent_output_chunk.get("type") == "error": # run_agent_streaming 내부에서 발생한 에러
+                    await manager.send_json_to_client(session_id, agent_output_chunk)
+                    await manager.send_json_to_client(session_id, {"type": "llm_response_end", "full_text": ""}) # 에러 시 빈 텍스트로 종료
+                    # SESSION_STATES의 error_message도 업데이트 필요 (final_state에서 처리됨)
+
+    except Exception as e:
+        error_msg = f"Agent 처리 중 예외 발생: {e}"
+        print(f"[{session_id}] {error_msg}")
         import traceback; traceback.print_exc()
         await manager.send_json_to_client(session_id, {"type": "error", "message": error_msg})
-        await manager.send_json_to_client(session_id, {"type": "llm_response_end", "full_text": ""})
-        return {"full_ai_response_text": "", "error": error_msg}
-
-
-async def handle_text_input(session_id: str, user_text: str, tts_service: StreamTTSService, input_mode: str):
-    """input_mode가 "voice"일 때 TTS를 포함하여 처리합니다."""
-    result = await handle_text_input_common(session_id, user_text, input_mode)
-    full_ai_response_text = result.get("full_ai_response_text")
-
-    if full_ai_response_text and not result.get("error") and input_mode == "voice": # TTS는 voice 모드에서만
-        print(f"[{session_id}] Starting TTS for (mode: {input_mode}): {full_ai_response_text[:50]}...")
-        await tts_service.start_tts_stream(full_ai_response_text)
-    elif result.get("error"):
-        print(f"[{session_id}] Error during text input handling (mode: {input_mode}), TTS skipped.")
-    elif input_mode != "voice":
-        print(f"[{session_id}] Text input mode (mode: {input_mode}), TTS skipped as per logic.")
-    else: # No text or other conditions
-        print(f"[{session_id}] No text to synthesize or other condition met, TTS skipped (mode: {input_mode}).")
-
-
-async def handle_text_input_without_tts(session_id: str, user_text: str, input_mode: str):
-    """input_mode가 "text"이거나 TTS 서비스가 없을 때 호출됩니다."""
-    result = await handle_text_input_common(session_id, user_text, input_mode)
-    full_ai_response_text = result.get("full_ai_response_text")
-
-    if result.get("error"):
-        print(f"[{session_id}] Error during text input handling (mode: {input_mode}, no TTS).")
-    elif not full_ai_response_text:
-        print(f"[{session_id}] No text response from LLM (mode: {input_mode}, no TTS).")
-    else:
-        print(f"[{session_id}] LLM response generated (mode: {input_mode}), TTS explicitly skipped: {full_ai_response_text[:50]}...")
+        await manager.send_json_to_client(session_id, {"type": "llm_response_end", "full_text": ""}) # 에러 시 빈 텍스트로 종료
+        # 세션 상태 업데이트
+        if session_id in SESSION_STATES:
+            SESSION_STATES[session_id]["error_message"] = error_msg
+            SESSION_STATES[session_id]["is_final_turn_response"] = True

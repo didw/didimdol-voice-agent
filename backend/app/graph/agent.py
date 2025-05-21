@@ -8,15 +8,14 @@ from typing import Dict, Optional, Sequence, Literal, Any, List, Union, cast, As
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, AIMessageChunk
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
-from langchain_core.output_parsers import PydanticOutputParser # PydanticOutputParser 직접 사용
+from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field as PydanticField
 
-from .state import AgentState, ScenarioAgentOutput # QAAgentOutput은 스트리밍으로 대체
+from .state import AgentState, ScenarioAgentOutput
 from ..core.config import OPENAI_API_KEY, LLM_MODEL_NAME
-from ..services.google_services import GOOGLE_SERVICES_AVAILABLE # STT/TTS 서비스 사용 가능 여부 확인용
-# STT/TTS 직접 호출은 service 모듈로 완전 위임
+from ..services.google_services import GOOGLE_SERVICES_AVAILABLE
 
-# --- Pydantic 모델 정의 (기존 파일 참고) ---
+# --- Pydantic 모델 정의 ---
 class NextStageDecisionModel(BaseModel):
     chosen_next_stage_id: str = PydanticField(description="LLM이 결정한 다음 시나리오 단계 ID")
 next_stage_decision_parser = PydanticOutputParser(pydantic_object=NextStageDecisionModel)
@@ -28,13 +27,50 @@ class ScenarioOutputModel(BaseModel):
     user_sentiment: Optional[Literal['positive', 'negative', 'neutral']] = PydanticField(default='neutral', description="사용자 발화의 감정 (옵션)")
 scenario_output_parser = PydanticOutputParser(pydantic_object=ScenarioOutputModel)
 
+class InitialTaskDecisionModel(BaseModel):
+    action: Literal[
+        "proceed_with_loan_type_didimdol",
+        "proceed_with_loan_type_jeonse",
+        "invoke_qa_agent_general",
+        "answer_directly_chit_chat",
+        "clarify_loan_type"
+    ] = PydanticField(description="결정된 Action")
+    direct_response: Optional[str] = PydanticField(default=None, description="AI의 직접 응답 텍스트 (필요시)")
+initial_task_decision_parser = PydanticOutputParser(pydantic_object=InitialTaskDecisionModel)
 
-# --- 경로 및 설정 (기존 파일 참고) ---
-APP_DIR = Path(__file__).resolve().parent.parent # 경로 수정
+class MainRouterDecisionModel(BaseModel):
+    action: Literal[
+        "select_loan_type",
+        "set_loan_type_didimdol",
+        "set_loan_type_jeonse",
+        "invoke_scenario_agent",
+        "invoke_qa_agent",
+        "answer_directly_chit_chat",
+        "process_next_scenario_step",
+        "end_conversation",
+        "unclear_input"
+    ] = PydanticField(description="결정된 Action")
+    extracted_value: Optional[str] = PydanticField(default=None, description="단순 응답 값 (process_next_scenario_step용)")
+    direct_response: Optional[str] = PydanticField(default=None, description="직접 응답 텍스트")
+main_router_decision_parser = PydanticOutputParser(pydantic_object=MainRouterDecisionModel)
+
+
+# --- 경로 및 설정 ---
+APP_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = APP_DIR / "data"
 CONFIG_DIR = APP_DIR / "config"
-SCENARIO_FILE_PATH = DATA_DIR / "loan_scenario.json"
-QA_KNOWLEDGE_BASE_PATH = DATA_DIR / "didimdol.md"
+
+# 시나리오 및 지식베이스 파일 정의
+SCENARIO_FILES: Dict[Literal["didimdol", "jeonse"], Path] = {
+    "didimdol": DATA_DIR / "didimdol_loan_scenario.json",
+    "jeonse": DATA_DIR / "jeonse_loan_scenario.json",
+}
+KNOWLEDGE_BASE_FILES: Dict[Literal["didimdol", "jeonse"], Path] = {
+    "didimdol": DATA_DIR / "didimdol.md",
+    "jeonse": DATA_DIR / "jeonse.md",
+}
+# 일반 QA를 위한 기본 지식베이스 (선택 사항, 없으면 특정 상품 KB 우선 또는 에러)
+# GENERAL_KNOWLEDGE_BASE_PATH = DATA_DIR / "general_faq.md" 
 
 PROMPT_FILES = {
     'main_agent': CONFIG_DIR / "main_agent_prompts.yaml",
@@ -42,12 +78,9 @@ PROMPT_FILES = {
     'qa_agent': CONFIG_DIR / "qa_agent_prompts.yaml",
 }
 
-# --- LLM 초기화 (기존 파일 참고) ---
+# --- LLM 초기화 ---
 if not OPENAI_API_KEY:
     print("CRITICAL: OPENAI_API_KEY가 설정되지 않았습니다. .env 파일을 확인하세요.")
-    # 애플리케이션 실행 중단 또는 기본 동작을 정의할 수 있으나, 여기서는 경고만 출력
-    # raise ValueError("OPENAI_API_KEY is not set.")
-
 main_llm = ChatOpenAI(
     model=LLM_MODEL_NAME, openai_api_key=OPENAI_API_KEY, temperature=0.1,
     model_kwargs={"response_format": {"type": "json_object"}}
@@ -58,15 +91,13 @@ streaming_llm = ChatOpenAI(
 ) if OPENAI_API_KEY else None
 
 
-# --- 프롬프트 및 시나리오 로드 함수 (기존과 동일) ---
+# --- 프롬프트 및 데이터 로드 함수 ---
 ALL_PROMPTS: Dict[str, Dict[str, str]] = {}
-LOAN_SCENARIO_DATA: Dict = {}
-QA_KNOWLEDGE_BASE_CONTENT: Optional[str] = None
+ALL_SCENARIOS_DATA: Dict[Literal["didimdol", "jeonse"], Dict] = {}
+ALL_KNOWLEDGE_BASES: Dict[Literal["didimdol", "jeonse"], Optional[str]] = {"didimdol": None, "jeonse": None}
+# GENERAL_KNOWLEDGE_BASE_CONTENT: Optional[str] = None
 
-def load_all_prompts_sync() -> Dict[str, Dict[str, str]]:
-    # (기존 load_all_prompts 로직)
-    # 제공된 코드의 load_all_prompts() 함수 내용 사용
-    # ... (생략, 기존 파일 내용 복사)
+def load_all_prompts_sync() -> None:
     global ALL_PROMPTS
     loaded_prompts = {}
     try:
@@ -74,684 +105,866 @@ def load_all_prompts_sync() -> Dict[str, Dict[str, str]]:
             with open(file_path, 'r', encoding='utf-8') as f:
                 prompts_for_agent = yaml.safe_load(f)
             if not prompts_for_agent:
-                raise ValueError(f"{agent_name} 프롬프트 파일이 비어있거나 로드에 실패했습니다: {file_path}")
+                raise ValueError(f"{agent_name} 프롬프트 파일이 비어있거나 로드에 실패했습니다: {file_path}") #
             loaded_prompts[agent_name] = prompts_for_agent
         ALL_PROMPTS = loaded_prompts
-        print("--- 모든 에이전트 프롬프트 로드 완료 ---")
-        return loaded_prompts
-    except FileNotFoundError as e:
-        raise FileNotFoundError(f"프롬프트 파일을 찾을 수 없습니다: {e.filename}")
-    except yaml.YAMLError as e:
-        raise ValueError(f"프롬프트 파일의 YAML 형식이 올바르지 않습니다: {e}")
+        print("--- 모든 에이전트 프롬프트 로드 완료 ---") #
     except Exception as e:
-        raise Exception(f"프롬프트 파일 로드 중 오류 발생: {e}")
+        print(f"프롬프트 파일 로드 중 치명적 오류 발생: {e}")
+        raise
 
-
-def load_loan_scenario_sync() -> Dict:
-    # (기존 load_loan_scenario 로직)
-    # 제공된 코드의 load_loan_scenario() 함수 내용 사용
-    # ... (생략, 기존 파일 내용 복사)
-    global LOAN_SCENARIO_DATA
+def load_all_scenarios_sync() -> None:
+    global ALL_SCENARIOS_DATA
+    loaded_scenarios = {}
     try:
-        with open(SCENARIO_FILE_PATH, 'r', encoding='utf-8') as f:
-            scenario = json.load(f)
-        if not scenario: raise ValueError("시나리오 파일이 비어있습니다.")
-        LOAN_SCENARIO_DATA = scenario
-        print("--- 대출 시나리오 데이터 로드 완료 ---")
-        return scenario
-    except FileNotFoundError: raise FileNotFoundError(f"시나리오 파일을 찾을 수 없습니다: {SCENARIO_FILE_PATH}")
-    except json.JSONDecodeError: raise ValueError(f"시나리오 파일의 JSON 형식이 올바르지 않습니다: {SCENARIO_FILE_PATH}")
-    except Exception as e: raise Exception(f"시나리오 파일 로드 중 오류 발생: {e}")
+        for loan_type, file_path in SCENARIO_FILES.items():
+            with open(file_path, 'r', encoding='utf-8') as f:
+                scenario = json.load(f)
+            if not scenario: raise ValueError(f"{loan_type} 시나리오 파일이 비어있습니다: {file_path}") #
+            loaded_scenarios[loan_type] = scenario
+        ALL_SCENARIOS_DATA = cast(Dict[Literal["didimdol", "jeonse"], Dict], loaded_scenarios)
+        print("--- 모든 대출 시나리오 데이터 로드 완료 ---") #
+    except Exception as e:
+        print(f"시나리오 파일 로드 중 치명적 오류 발생: {e}")
+        raise
 
-async def load_knowledge_base_content_async() -> Optional[str]:
-    # (기존 load_knowledge_base_content_async 로직)
-    # 제공된 코드의 load_knowledge_base_content_async() 함수 내용 사용
-    # ... (생략, 기존 파일 내용 복사)
-    global QA_KNOWLEDGE_BASE_CONTENT
-    if QA_KNOWLEDGE_BASE_CONTENT is None:
-        print("--- QA Agent: 지식베이스 (didimdol.md) 로딩 중... ---")
+async def load_knowledge_base_content_async(loan_type: Literal["didimdol", "jeonse"]) -> Optional[str]:
+    global ALL_KNOWLEDGE_BASES
+    if ALL_KNOWLEDGE_BASES.get(loan_type) is None or "ERROR" in str(ALL_KNOWLEDGE_BASES.get(loan_type)):
+        file_path = KNOWLEDGE_BASE_FILES[loan_type]
+        print(f"--- QA Agent: '{loan_type}' 지식베이스 ({file_path.name}) 로딩 중... ---") #
         try:
-            if not QA_KNOWLEDGE_BASE_PATH.exists():
-                print(f"경고: 지식베이스 파일을 찾을 수 없습니다: {QA_KNOWLEDGE_BASE_PATH}"); QA_KNOWLEDGE_BASE_CONTENT = "ERROR_FILE_NOT_FOUND"; return None
-            with open(QA_KNOWLEDGE_BASE_PATH, 'r', encoding='utf-8') as f: content = f.read()
+            if not file_path.exists():
+                print(f"경고: '{loan_type}' 지식베이스 파일을 찾을 수 없습니다: {file_path}") #
+                ALL_KNOWLEDGE_BASES[loan_type] = "ERROR_FILE_NOT_FOUND" #
+                return None
+            with open(file_path, 'r', encoding='utf-8') as f: content = f.read()
             if not content.strip():
-                print(f"경고: 지식베이스 파일이 비어있습니다: {QA_KNOWLEDGE_BASE_PATH}"); QA_KNOWLEDGE_BASE_CONTENT = "EMPTY_CONTENT"; return None
-            QA_KNOWLEDGE_BASE_CONTENT = content
-            print(f"--- QA Agent: 지식베이스 (didimdol.md) 로딩 완료 ({len(content)} 자) ---")
-        except Exception as e: print(f"QA 지식베이스 로딩 실패: {e}"); QA_KNOWLEDGE_BASE_CONTENT = "ERROR_LOADING_FAILED"; return None
-    if QA_KNOWLEDGE_BASE_CONTENT in ["ERROR_FILE_NOT_FOUND", "EMPTY_CONTENT", "ERROR_LOADING_FAILED"]: return None
-    return QA_KNOWLEDGE_BASE_CONTENT
+                print(f"경고: '{loan_type}' 지식베이스 파일이 비어있습니다: {file_path}") #
+                ALL_KNOWLEDGE_BASES[loan_type] = "EMPTY_CONTENT" #
+                return None
+            ALL_KNOWLEDGE_BASES[loan_type] = content
+            print(f"--- QA Agent: '{loan_type}' 지식베이스 로딩 완료 ({len(content)} 자) ---") #
+        except Exception as e:
+            print(f"'{loan_type}' QA 지식베이스 로딩 실패: {e}") #
+            ALL_KNOWLEDGE_BASES[loan_type] = "ERROR_LOADING_FAILED" #
+            return None
+    
+    if str(ALL_KNOWLEDGE_BASES.get(loan_type)).startswith("ERROR_"):
+        return None
+    return ALL_KNOWLEDGE_BASES[loan_type]
 
+# async def load_general_knowledge_base_async(): # 필요한 경우 일반 QA용
+#     global GENERAL_KNOWLEDGE_BASE_CONTENT
+#     # ... 로직 ...
 
 # 애플리케이션 시작 시 동기적으로 로드
 load_all_prompts_sync()
-load_loan_scenario_sync()
-# QA 지식베이스는 첫 호출 시 비동기적으로 로드되도록 유지 (load_knowledge_base_content_async)
+load_all_scenarios_sync()
+
+
+def get_active_scenario_data(state: AgentState) -> Optional[Dict]:
+    loan_type = state.get("current_loan_type")
+    if loan_type:
+        return ALL_SCENARIOS_DATA.get(loan_type)
+    return None
+
+async def get_active_knowledge_base(state: AgentState) -> Optional[str]:
+    loan_type = state.get("current_loan_type")
+    if loan_type:
+        return await load_knowledge_base_content_async(loan_type)
+    # else:
+    #     # 일반 QA 시나리오에서는 특정 KB를 로드하지 않음 (invoke_qa_agent_streaming_logic에서 처리)
+    #     print("일반 QA 요청: 특정 상품 지식베이스를 로드하지 않습니다.")
+    return None
 
 
 def format_messages_for_prompt(messages: Sequence[BaseMessage], max_history: int = 3) -> str:
-    # (기존 함수와 동일)
     history_str = []
-    # 시스템 메시지를 제외하고 최근 max_history 개의 메시지만 사용 (Human, AI 순서 유지)
-    # 현재 사용자 입력은 제외하고 이전 턴까지만 포함하도록 수정 필요 (main_agent_router_node에서 호출 시 주의)
-    relevant_messages = [m for m in messages if isinstance(m, (HumanMessage, AIMessage))][-(max_history * 2):] # 대화턴 기준
-    
+    relevant_messages = [m for m in messages if isinstance(m, (HumanMessage, AIMessage))][-(max_history * 2):] #
     for msg in relevant_messages:
-        role = "사용자" if isinstance(msg, HumanMessage) else "상담원"
+        role = "사용자" if isinstance(msg, HumanMessage) else "상담원" #
         history_str.append(f"{role}: {msg.content}")
-    return "\n".join(history_str) if history_str else "이전 대화 없음."
+    return "\n".join(history_str) if history_str else "이전 대화 없음." #
 
 def format_transitions_for_prompt(transitions: List[Dict[str, Any]], current_stage_prompt: str) -> str:
     if not transitions:
-        return "현재 단계에서 다음으로 넘어갈 수 있는 조건(Transition)이 정의되지 않았습니다."
-    
-    formatted_list = [f"현재 단계의 사용자 안내/질문: \"{current_stage_prompt}\""]
+        return "현재 단계에서 다음으로 넘어갈 수 있는 조건(Transition)이 정의되지 않았습니다." #
+    formatted_list = [f"현재 단계의 사용자 안내/질문: \"{current_stage_prompt}\""] #
     for i, transition in enumerate(transitions):
-        condition_desc = transition.get("condition_description", "조건 설명 없음")
-        example_phrases_str = ", ".join(f"'{p}'" for p in transition.get("example_phrases", []))
+        condition_desc = transition.get("condition_description", "조건 설명 없음") #
+        example_phrases_str = ", ".join(f"'{p}'" for p in transition.get("example_phrases", [])) #
         if example_phrases_str:
-            condition_desc += f" (예시: {example_phrases_str})"
-        
-        formatted_list.append(f"{i+1}. 다음 단계 ID: '{transition['next_stage_id']}', 조건: {condition_desc}")
+            condition_desc += f" (예시: {example_phrases_str})" #
+        formatted_list.append(f"{i+1}. 다음 단계 ID: '{transition['next_stage_id']}', 조건: {condition_desc}") #
     
     return "\n".join(formatted_list)
 
-# --- Specialist Agent 로직 (기존 파일 참고, 에러 처리 강화) ---
-async def invoke_scenario_agent_logic(user_input: str, current_stage_prompt: str, expected_info_key: Optional[str], messages_history: Sequence[BaseMessage], scenario_name: str) -> ScenarioAgentOutput:
-    # ... (제공된 invoke_scenario_agent_logic 함수 내용, main_llm null 체크 추가)
-    if not main_llm:
-        return cast(ScenarioAgentOutput, {"intent": "error_llm_not_initialized", "entities": {}, "is_scenario_related": False})
-    # (이하 기존 코드)
-    print(f"--- Scenario Agent 호출 (입력: '{user_input}') ---")
-    prompt_template = ALL_PROMPTS.get('scenario_agent', {}).get('nlu_extraction', '')
-    if not prompt_template:
-        return cast(ScenarioAgentOutput, {"intent": "error_prompt_not_found", "entities": {}, "is_scenario_related": False, "user_sentiment": "neutral"})
 
-    formatted_history = format_messages_for_prompt(messages_history) # 이전 대화만 전달
+async def invoke_scenario_agent_logic(
+    user_input: str, current_stage_prompt: str, expected_info_key: Optional[str],
+    messages_history: Sequence[BaseMessage], scenario_name: str
+) -> ScenarioAgentOutput:
+    if not main_llm:
+        return cast(ScenarioAgentOutput, {"intent": "error_llm_not_initialized", "entities": {}, "is_scenario_related": False}) #
+    
+    print(f"--- Scenario Agent 호출 (시나리오: '{scenario_name}', 입력: '{user_input[:50]}...') ---")
+    prompt_template = ALL_PROMPTS.get('scenario_agent', {}).get('nlu_extraction', '') #
+    if not prompt_template:
+        return cast(ScenarioAgentOutput, {"intent": "error_prompt_not_found", "entities": {}, "is_scenario_related": False}) #
+
+    formatted_history = format_messages_for_prompt(messages_history) #
     try:
-        format_instructions = scenario_output_parser.get_format_instructions()
+        format_instructions = scenario_output_parser.get_format_instructions() #
         formatted_prompt = prompt_template.format(
             scenario_name=scenario_name, current_stage_prompt=current_stage_prompt,
             expected_info_key=expected_info_key or "특정 정보 없음",
             formatted_messages_history=formatted_history, user_input=user_input,
             format_instructions=format_instructions
         )
-        # print(f"Scenario Agent 프롬프트:\n{formatted_prompt}") # 디버깅용
-        response = await main_llm.ainvoke([HumanMessage(content=formatted_prompt)])
-        raw_content = response.content.strip()
-        # print(f"Scenario Agent 원본 LLM 응답:\n{raw_content}") # 디버깅용
-        if raw_content.startswith("```json"): raw_content = raw_content.replace("```json", "").replace("```", "").strip()
+        response = await main_llm.ainvoke([HumanMessage(content=formatted_prompt)]) #
+        raw_content = response.content.strip() #
+        if raw_content.startswith("```json"): raw_content = raw_content.replace("```json", "").replace("```", "").strip() #
         
-        parsed_output_dict = scenario_output_parser.parse(raw_content).model_dump()
-        print(f"Scenario Agent 결과: {parsed_output_dict}")
+        parsed_output_dict = scenario_output_parser.parse(raw_content).model_dump() #
+        print(f"Scenario Agent 결과: {parsed_output_dict}") #
         return cast(ScenarioAgentOutput, parsed_output_dict)
     except Exception as e:
-        print(f"Scenario Agent 처리 오류: {e}. LLM 응답: {getattr(e, 'llm_output', getattr(response if 'response' in locals() else None, 'content', 'N/A'))}")
-        # import traceback; traceback.print_exc() # 상세 디버깅
-        return cast(ScenarioAgentOutput, {"intent": "error_parsing_scenario_output", "entities": {}, "is_scenario_related": False, "user_sentiment": "neutral"})
+        print(f"Scenario Agent 처리 오류: {e}. LLM 응답: {getattr(e, 'llm_output', getattr(response if 'response' in locals() else None, 'content', 'N/A'))}") #
+        return cast(ScenarioAgentOutput, {"intent": "error_parsing_scenario_output", "entities": {}, "is_scenario_related": False}) #
 
 
-async def invoke_qa_agent_streaming_logic(user_question: str, scenario_name: str) -> AsyncGenerator[str, None]:
-    # ... (제공된 invoke_qa_agent_streaming_logic 함수 내용, streaming_llm null 체크 추가)
+async def invoke_qa_agent_streaming_logic(user_question: str, scenario_name: str, knowledge_base_text: Optional[str]) -> AsyncGenerator[str, None]:
     if not streaming_llm:
-        yield "죄송합니다, 답변 생성 서비스가 현재 사용할 수 없습니다. (LLM 초기화 오류)"
+        yield "죄송합니다, 답변 생성 서비스가 현재 사용할 수 없습니다. (LLM 초기화 오류)" #
         return
-    # (이하 기존 코드)
-    print(f"--- QA Agent 스트리밍 호출 (질문: '{user_question}') ---")
-    try:
-        knowledge_base_text = await load_knowledge_base_content_async()
-        if knowledge_base_text is None or "ERROR" in QA_KNOWLEDGE_BASE_CONTENT : # type: ignore
-            error_map = {
-                "ERROR_FILE_NOT_FOUND": f"죄송합니다. 상담에 필요한 정보 파일({QA_KNOWLEDGE_BASE_PATH.name})을 찾을 수 없습니다.",
-                "EMPTY_CONTENT": f"죄송합니다. 상담에 필요한 정보 파일({QA_KNOWLEDGE_BASE_PATH.name})의 내용이 비어있습니다.",
-                "ERROR_LOADING_FAILED": "죄송합니다. 현재 대출 관련 정보를 조회할 수 없습니다 (지식베이스 문제)."
-            }
-            yield error_map.get(QA_KNOWLEDGE_BASE_CONTENT, "지식베이스 접근 중 알 수 없는 오류 발생.") # type: ignore
-            return
-
-        prompt_template = ALL_PROMPTS.get('qa_agent', {}).get('rag_answer_generation', '')
-        if not prompt_template:
-            yield "죄송합니다, 답변 생성에 필요한 설정(프롬프트)을 찾을 수 없습니다."
-            return
-
-        formatted_prompt = prompt_template.format(
-            scenario_name=scenario_name, context_for_llm=knowledge_base_text, user_question=user_question
-        )
-        # print(f"\n=== QA Agent 스트리밍 프롬프트 (일부 컨텍스트) ===\n{formatted_prompt[:500]}...\n=============================\n") # 디버깅용
-        
-        async for chunk in streaming_llm.astream([HumanMessage(content=formatted_prompt)]):
-            if isinstance(chunk, AIMessageChunk) and chunk.content:
-                yield str(chunk.content)
-            elif isinstance(chunk, str) and chunk: # 이전 버전 호환
-                yield chunk
-    except Exception as e:
-        print(f"QA Agent 스트리밍 처리 오류: {e}")
-        yield f"질문 답변 중 시스템 오류가 발생했습니다: {e}"
-
-
-# --- LangGraph 노드 함수 정의 (기존 파일 참고, TTS 로직 제거 및 에러 처리 강화) ---
-async def entry_point_node(state: AgentState) -> AgentState:
-    print("--- 노드: Entry Point ---")
-    # loan_scenario_data는 전역에서 로드된 LOAN_SCENARIO_DATA 사용
-    if not LOAN_SCENARIO_DATA:
-        # 이 경우는 애플리케이션 시작 시 로드 실패. 심각한 오류로 처리.
-        error_msg = "상담 서비스 초기화 실패 (시나리오 데이터 로드 불가)."
-        print(f"CRITICAL: 시나리오 데이터가 로드되지 않았습니다 (entry_point_node).")
-        return {**state, "error_message": error_msg, "final_response_text_for_tts": error_msg, "is_final_turn_response": True}
-    state["loan_scenario_data"] = LOAN_SCENARIO_DATA
-
-    # 턴 시작 시 초기화할 필드들
-    turn_specific_defaults: Dict[str, Any] = {
-        "stt_result": None, "main_agent_routing_decision": None, "main_agent_direct_response": None,
-        "scenario_agent_output": None, # qa_agent_output은 스트리밍으로 처리되므로 상태에 직접 저장하지 않음
-        "final_response_text_for_tts": None, "is_final_turn_response": False, "error_message": None,
-    }
-    # messages는 이전 상태에서 가져오되, 없으면 시스템 프롬프트로 초기화
-    initial_messages: List[BaseMessage] = list(state.get("messages", []))
-    if not initial_messages and LOAN_SCENARIO_DATA.get("system_prompt"):
-        initial_messages.append(SystemMessage(content=LOAN_SCENARIO_DATA["system_prompt"]))
     
-    updated_state = {**state, **turn_specific_defaults, "messages": initial_messages}
+    print(f"--- QA Agent 스트리밍 호출 (컨텍스트: '{scenario_name}', 질문: '{user_question[:50]}...') ---")
+    if knowledge_base_text is None:
+        # IMPROVEMENT: Handle general QA when no specific KB is loaded
+        if scenario_name == "일반 금융 상담":
+            # For general queries where no specific KB is expected,
+            # we can directly use the LLM for a general answer or provide a specific message.
+            # Here, we'll try to answer generally using the LLM without specific context.
+            # Alternatively, provide a canned response.
+            general_qa_prompt_template = ALL_PROMPTS.get('qa_agent', {}).get('rag_answer_generation', '') # Re-use or use a new one
+            if not general_qa_prompt_template:
+                yield "죄송합니다, 답변 생성에 필요한 설정(프롬프트)을 찾을 수 없습니다."
+                return
+            
+            # Format prompt for general QA (no specific context)
+            # The RAG prompt expects a context; for general QA, we might pass an empty string
+            # or modify the prompt to handle cases with no context better.
+            # For now, we'll pass a message indicating no specific context.
+            general_context_info = "특정 상품 문서가 제공되지 않았습니다. 일반적인 금융 상식 또는 사용자의 질문 자체에만 기반하여 답변해주세요."
+            formatted_prompt = general_qa_prompt_template.format(
+                scenario_name=scenario_name, 
+                context_for_llm=general_context_info, # Or an empty string
+                user_question=user_question
+            )
+            try:
+                print(f"QA Agent (일반): 프롬프트 전송 (특정 문서 없음)")
+                async for chunk in streaming_llm.astream([HumanMessage(content=formatted_prompt)]):
+                    if isinstance(chunk, AIMessageChunk) and chunk.content:
+                        yield str(chunk.content)
+            except Exception as e:
+                print(f"일반 QA Agent 스트리밍 처리 오류: {e}")
+                yield f"질문 답변 중 시스템 오류가 발생했습니다: {str(e)}"
+            return # End execution for general QA here.
 
-    if updated_state.get("user_input_audio_b64"):
-        if not GOOGLE_SERVICES_AVAILABLE:
-            print("STT 서비스 사용 불가. 텍스트 입력으로 처리합니다.")
-            updated_state["user_input_text"] = "(음성 입력 시도 - STT 서비스 비활성)" # 또는 빈 문자열
-            updated_state["user_input_audio_b64"] = None # 오디오 처리 안 함
-            # 바로 main_agent_router_node로 가도록
+        # Original logic for when a specific KB was expected but not found
+        error_message = f"죄송합니다. '{scenario_name}' 관련 정보를 현재 조회할 수 없습니다 (지식베이스 문제)."
+        if scenario_name == "미정": # Should have been caught by general QA logic above ideally
+            error_message = "죄송합니다. 현재 대출 관련 일반 정보를 조회할 수 없습니다 (지식베이스 문제)."
+        yield error_message
+        return
+
+    prompt_template = ALL_PROMPTS.get('qa_agent', {}).get('rag_answer_generation', '') #
+    if not prompt_template:
+        yield "죄송합니다, 답변 생성에 필요한 설정(프롬프트)을 찾을 수 없습니다." #
+        return
+
+    formatted_prompt = prompt_template.format(
+        scenario_name=scenario_name, context_for_llm=knowledge_base_text, user_question=user_question
+    ) #
+    try:
+        async for chunk in streaming_llm.astream([HumanMessage(content=formatted_prompt)]): #
+            if isinstance(chunk, AIMessageChunk) and chunk.content: #
+                yield str(chunk.content)
+    except Exception as e:
+        print(f"QA Agent 스트리밍 처리 오류: {e}") #
+        yield f"질문 답변 중 시스템 오류가 발생했습니다: {str(e)}" #
+
+
+# --- LangGraph 노드 함수 정의 ---
+async def entry_point_node(state: AgentState) -> AgentState:
+    print("--- 노드: Entry Point ---") #
+    if not ALL_SCENARIOS_DATA or not ALL_PROMPTS:
+        error_msg = "상담 서비스 초기화 실패 (시나리오 또는 프롬프트 데이터 로드 불가)." #
+        print(f"CRITICAL: 필수 데이터가 로드되지 않았습니다.")
+        return {**state, "error_message": error_msg, "final_response_text_for_tts": error_msg, "is_final_turn_response": True} #
+
+    turn_specific_defaults: Dict[str, Any] = {
+        "stt_result": None, "main_agent_routing_decision": None, "main_agent_direct_response": None, #
+        "scenario_agent_output": None, "final_response_text_for_tts": None, #
+        "is_final_turn_response": False, "error_message": None, #
+        "active_scenario_data": None, "active_knowledge_base_content": None, "active_scenario_name": None, #
+        "available_loan_types": ["didimdol", "jeonse"] #
+    }
+    
+    current_loan_type = state.get("current_loan_type") #
+    updated_state = {**state, **turn_specific_defaults} #
+    updated_state["current_loan_type"] = current_loan_type #
+
+    if current_loan_type:
+        active_scenario = ALL_SCENARIOS_DATA.get(current_loan_type) #
+        if active_scenario:
+            updated_state["active_scenario_data"] = active_scenario #
+            updated_state["active_scenario_name"] = active_scenario.get("scenario_name", "알 수 없는 상품") #
+            if not updated_state.get("current_scenario_stage_id"): #
+                 updated_state["current_scenario_stage_id"] = active_scenario.get("initial_stage_id") #
         else:
-            print("입력 유형: 음성 -> STT는 chat.py에서 이미 처리됨. stt_result 사용.")
-            # chat.py에서 STT 최종 결과를 user_input_text로 전달해 줄 것으로 가정.
-            # 또는, run_agent_streaming 호출 시 stt_result가 채워져 들어옴.
-            # 여기서는 stt_result가 있으면 HumanMessage 추가 로직만 수행
-            pass # STT 결과는 이미 state['stt_result']에 있을 것으로 가정
+            updated_state["error_message"] = f"선택하신 '{current_loan_type}' 상품 정보를 불러올 수 없습니다." #
+            updated_state["current_loan_type"] = None #
+    else:
+        updated_state["active_scenario_name"] = "미정" #
 
-    # user_input_text가 있으면 messages에 추가 (stt_result 또는 직접 텍스트 입력)
-    user_text_for_turn = updated_state.get("stt_result") or updated_state.get("user_input_text")
+    initial_messages: List[BaseMessage] = list(state.get("messages", [])) #
+    updated_state["messages"] = initial_messages #
+
+    user_text_for_turn = updated_state.get("stt_result") or updated_state.get("user_input_text") #
     
     if user_text_for_turn:
-        current_messages = list(updated_state.get("messages", []))
-        # 중복 메시지 추가 방지
-        if not current_messages or not (isinstance(current_messages[-1], HumanMessage) and current_messages[-1].content == user_text_for_turn):
-            current_messages.append(HumanMessage(content=user_text_for_turn))
-        updated_state["messages"] = current_messages
-        updated_state["stt_result"] = user_text_for_turn # 일관성을 위해 stt_result에도 최종 텍스트 입력
-    elif not updated_state.get("user_input_audio_b64"): # 텍스트도, 오디오도 없는 경우
-        err_msg = "사용자 입력이 없습니다."
-        updated_state.update({"error_message": err_msg, "final_response_text_for_tts": err_msg, "is_final_turn_response": True})
-
+        current_messages = list(updated_state.get("messages", [])) #
+        if not current_messages or not (isinstance(current_messages[-1], HumanMessage) and current_messages[-1].content == user_text_for_turn): #
+            current_messages.append(HumanMessage(content=user_text_for_turn)) #
+        updated_state["messages"] = current_messages #
+        updated_state["stt_result"] = user_text_for_turn #
+    elif not updated_state.get("user_input_audio_b64"): #
+        if not initial_messages: #
+             pass
     return cast(AgentState, updated_state)
 
+
 async def main_agent_router_node(state: AgentState) -> AgentState:
-    print("--- 노드: Main Agent Router ---")
-    # (기존 main_agent_router_node 로직, main_llm null 체크 및 프롬프트 로드 확인 추가)
+    print("--- 노드: Main Agent Router ---") #
     if not main_llm:
-        return {**state, "error_message": "라우터 서비스 사용 불가 (LLM 미초기화)", "final_response_text_for_tts": "시스템 설정 오류입니다.", "main_agent_routing_decision": "unclear_input", "is_final_turn_response": True}
+        return {**state, "error_message": "라우터 서비스 사용 불가 (LLM 미초기화)", "final_response_text_for_tts": "시스템 설정 오류입니다.", "main_agent_routing_decision": "unclear_input", "is_final_turn_response": True} #
 
-    user_input = state.get("stt_result", "") # stt_result에 최종 사용자 발화가 있다고 가정
-    messages_history = state.get("messages", [])
+    user_input = state.get("stt_result", "") #
+    messages_history = state.get("messages", []) #
+    current_loan_type = state.get("current_loan_type") #
+    active_scenario_data = get_active_scenario_data(state) #
     
-    if not user_input and user_input != "": # 입력이 None이거나 빈 문자열인 경우
-        # entry_point_node에서 이 경우 is_final_turn_response=True로 설정되어 여기까지 오지 않아야 함.
-        # 만약을 위한 방어 코드
-        print("Main Agent Router: 사용자 입력 없음. 폴백 처리.")
-        return {**state, "error_message": "입력 내용이 없어 처리할 수 없습니다.", "final_response_text_for_tts": "다시 말씀해주시겠어요?", "main_agent_routing_decision": "unclear_input", "is_final_turn_response": True}
+    prompt_template_key = ""
+    if not current_loan_type: # 대출 유형 미선택 (초기 또는 사용자가 명확히 안했을 때)
+        # 사용자 입력이 없어도 (예: 초기 접속 시) initial_task_selection_prompt를 타도록 유도
+        # 단, chat.py에서 초기 메시지를 보내고, 사용자 첫 입력부터 이 그래프가 처리하는 것이 더 자연스러움.
+        # 현재 로직은 user_input이 있어야 이 노드에 의미있게 도달함.
+        if not user_input and not state.get("messages"): # 첫 턴이고 입력 없음
+             # 이 경우는 entry_point에서 처리되어 main_agent_router_node로 오지 않거나,
+             # chat.py에서 초기 메시지를 보낸 후 사용자의 첫 발화를 기다리는 상태여야 함.
+             # 만약 chat.py에서 초기 메시지를 보내지 않고 바로 여기로 온다면, 사용자에게 선택을 유도하는 응답 필요.
+             print("Main Agent Router: 초기 상태, 사용자 입력 대기 중 (또는 chat.py에서 초기 안내 필요)")
+             # 다음 턴에 사용자가 입력하면 initial_task_selection_prompt를 타도록 설정.
+             # 여기서는 직접적인 응답 생성보다는, 다음 턴을 위한 상태 준비에 집중.
+             # 또는, "select_loan_type" 액션과 함께 안내 메시지를 direct_response에 설정.
+             return {**state, "main_agent_routing_decision": "select_loan_type", "main_agent_direct_response": "안녕하세요! 어떤 대출 상품에 대해 궁금하신가요? (디딤돌 대출, 전세자금 대출 등)"}
 
-    # messages_history에는 현재 사용자 입력이 이미 포함되어 있음. 라우터 프롬프트에는 이전 대화만 전달.
-    # HumanMessage가 마지막에 두 번 들어가지 않도록 주의.
-    # format_messages_for_prompt는 마지막 HumanMessage를 제외하고 전달해야 함.
-    
-    # messages_history가 비어있거나, 마지막이 HumanMessage가 아니면 비정상.
-    if not messages_history or not isinstance(messages_history[-1], HumanMessage):
-        print(f"경고: Main Agent Router - messages_history의 마지막이 HumanMessage가 아님: {messages_history[-1] if messages_history else '비어있음'}")
-        # 비상시 현재 입력을 HumanMessage로 간주
-        history_for_prompt = list(messages_history)
-    else:
-        history_for_prompt = list(messages_history[:-1]) # 마지막 사용자 입력 제외
+        prompt_template_key = 'initial_task_selection_prompt' #
+        print(f"Main Agent Router: 대출 유형 미선택, 사용자 입력 ('{user_input[:30]}...')으로 초기 작업 선택.") #
+    else: # 대출 유형 선택된 상태
+        prompt_template_key = 'router_prompt' #
+        print(f"Main Agent Router: 현재 대출 유형 '{current_loan_type}', 라우터 프롬프트 사용.") #
 
-    current_stage_id = state.get("current_scenario_stage_id", LOAN_SCENARIO_DATA.get("initial_stage_id", "greeting"))
-    current_stage_info = LOAN_SCENARIO_DATA.get("stages", {}).get(current_stage_id, {})
-    prompt_template = ALL_PROMPTS.get('main_agent', {}).get('router_prompt', '')
-
+    prompt_template = ALL_PROMPTS.get('main_agent', {}).get(prompt_template_key, '') #
     if not prompt_template:
-         return {**state, "error_message": "라우터 프롬프트 로드 실패", "final_response_text_for_tts": "시스템 설정 오류로 요청을 이해할 수 없습니다.", "main_agent_routing_decision": "unclear_input", "is_final_turn_response": True}
+         return {**state, "error_message": "라우터 프롬프트 로드 실패", "main_agent_routing_decision": "unclear_input", "is_final_turn_response": True} #
 
-    formatted_history_str = format_messages_for_prompt(history_for_prompt) 
+    history_for_prompt = list(messages_history[:-1]) if messages_history and isinstance(messages_history[-1], HumanMessage) else list(messages_history) #
+    formatted_history_str = format_messages_for_prompt(history_for_prompt) #
     
-    try:
-        main_agent_prompt_filled = prompt_template.format(
-            user_input=user_input, formatted_messages_history=formatted_history_str,
-            current_scenario_stage_id=current_stage_id,
-            current_stage_prompt=current_stage_info.get("prompt", "안내 없음"),
-            collected_loan_info=str(state.get("collected_loan_info", {})),
-            scenario_name=LOAN_SCENARIO_DATA.get("scenario_name", "대출 상담"),
-            expected_info_key=current_stage_info.get("expected_info_key", "정보 없음"),
-            # qa_keywords_example는 프롬프트에서 제거했으므로 주석 처리
-        )
-        # print(f"Main Agent Router 프롬프트:\n{main_agent_prompt_filled}") # 디버깅용
-        response = await main_llm.ainvoke([HumanMessage(content=main_agent_prompt_filled)])
-        raw_response_content = response.content.strip()
-        # print(f"Main Agent Router 원본 LLM 응답:\n{raw_response_content}") # 디버깅용
-        if raw_response_content.startswith("```json"): raw_response_content = raw_response_content.replace("```json", "").replace("```", "").strip()
-        
-        decision_data = json.loads(raw_response_content)
-        routing_decision = decision_data.get("action")
-        direct_response = decision_data.get("direct_response") # 칫챗용
-        extracted_value_for_direct_processing = decision_data.get("extracted_value") # process_next_scenario_step용
-        
-        print(f"Main Agent 결정: {routing_decision}, 직접 답변: {direct_response}, 추출값: {extracted_value_for_direct_processing}")
-        
-        # 'process_next_scenario_step'일 경우, ScenarioAgentOutput과 유사한 구조로 만들어 다음 노드에서 일관되게 처리
-        scenario_output_for_direct_step = None
-        if routing_decision == "process_next_scenario_step" and extracted_value_for_direct_processing is not None:
-            key_to_collect = current_stage_info.get("expected_info_key")
-            entities_direct = {key_to_collect: extracted_value_for_direct_processing} if key_to_collect else {}
-            scenario_output_for_direct_step = cast(ScenarioAgentOutput, {
-                "intent": f"direct_input_{str(extracted_value_for_direct_processing)[:20].replace(' ','_').lower()}", 
-                "entities": entities_direct, 
-                "is_scenario_related": True
-            })
-            # 이 경우, scenario_agent_output을 채워 main_agent_scenario_processing_node가 처리하도록 함
+    current_stage_id_for_prompt = state.get("current_scenario_stage_id", "정보 없음") #
+    current_stage_prompt_for_prompt = "정보 없음" #
+    expected_info_key_for_prompt = "정보 없음" #
+    active_scenario_name_for_prompt = state.get("active_scenario_name", "미정") #
 
-        return {
-            **state, 
-            "main_agent_routing_decision": routing_decision, 
-            "main_agent_direct_response": direct_response, # 칫챗 응답
-            "scenario_agent_output": scenario_output_for_direct_step # process_next_scenario_step일 때만 채워짐
-        }
+    if active_scenario_data and current_loan_type: #
+        current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id_for_prompt), {}) #
+        current_stage_prompt_for_prompt = current_stage_info.get("prompt", "안내 없음") #
+        expected_info_key_for_prompt = current_stage_info.get("expected_info_key", "정보 없음") #
+    
+    available_loan_types_display = ", ".join([ALL_SCENARIOS_DATA[lt]["scenario_name"] for lt in state.get("available_loan_types", []) if lt in ALL_SCENARIOS_DATA]) #
+
+    response_parser = None
+    try:
+        if prompt_template_key == 'initial_task_selection_prompt':
+            main_agent_prompt_filled = prompt_template.format(user_input=user_input) #
+            response_parser = initial_task_decision_parser #
+        else: # router_prompt
+            main_agent_prompt_filled = prompt_template.format(
+                user_input=user_input, #
+                active_scenario_name=active_scenario_name_for_prompt, #
+                formatted_messages_history=formatted_history_str, #
+                current_scenario_stage_id=current_stage_id_for_prompt, #
+                current_stage_prompt=current_stage_prompt_for_prompt, #
+                collected_loan_info=str(state.get("collected_loan_info", {})), #
+                expected_info_key=expected_info_key_for_prompt, #
+                available_loan_types_display=available_loan_types_display #
+            )
+            response_parser = main_router_decision_parser #
+        
+        response = await main_llm.ainvoke([HumanMessage(content=main_agent_prompt_filled)]) #
+        raw_response_content = response.content.strip() #
+        if raw_response_content.startswith("```json"): raw_response_content = raw_response_content.replace("```json", "").replace("```", "").strip() #
+        
+        parsed_decision = response_parser.parse(raw_response_content) #
+        
+        new_state_changes: Dict[str, Any] = {"main_agent_routing_decision": parsed_decision.action} #
+        if hasattr(parsed_decision, 'direct_response') and parsed_decision.direct_response: #
+            new_state_changes["main_agent_direct_response"] = parsed_decision.direct_response #
+        if hasattr(parsed_decision, 'extracted_value') and parsed_decision.extracted_value: #
+            if active_scenario_data and current_loan_type: #
+                current_stage_info = active_scenario_data.get("stages", {}).get(str(state.get("current_scenario_stage_id")), {}) #
+                key_to_collect = current_stage_info.get("expected_info_key") #
+                entities_direct = {key_to_collect: parsed_decision.extracted_value} if key_to_collect else {} #
+                new_state_changes["scenario_agent_output"] = cast(ScenarioAgentOutput, { #
+                    "intent": f"direct_input_{str(parsed_decision.extracted_value)[:20].replace(' ','_').lower()}",  #
+                    "entities": entities_direct,  #
+                    "is_scenario_related": True #
+                })
+        
+        if prompt_template_key == 'initial_task_selection_prompt':
+            initial_decision = cast(InitialTaskDecisionModel, parsed_decision) #
+            if initial_decision.action == "proceed_with_loan_type_didimdol":
+                new_state_changes["current_loan_type"] = "didimdol" #
+                new_state_changes["main_agent_routing_decision"] = "set_loan_type_didimdol" #
+            elif initial_decision.action == "proceed_with_loan_type_jeonse":
+                new_state_changes["current_loan_type"] = "jeonse" #
+                new_state_changes["main_agent_routing_decision"] = "set_loan_type_jeonse" #
+            elif initial_decision.action == "invoke_qa_agent_general":
+                new_state_changes["main_agent_routing_decision"] = "invoke_qa_agent" #
+                new_state_changes["active_scenario_name"] = "일반 금융 상담" #
+            elif initial_decision.action == "clarify_loan_type":
+                new_state_changes["main_agent_routing_decision"] = "select_loan_type" #
+                new_state_changes["main_agent_direct_response"] = initial_decision.direct_response or \
+                    f"어떤 대출 상품에 대해 안내해 드릴까요? {available_loan_types_display} 중에서 선택해주세요." #
+            elif initial_decision.action == "answer_directly_chit_chat":
+                 new_state_changes["main_agent_routing_decision"] = "answer_directly_chit_chat" #
+                 new_state_changes["main_agent_direct_response"] = initial_decision.direct_response #
+            else: 
+                 new_state_changes["main_agent_routing_decision"] = "unclear_input" #
+
+        print(f"Main Agent 최종 결정: {new_state_changes.get('main_agent_routing_decision')}, 직접 답변: {new_state_changes.get('main_agent_direct_response')}, 다음 대출 유형: {new_state_changes.get('current_loan_type')}") #
+        return {**state, **new_state_changes}
+
     except json.JSONDecodeError as je:
-        err_msg = "요청을 이해하는 중 내부 오류가 발생했습니다 (JSON 파싱). 다시 시도해주세요."
-        print(f"Main Agent Router JSON 파싱 오류: {je}. LLM 응답: {getattr(response if 'response' in locals() else None, 'content', 'N/A')}")
-        return {**state, "error_message": err_msg, "final_response_text_for_tts":err_msg, "main_agent_routing_decision": "unclear_input", "is_final_turn_response": True}
+        err_msg = "요청을 이해하는 중 내부 오류가 발생했습니다 (JSON 파싱). 다시 시도해주세요." #
+        print(f"Main Agent Router JSON 파싱 오류: {je}. LLM 응답: {getattr(response if 'response' in locals() else None, 'content', 'N/A')}") #
+        return {**state, "error_message": err_msg, "final_response_text_for_tts":err_msg, "main_agent_routing_decision": "unclear_input", "is_final_turn_response": True} #
     except Exception as e:
-        err_msg = "요청 처리 중 시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
-        print(f"Main Agent Router 시스템 오류: {e}"); import traceback; traceback.print_exc()
-        return {**state, "error_message": err_msg, "final_response_text_for_tts": err_msg, "main_agent_routing_decision": "unclear_input", "is_final_turn_response": True}
+        err_msg = "요청 처리 중 시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요." #
+        print(f"Main Agent Router 시스템 오류: {e}"); import traceback; traceback.print_exc() #
+        return {**state, "error_message": err_msg, "final_response_text_for_tts": err_msg, "main_agent_routing_decision": "unclear_input", "is_final_turn_response": True} #
+
 
 async def call_scenario_agent_node(state: AgentState) -> AgentState:
-    print("--- 노드: Scenario Agent 호출 ---")
-    user_input = state.get("stt_result", "")
-    if not user_input and user_input != "":
-        print("Scenario Agent 호출 노드: 사용자 입력 없음. 폴백 처리 필요.")
-        return {**state, "scenario_agent_output": cast(ScenarioAgentOutput, {"intent": "no_input", "entities": {}, "is_scenario_related": False})}
+    print("--- 노드: Scenario Agent 호출 ---") #
+    user_input = state.get("stt_result", "") #
+    current_loan_type = state.get("current_loan_type") #
+    active_scenario_data = get_active_scenario_data(state) #
 
-    current_stage_id = state.get("current_scenario_stage_id", LOAN_SCENARIO_DATA.get("initial_stage_id", "greeting"))
-    current_stage_info = LOAN_SCENARIO_DATA.get("stages", {}).get(current_stage_id, {})
-    messages_history = state.get("messages", [])[:-1] # 현재 사용자 입력 제외
+    if not current_loan_type or not active_scenario_data: #
+        return {**state, "error_message": "시나리오 에이전트 호출 실패: 현재 대출 유형 또는 시나리오 데이터가 없습니다.",  #
+                "main_agent_routing_decision": "unclear_input", "is_final_turn_response": True} #
+
+    if not user_input and user_input != "": #
+        return {**state, "scenario_agent_output": cast(ScenarioAgentOutput, {"intent": "no_input", "entities": {}, "is_scenario_related": False})} #
+
+    current_stage_id = state.get("current_scenario_stage_id") #
+    if not current_stage_id: #
+        current_stage_id = active_scenario_data.get("initial_stage_id") #
+        if not current_stage_id: #
+             return {**state, "error_message": f"'{current_loan_type}' 상품의 시작 단계를 찾을 수 없습니다.", "main_agent_routing_decision": "unclear_input", "is_final_turn_response": True} #
+
+    current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {}) #
+    messages_history = state.get("messages", [])[:-1] #
+    scenario_name = active_scenario_data.get("scenario_name", "대출 상담") #
     
     output = await invoke_scenario_agent_logic(
         user_input=user_input,
         current_stage_prompt=current_stage_info.get("prompt", ""),
         expected_info_key=current_stage_info.get("expected_info_key"),
         messages_history=messages_history,
-        scenario_name=LOAN_SCENARIO_DATA.get("scenario_name", "대출 상담")
-    )
-    return {**state, "scenario_agent_output": output}
+        scenario_name=scenario_name
+    ) #
+    return {**state, "scenario_agent_output": output} #
 
 async def call_qa_agent_node(state: AgentState) -> AgentState:
-    print("--- 노드: QA Agent 호출 준비 (스트리밍은 run_agent_streaming에서 직접 처리) ---")
-    # 이 노드는 실제 로직을 수행하지 않고, 라우팅 결정에 따라 run_agent_streaming에서
-    # invoke_qa_agent_streaming_logic를 직접 호출하도록 하는 신호 역할.
-    # state에 qa_agent_output을 채우지 않음.
-    return state # 상태 변경 없음
+    print("--- 노드: QA Agent 호출 준비 (스트리밍은 run_agent_streaming에서 직접 처리) ---") #
+    current_loan_type = state.get("current_loan_type") #
+    active_scenario_name = state.get("active_scenario_name", "일반 금융 상담") #
+
+    # active_knowledge_base_content는 run_agent_streaming에서 kb_content_for_qa로 직접 로드하여
+    # invoke_qa_agent_streaming_logic에 전달됩니다.
+    # 따라서 이 노드에서 kb를 로드하거나 state에 저장할 필요는 없습니다.
+    # 다만, kb 로드 실패 시의 처리를 위해 여기서 미리 체크해볼 수는 있습니다.
+    if current_loan_type:
+        # 여기서 kb를 미리 로드해서 state.active_knowledge_base_content에 넣을 수도 있으나,
+        # 스트리밍 함수에서 직접 로드하는 것이 비동기 흐름에 더 적합할 수 있음.
+        # kb 로드 실패에 대한 처리는 invoke_qa_agent_streaming_logic 내부 또는
+        # run_agent_streaming 함수에서 이루어지도록 함.
+        pass
+    
+    # 만약 KB 로드 실패가 routing 결정에 영향을 줘야 한다면, 여기서 로드 시도하고
+    # 실패 시 state에 에러 메시지를 설정하고 다른 노드로 라우팅할 수 있음.
+    # 현재는 run_agent_streaming에서 QA 로직 실행 시 KB를 로드함.
+    # 로그에서 "컨텍스트: '일반 금융 상담'"으로 나오는 것은 active_scenario_name이 그렇게 설정되었기 때문.
+    # current_loan_type이 None일 때 active_scenario_name이 "일반 금융 상담"으로 설정됨.
+    # invoke_qa_agent_streaming_logic은 이 scenario_name과 None인 knowledge_base_text를 받음.
+    # invoke_qa_agent_streaming_logic 내부에서 knowledge_base_text가 None이고 scenario_name이 "일반 금융 상담"일 때
+    # 적절한 일반 응답을 생성하도록 수정 필요.
+
+    return state #
+
 
 async def main_agent_scenario_processing_node(state: AgentState) -> AgentState:
-    print("--- 노드: Main Agent 시나리오 처리 (다음 단계 결정 및 응답 생성) ---")
-    # (기존 main_agent_scenario_processing_node 로직, main_llm null 체크 추가)
+    print("--- 노드: Main Agent 시나리오 처리 (다음 단계 결정 및 응답 생성) ---") #
     if not main_llm:
-         return {**state, "error_message": "시나리오 처리 서비스 사용 불가 (LLM 미초기화)", "final_response_text_for_tts": "시스템 설정 오류로 다음 안내를 드릴 수 없습니다.", "is_final_turn_response": True}
+         return {**state, "error_message": "시나리오 처리 서비스 사용 불가 (LLM 미초기화)", "final_response_text_for_tts": "시스템 설정 오류로 다음 안내를 드릴 수 없습니다.", "is_final_turn_response": True} #
 
-    user_input = state.get("stt_result", "")
-    scenario_output = state.get("scenario_agent_output") # invoke_scenario_agent 또는 process_next_scenario_step 에서 채워짐
-    current_stage_id = state.get("current_scenario_stage_id", LOAN_SCENARIO_DATA.get("initial_stage_id", "greeting"))
-    stages_data = LOAN_SCENARIO_DATA.get("stages", {})
-    current_stage_info = stages_data.get(current_stage_id, {})
-    collected_info = state.get("collected_loan_info", {}).copy()
+    user_input = state.get("stt_result", "") #
+    scenario_output = state.get("scenario_agent_output") #
+    current_loan_type = state.get("current_loan_type") #
+    active_scenario_data = get_active_scenario_data(state) #
+    
+    if not current_loan_type or not active_scenario_data: #
+        return {**state, "error_message": "시나리오 처리 실패: 현재 대출 유형 또는 시나리오 데이터가 없습니다.", "is_final_turn_response": True} #
 
-    final_response_text_for_user: str = LOAN_SCENARIO_DATA.get("fallback_message", "죄송합니다, 처리 중 오류가 발생했습니다.")
-    determined_next_stage_id: str = current_stage_id 
+    current_stage_id = state.get("current_scenario_stage_id") #
+    if not current_stage_id: #
+        current_stage_id = active_scenario_data.get("initial_stage_id") #
+        if not current_stage_id : #
+             return {**state, "error_message": f"'{current_loan_type}' 상품의 시작 단계를 찾을 수 없습니다.", "is_final_turn_response": True} #
 
-    # Scenario Agent 결과 또는 Main Agent 직접 처리 결과(scenario_output에 저장됨)를 바탕으로 정보 수집
-    if scenario_output and scenario_output.get("is_scenario_related"):
-        extracted_entities = scenario_output.get("entities", {})
-        for key, value in extracted_entities.items():
-            if value is not None: # None이 아닌 값만 수집
-                collected_info[key] = value
-                print(f"정보 업데이트: {key} = {value}")
+    stages_data = active_scenario_data.get("stages", {}) #
+    current_stage_info = stages_data.get(str(current_stage_id), {}) #
+    collected_info = state.get("collected_loan_info", {}).copy() #
+
+    final_response_text_for_user: str = active_scenario_data.get("fallback_message", "죄송합니다, 처리 중 오류가 발생했습니다.") #
+    determined_next_stage_id: str = str(current_stage_id) #
+
+    if scenario_output and scenario_output.get("is_scenario_related"): #
+        extracted_entities = scenario_output.get("entities", {}) #
+        for key, value in extracted_entities.items(): #
+            if value is not None: #
+                collected_info[key] = value; print(f"정보 업데이트 ({current_loan_type}): {key} = {value}") #
         
-        # 다음 단계 결정 로직
-        prompt_template = ALL_PROMPTS.get('main_agent', {}).get('determine_next_scenario_stage', '')
-        if not prompt_template:
-            print("오류: 다음 단계 결정 프롬프트를 찾을 수 없습니다. 기본 다음 단계로 진행합니다.")
-            determined_next_stage_id = current_stage_info.get("default_next_stage_id", current_stage_id)
-            if not determined_next_stage_id and current_stage_id not in ["END_SCENARIO_COMPLETE", "END_SCENARIO_ABORT", "qa_listen"]:
-                determined_next_stage_id = "END_SCENARIO_COMPLETE" # 정의된 다음 단계 없으면 완료로 간주
+        prompt_template = ALL_PROMPTS.get('main_agent', {}).get('determine_next_scenario_stage', '') #
+        if not prompt_template: #
+            print("오류: 다음 단계 결정 프롬프트를 찾을 수 없습니다.")
+            determined_next_stage_id = current_stage_info.get("default_next_stage_id", current_stage_id) #
         else:
-            # LLM에 다음 단계 결정을 요청
-            scenario_agent_intent_str = scenario_output.get("intent", "정보 없음")
-            scenario_agent_entities_str = str(scenario_output.get("entities", {}))
-            
-            current_transitions = current_stage_info.get("transitions", [])
-            formatted_transitions_str = format_transitions_for_prompt(current_transitions, current_stage_info.get("prompt",""))
+            scenario_agent_intent_str = scenario_output.get("intent", "정보 없음") #
+            scenario_agent_entities_str = str(scenario_output.get("entities", {})) #
+            current_transitions = current_stage_info.get("transitions", []) #
+            formatted_transitions_str = format_transitions_for_prompt(current_transitions, current_stage_info.get("prompt","")) #
 
             llm_prompt_for_next_stage = prompt_template.format(
-                scenario_name=LOAN_SCENARIO_DATA.get("scenario_name", "대출 상담"),
-                current_stage_id=current_stage_id,
-                current_stage_prompt=current_stage_info.get("prompt", "안내 없음"),
-                user_input=user_input, # 현재 사용자 발화
-                scenario_agent_intent=scenario_agent_intent_str,
-                scenario_agent_entities=scenario_agent_entities_str,
-                collected_loan_info=str(collected_info),
-                formatted_transitions=formatted_transitions_str,
-                default_next_stage_id=current_stage_info.get("default_next_stage_id", "None")
+                active_scenario_name=active_scenario_data.get("scenario_name", "대출 상담"), #
+                current_stage_id=str(current_stage_id), #
+                current_stage_prompt=current_stage_info.get("prompt", "안내 없음"), #
+                user_input=user_input, #
+                scenario_agent_intent=scenario_agent_intent_str, #
+                scenario_agent_entities=scenario_agent_entities_str, #
+                collected_loan_info=str(collected_info), #
+                formatted_transitions=formatted_transitions_str, #
+                default_next_stage_id=current_stage_info.get("default_next_stage_id", "None") #
             )
-            # print(f"\n=== 다음 단계 결정 LLM 프롬프트 ===\n{llm_prompt_for_next_stage}\n=============================\n") # 디버깅
             try:
-                response = await main_llm.ainvoke([HumanMessage(content=llm_prompt_for_next_stage)])
-                raw_content = response.content.strip()
-                if raw_content.startswith("```json"): raw_content = raw_content.replace("```json", "").replace("```", "").strip()
-                
-                decision_data = next_stage_decision_parser.parse(raw_content) 
-                determined_next_stage_id = decision_data.chosen_next_stage_id
-                print(f"LLM 결정 다음 단계 ID: '{determined_next_stage_id}'")
-
+                response = await main_llm.ainvoke([HumanMessage(content=llm_prompt_for_next_stage)]) #
+                raw_content = response.content.strip() #
+                if raw_content.startswith("```json"): raw_content = raw_content.replace("```json", "").replace("```", "").strip() #
+                decision_data = next_stage_decision_parser.parse(raw_content)  #
+                determined_next_stage_id = decision_data.chosen_next_stage_id #
+                print(f"LLM 결정 다음 단계 ID ('{current_loan_type}' 시나리오): '{determined_next_stage_id}'") #
                 if determined_next_stage_id not in stages_data and \
-                   determined_next_stage_id not in ["END_SCENARIO_COMPLETE", "END_SCENARIO_ABORT", "qa_listen"]:
-                    print(f"경고: LLM이 반환한 다음 단계 ID ('{determined_next_stage_id}')가 유효하지 않습니다. 기본 다음 단계를 사용합니다.")
-                    determined_next_stage_id = current_stage_info.get("default_next_stage_id", current_stage_id)
+                   determined_next_stage_id not in ["END_SCENARIO_COMPLETE", "END_SCENARIO_ABORT", f"qa_listen_{current_loan_type}"]: #
+                    print(f"경고: LLM이 반환한 다음 단계 ID ('{determined_next_stage_id}')가 유효하지 않습니다. 기본 다음 단계를 사용합니다.") #
+                    determined_next_stage_id = current_stage_info.get("default_next_stage_id", str(current_stage_id)) #
             except Exception as e:
-                print(f"다음 단계 결정 LLM 오류: {e}. LLM Raw: {getattr(response if 'response' in locals() else None, 'content', 'N/A')}. 기본 다음 단계 사용.")
-                determined_next_stage_id = current_stage_info.get("default_next_stage_id", current_stage_id)
-                if not determined_next_stage_id and current_stage_id not in ["END_SCENARIO_COMPLETE", "END_SCENARIO_ABORT", "qa_listen"]:
-                     determined_next_stage_id = "END_SCENARIO_COMPLETE"
-    else: # 시나리오 관련 발화가 아님 (Scenario Agent가 그렇게 판단했거나, 호출되지 않음)
-        print(f"시나리오 처리 노드: 시나리오 관련 발화 아님. 현재 단계({current_stage_id}) 유지 또는 fallback 메시지.")
-        # 특별한 안내 없이 현재 상태의 fallback_message 또는 이전 라우터의 direct_response 사용됨.
-        # 이 노드는 시나리오 '진행'을 담당하므로, 관련 없으면 다음 단계 결정 안 함.
-        # main_agent_router_node에서 'answer_directly_chit_chat' 등으로 이미 분기되었어야 함.
-        # 이 경로로 왔다는 것은 로직상 오류 가능성 -> fallback 처리
-        determined_next_stage_id = current_stage_id # 현재 단계 유지
-        final_response_text_for_user = state.get("main_agent_direct_response") or LOAN_SCENARIO_DATA.get("fallback_message")
+                print(f"다음 단계 결정 LLM 오류: {e}. LLM Raw: {getattr(response if 'response' in locals() else None, 'content', 'N/A')}. 기본 다음 단계 사용.") #
+                determined_next_stage_id = current_stage_info.get("default_next_stage_id", str(current_stage_id)) #
+    
+    if not determined_next_stage_id or determined_next_stage_id == "None": #
+        if current_stage_id not in ["END_SCENARIO_COMPLETE", "END_SCENARIO_ABORT"] and not str(current_stage_id).startswith("qa_listen"): #
+            print(f"'{current_loan_type}' 시나리오: 명시적인 다음 단계 없음. 시나리오 완료로 간주.")
+            determined_next_stage_id = "END_SCENARIO_COMPLETE" #
+        elif not determined_next_stage_id : #
+            determined_next_stage_id = str(current_stage_id) #
 
-    # 다음 단계의 프롬프트 설정
-    target_stage_info = stages_data.get(determined_next_stage_id, {})
-    if determined_next_stage_id == "END_SCENARIO_COMPLETE":
-        final_response_text_for_user = LOAN_SCENARIO_DATA.get("end_scenario_message", "상담이 완료되었습니다.")
-    elif determined_next_stage_id == "END_SCENARIO_ABORT":
-        final_response_text_for_user = target_stage_info.get("prompt", LOAN_SCENARIO_DATA.get("end_conversation_message", "상담을 종료합니다."))
-    elif determined_next_stage_id == "qa_listen": # QA 후 다시 질문을 듣는 상태
-        final_response_text_for_user = target_stage_info.get("prompt") or ALL_PROMPTS.get('main_agent',{}).get('qa_follow_up_prompt', "다른 궁금한 점이 있으시면 말씀해주세요.")
+    target_stage_info = stages_data.get(determined_next_stage_id, {}) #
+    if determined_next_stage_id == "END_SCENARIO_COMPLETE": #
+        final_response_text_for_user = active_scenario_data.get("end_scenario_message", "상담이 완료되었습니다.") #
+    elif determined_next_stage_id == "END_SCENARIO_ABORT": #
+        final_response_text_for_user = target_stage_info.get("prompt") or active_scenario_data.get("end_conversation_message", "상담을 종료합니다.") #
+    elif str(determined_next_stage_id).startswith("qa_listen"): #
+        final_response_text_for_user = target_stage_info.get("prompt") or ALL_PROMPTS.get('main_agent',{}).get('qa_follow_up_prompt', "다른 궁금한 점이 있으시면 말씀해주세요.") #
     else: 
-        final_response_text_for_user = target_stage_info.get("prompt", LOAN_SCENARIO_DATA.get("fallback_message"))
-        # Placeholder 치환
-        if "%{" in final_response_text_for_user:
-            import re
-            def replace_placeholder(match): key = match.group(1); return str(collected_info.get(key, f"%{{{key}}}%")) 
-            final_response_text_for_user = re.sub(r'%\{([^}]+)\}%', replace_placeholder, final_response_text_for_user)
+        final_response_text_for_user = target_stage_info.get("prompt", active_scenario_data.get("fallback_message")) #
+        if "%{" in final_response_text_for_user: #
+            import re #
+            def replace_placeholder(match): key = match.group(1); return str(collected_info.get(key, f"%{{{key}}}%"))  #
+            final_response_text_for_user = re.sub(r'%\{([^}]+)\}%', replace_placeholder, final_response_text_for_user) #
 
-
-    print(f"Main Agent 시나리오 처리 결과: 다음 사용자 안내 '{final_response_text_for_user[:70]}...', 다음 단계 ID '{determined_next_stage_id}'")
-    updated_messages = list(state.get("messages", []))
-    # 중복 AIMessage 추가 방지
-    if not updated_messages or not (isinstance(updated_messages[-1], AIMessage) and updated_messages[-1].content == final_response_text_for_user):
-         updated_messages.append(AIMessage(content=final_response_text_for_user))
+    print(f"Main Agent 시나리오 처리 결과 ({current_loan_type}): 다음 사용자 안내 '{final_response_text_for_user[:70]}...', 다음 단계 ID '{determined_next_stage_id}'") #
+    updated_messages = list(state.get("messages", [])) #
+    if not updated_messages or not (isinstance(updated_messages[-1], AIMessage) and updated_messages[-1].content == final_response_text_for_user): #
+         updated_messages.append(AIMessage(content=final_response_text_for_user)) #
     
     return {
         **state, 
-        "collected_loan_info": collected_info, 
-        "current_scenario_stage_id": determined_next_stage_id,
-        "final_response_text_for_tts": final_response_text_for_user, 
-        "messages": updated_messages,
-        "is_final_turn_response": True # 이 노드가 응답을 결정하면 턴 종료
+        "collected_loan_info": collected_info,  #
+        "current_scenario_stage_id": determined_next_stage_id, #
+        "final_response_text_for_tts": final_response_text_for_user,  #
+        "messages": updated_messages, #
+        "is_final_turn_response": True #
     }
 
 async def prepare_direct_response_node(state: AgentState) -> AgentState:
-    print("--- 노드: 직접 응답 준비 (칫챗 등) ---")
-    response_text = state.get("main_agent_direct_response") or LOAN_SCENARIO_DATA.get("fallback_message", "네, 말씀하세요.")
-    updated_messages = list(state.get("messages", []))
-    if not updated_messages or not (isinstance(updated_messages[-1], AIMessage) and updated_messages[-1].content == response_text):
-        updated_messages.append(AIMessage(content=response_text))
+    print("--- 노드: 직접 응답 준비 (칫챗, 대출 유형 선택 안내 등) ---") #
+    response_text = state.get("main_agent_direct_response") #
     
-    # 칫챗 후 다음 시나리오 단계는 현재 단계 유지 또는 qa_listen으로 설정
-    next_stage_after_chitchat = state.get("current_scenario_stage_id", "qa_listen") # 또는 "greeting" 등 초기/대기 상태
+    if not response_text: #
+        active_scenario = get_active_scenario_data(state) #
+        fallback_msg = active_scenario.get("fallback_message") if active_scenario else "죄송합니다, 잘 이해하지 못했습니다." #
+        response_text = fallback_msg #
+        print(f"경고: prepare_direct_response_node에 direct_response 없음. fallback 사용: {response_text}")
+
+    updated_messages = list(state.get("messages", [])) #
+    if not updated_messages or not (isinstance(updated_messages[-1], AIMessage) and updated_messages[-1].content == response_text): #
+        updated_messages.append(AIMessage(content=response_text)) #
     
-    return {**state, "final_response_text_for_tts": response_text, "messages": updated_messages, "is_final_turn_response": True, "current_scenario_stage_id": next_stage_after_chitchat}
+    next_stage_id = state.get("current_scenario_stage_id") #
+    if state.get("main_agent_routing_decision") == "select_loan_type": #
+        pass 
+    elif state.get("current_loan_type"): #
+        pass #
+    else: 
+        pass
+
+    return {**state, "final_response_text_for_tts": response_text, "messages": updated_messages, "is_final_turn_response": True, "current_scenario_stage_id": next_stage_id} #
+
+
+async def set_loan_type_node(state: AgentState) -> AgentState:
+    print(f"--- 노드: 대출 유형 설정 ---") #
+    routing_decision = state.get("main_agent_routing_decision") #
+    new_loan_type: Optional[Literal["didimdol", "jeonse"]] = None #
+    
+    if routing_decision == "set_loan_type_didimdol": #
+        new_loan_type = "didimdol" #
+    elif routing_decision == "set_loan_type_jeonse": #
+        new_loan_type = "jeonse" #
+    
+    if new_loan_type and new_loan_type in ALL_SCENARIOS_DATA: #
+        active_scenario = ALL_SCENARIOS_DATA[new_loan_type] #
+        initial_stage_id = active_scenario.get("initial_stage_id") #
+        initial_prompt = active_scenario.get("stages", {}).get(str(initial_stage_id), {}).get("prompt") #
+        
+        if not initial_prompt: #
+            initial_prompt = f"{active_scenario.get('scenario_name', new_loan_type + ' 대출')} 상담을 시작하겠습니다. 무엇을 도와드릴까요?" #
+
+        print(f"대출 유형 '{new_loan_type}'으로 설정됨. 시작 단계: '{initial_stage_id}', 안내: '{initial_prompt[:50]}...'") #
+        
+        updated_messages = list(state.get("messages", [])) #
+        if not updated_messages or not (isinstance(updated_messages[-1], AIMessage) and updated_messages[-1].content == initial_prompt): #
+            updated_messages.append(AIMessage(content=initial_prompt)) #
+
+        return {
+            **state,
+            "current_loan_type": new_loan_type, #
+            "active_scenario_data": active_scenario, #
+            "active_scenario_name": active_scenario.get("scenario_name"), #
+            "current_scenario_stage_id": initial_stage_id, #
+            "collected_loan_info": {}, #
+            "final_response_text_for_tts": initial_prompt, #
+            "messages": updated_messages, #
+            "is_final_turn_response": True  #
+        }
+    else:
+        error_msg = f"요청하신 대출 유형('{new_loan_type}')을 처리할 수 없습니다." #
+        print(error_msg) #
+        updated_messages = list(state.get("messages", [])) + [AIMessage(content=error_msg)] #
+        return {
+            **state, 
+            "error_message": error_msg,  #
+            "final_response_text_for_tts": error_msg,  #
+            "messages": updated_messages, #
+            "is_final_turn_response": True, #
+            "current_loan_type": None #
+        }
+
 
 async def prepare_fallback_response_node(state: AgentState) -> AgentState:
-    # (기존 prepare_fallback_response_node 로직)
-    print("--- 노드: 폴백 응답 준비 ---")
-    response_text = state.get("error_message") or LOAN_SCENARIO_DATA.get("fallback_message", "죄송합니다, 잘 이해하지 못했습니다.")
-    updated_messages = list(state.get("messages", []))
-    if not updated_messages or not (isinstance(updated_messages[-1], AIMessage) and updated_messages[-1].content == response_text):
-        updated_messages.append(AIMessage(content=response_text))
+    print("--- 노드: 폴백 응답 준비 ---") #
+    active_scenario = get_active_scenario_data(state) #
+    default_fallback = "죄송합니다, 잘 이해하지 못했습니다. 다시 말씀해주시겠어요?" #
+    response_text = state.get("error_message") or (active_scenario.get("fallback_message") if active_scenario else default_fallback) #
     
-    # 폴백 후 다음 시나리오 단계는 현재 단계 유지 또는 재질문 단계
-    next_stage_after_fallback = state.get("current_scenario_stage_id") # 현재 단계 유지하며 재시도 유도
-    # 또는 특정 reprompt stage ID: current_stage_info.get("reprompt_stage_id", state.get("current_scenario_stage_id"))
-
-    return {**state, "final_response_text_for_tts": response_text, "messages": updated_messages, "is_final_turn_response": True, "current_scenario_stage_id": next_stage_after_fallback}
+    updated_messages = list(state.get("messages", [])) #
+    if not updated_messages or not (isinstance(updated_messages[-1], AIMessage) and updated_messages[-1].content == response_text): #
+        updated_messages.append(AIMessage(content=response_text)) #
+    
+    next_stage_after_fallback = state.get("current_scenario_stage_id") #
+    return {**state, "final_response_text_for_tts": response_text, "messages": updated_messages, "is_final_turn_response": True, "current_scenario_stage_id": next_stage_after_fallback} #
 
 async def prepare_end_conversation_node(state: AgentState) -> AgentState:
-    # (기존 prepare_end_conversation_node 로직)
-    print("--- 노드: 대화 종료 메시지 준비 ---")
-    response_text = LOAN_SCENARIO_DATA.get("end_conversation_message", "상담을 종료합니다. 이용해주셔서 감사합니다.")
-    updated_messages = list(state.get("messages", [])) + [AIMessage(content=response_text)]
-    return {**state, "final_response_text_for_tts": response_text, "messages": updated_messages, "is_final_turn_response": True, "current_scenario_stage_id": "END_SCENARIO_ABORT"} # 명시적 종료 상태
-
-
-async def handle_error_node(state: AgentState) -> AgentState: # 최종 에러 처리
-    print("--- 노드: 에러 핸들링 (최종) ---")
-    error_msg_for_user = state.get("error_message", "알 수 없는 오류가 발생했습니다. 죄송합니다.")
-    updated_messages = list(state.get("messages", []))
-    if not updated_messages or not (isinstance(updated_messages[-1], AIMessage) and updated_messages[-1].content == error_msg_for_user):
-        updated_messages.append(AIMessage(content=error_msg_for_user))
+    print("--- 노드: 대화 종료 메시지 준비 ---") #
+    active_scenario = get_active_scenario_data(state) #
+    default_end_msg = "상담을 종료합니다. 이용해주셔서 감사합니다." #
+    response_text = (active_scenario.get("end_conversation_message") if active_scenario else default_end_msg) or default_end_msg #
     
-    return {**state, "final_response_text_for_tts": error_msg_for_user, "is_final_turn_response": True, "messages": updated_messages, "current_scenario_stage_id": state.get("current_scenario_stage_id")} # 현재 단계 유지
+    updated_messages = list(state.get("messages", [])) + [AIMessage(content=response_text)] #
+    return {**state, "final_response_text_for_tts": response_text, "messages": updated_messages, "is_final_turn_response": True, "current_scenario_stage_id": "END_SCENARIO_ABORT"} #
 
-# --- 조건부 엣지 로직 (STT 노드 제거 및 라우팅 수정) ---
+async def handle_error_node(state: AgentState) -> AgentState:
+    print("--- 노드: 에러 핸들링 (최종) ---") #
+    error_msg_for_user = state.get("error_message", "알 수 없는 오류가 발생했습니다. 죄송합니다.") #
+    updated_messages = list(state.get("messages", [])) #
+    if not updated_messages or not (isinstance(updated_messages[-1], AIMessage) and updated_messages[-1].content == error_msg_for_user): #
+        updated_messages.append(AIMessage(content=error_msg_for_user)) #
+    
+    return {**state, "final_response_text_for_tts": error_msg_for_user, "is_final_turn_response": True, "messages": updated_messages} #
+
+# --- 조건부 엣지 로직 ---
 def route_from_entry(state: AgentState) -> str:
-    if state.get("is_final_turn_response"): return END # 입력 오류 등으로 바로 종료될 경우
-    # STT는 chat.py에서 처리하고 결과를 stt_result에 담아오므로, STT 노드 불필요.
-    return "main_agent_router_node" 
+    if state.get("is_final_turn_response"): return END #
+    return "main_agent_router_node"  #
 
-# main_agent_router_node의 라우팅 조건은 기존과 유사
 def route_from_main_agent_router(state: AgentState) -> str:
-    # (기존 route_from_main_agent_router 로직)
-    decision = state.get("main_agent_routing_decision")
-    print(f"Main Agent 라우팅 결정: {decision}")
-    if state.get("is_final_turn_response"): return END 
-    if decision == "invoke_scenario_agent": return "call_scenario_agent_node"
-    if decision == "process_next_scenario_step": return "main_agent_scenario_processing_node" # scenario_agent_output이 채워져 있음
-    if decision == "invoke_qa_agent": return "call_qa_agent_node" 
-    if decision == "answer_directly_chit_chat": return "prepare_direct_response_node"
-    if decision == "end_conversation": return "prepare_end_conversation_node"
-    return "prepare_fallback_response_node" # unclear_input 등
+    decision = state.get("main_agent_routing_decision") #
+    print(f"Main Agent 라우팅 결정: {decision}") #
+    if state.get("is_final_turn_response"): return END  #
 
-# call_scenario_agent_node 다음은 main_agent_scenario_processing_node로 통일
+    if decision == "set_loan_type_didimdol" or decision == "set_loan_type_jeonse": #
+        return "set_loan_type_node" #
+    if decision == "select_loan_type" or decision == "answer_directly_chit_chat": #
+        return "prepare_direct_response_node" #
+    if decision == "invoke_scenario_agent": #
+        # 대출 유형이 설정되어 있는지 확인
+        if not state.get("current_loan_type"):
+            print("경고: invoke_scenario_agent 요청되었으나 current_loan_type 미설정. select_loan_type으로 재라우팅.")
+            state["main_agent_direct_response"] = "먼저 어떤 대출 상품에 대해 상담하고 싶으신지 알려주시겠어요? (디딤돌 대출, 전세자금 대출 등)"
+            return "prepare_direct_response_node" # 사용자에게 다시 선택 요청
+        return "call_scenario_agent_node" #
+    if decision == "process_next_scenario_step": #
+        if not state.get("current_loan_type"):
+            print("경고: process_next_scenario_step 요청되었으나 current_loan_type 미설정. select_loan_type으로 재라우팅.")
+            state["main_agent_direct_response"] = "어떤 대출 상품의 다음 단계로 진행할까요? 먼저 상품을 선택해주세요."
+            return "prepare_direct_response_node"
+        return "main_agent_scenario_processing_node" #
+    if decision == "invoke_qa_agent": #
+        return "call_qa_agent_node"  #
+    if decision == "end_conversation": #
+        return "prepare_end_conversation_node" #
+    
+    # qa_error_no_kb는 call_qa_agent_node에서 발생하지 않고, run_agent_streaming에서 처리됨.
+    # 따라서 여기서 별도 라우팅 불필요. invoke_qa_agent 결과는 END로 감.
+    return "prepare_fallback_response_node" #
+
 def route_from_scenario_agent_call(state: AgentState) -> str:
-    # (기존 route_from_scenario_agent_call 로직)
-    scenario_output = state.get("scenario_agent_output")
-    if scenario_output and scenario_output.get("intent", "").startswith("error_"):
-        # 에러 메시지를 상태에 설정하고 handle_error_node로
-        err_msg = f"답변 분석 중 오류: {scenario_output.get('intent')}"
-        state["error_message"] = err_msg # final_response_text_for_tts도 설정해야 함
-        state["final_response_text_for_tts"] = err_msg
-        return "handle_error_node"
-    return "main_agent_scenario_processing_node"
+    scenario_output = state.get("scenario_agent_output") #
+    if scenario_output and scenario_output.get("intent", "").startswith("error_"): #
+        err_msg = f"답변 분석 중 오류: {scenario_output.get('intent')}" #
+        state["error_message"] = err_msg #
+        state["final_response_text_for_tts"] = err_msg #
+        return "handle_error_node" #
+    return "main_agent_scenario_processing_node" #
 
 def route_from_qa_agent_call(state: AgentState) -> str:
-    # QA 호출 후에는 run_agent_streaming에서 스트리밍 처리, 그래프는 종료
-    return END
+    # QA는 run_agent_streaming에서 직접 스트리밍 처리 후 그래프 종료
+    return END #
 
-# --- 그래프 빌드 (STT 노드 제거) ---
-workflow = StateGraph(AgentState)
+# --- 그래프 빌드 ---
+workflow = StateGraph(AgentState) #
 nodes_to_add = [
-    ("entry_point_node", entry_point_node),
-    ("main_agent_router_node", main_agent_router_node),
-    ("call_scenario_agent_node", call_scenario_agent_node),
-    ("call_qa_agent_node", call_qa_agent_node), # QA 스트리밍 시작 신호
-    ("main_agent_scenario_processing_node", main_agent_scenario_processing_node),
-    ("prepare_direct_response_node", prepare_direct_response_node),
-    ("prepare_fallback_response_node", prepare_fallback_response_node),
-    ("prepare_end_conversation_node", prepare_end_conversation_node),
-    ("handle_error_node", handle_error_node)
+    ("entry_point_node", entry_point_node), #
+    ("main_agent_router_node", main_agent_router_node), #
+    ("set_loan_type_node", set_loan_type_node), #
+    ("call_scenario_agent_node", call_scenario_agent_node), #
+    ("call_qa_agent_node", call_qa_agent_node),  #
+    ("main_agent_scenario_processing_node", main_agent_scenario_processing_node), #
+    ("prepare_direct_response_node", prepare_direct_response_node), #
+    ("prepare_fallback_response_node", prepare_fallback_response_node), #
+    ("prepare_end_conversation_node", prepare_end_conversation_node), #
+    ("handle_error_node", handle_error_node) #
 ]
-for name, node_func in nodes_to_add: workflow.add_node(name, node_func)
+for name, node_func in nodes_to_add: workflow.add_node(name, node_func) #
 
-workflow.set_entry_point("entry_point_node")
+workflow.set_entry_point("entry_point_node") #
 
-workflow.add_conditional_edges("entry_point_node", route_from_entry)
-# STT 노드가 없으므로 stt_node 관련 엣지 제거
+workflow.add_conditional_edges("entry_point_node", route_from_entry) #
+workflow.add_conditional_edges("main_agent_router_node", route_from_main_agent_router) #
+workflow.add_conditional_edges("call_scenario_agent_node", route_from_scenario_agent_call) #
+workflow.add_conditional_edges("call_qa_agent_node", route_from_qa_agent_call) #
 
-workflow.add_conditional_edges("main_agent_router_node", route_from_main_agent_router)
-workflow.add_conditional_edges("call_scenario_agent_node", route_from_scenario_agent_call)
-workflow.add_conditional_edges("call_qa_agent_node", route_from_qa_agent_call) # END로 연결
+workflow.add_edge("set_loan_type_node", END) #
+workflow.add_edge("main_agent_scenario_processing_node", END) #
+workflow.add_edge("prepare_direct_response_node", END) #
+workflow.add_edge("prepare_fallback_response_node", END) #
+workflow.add_edge("prepare_end_conversation_node", END) #
+workflow.add_edge("handle_error_node", END) #
 
-# 응답 준비 노드들은 모두 END로 연결 (각 노드에서 is_final_turn_response=True 설정)
-workflow.add_edge("main_agent_scenario_processing_node", END)
-workflow.add_edge("prepare_direct_response_node", END)
-workflow.add_edge("prepare_fallback_response_node", END)
-workflow.add_edge("prepare_end_conversation_node", END)
-workflow.add_edge("handle_error_node", END)
-
-app_graph = workflow.compile()
-print("--- LangGraph 컴파일 완료 ---")
+app_graph = workflow.compile() #
+print("--- LangGraph 컴파일 완료 (다중 업무 지원) ---") #
 
 
-# --- run_agent_streaming 함수 (기존 파일 참고, TTS 로직 제거) ---
 async def run_agent_streaming(
-    user_input_text: Optional[str] = None, # STT 결과를 직접 받거나 텍스트 입력
-    user_input_audio_b64: Optional[str] = None, # chat.py에서 STT 처리 후 user_input_text로 변환하여 전달 권장
+    user_input_text: Optional[str] = None,
+    user_input_audio_b64: Optional[str] = None,
     session_id: Optional[str] = "default_session",
     current_state_dict: Optional[Dict[str, Any]] = None
 ) -> AsyncGenerator[Union[Dict[str, Any], str], None]:
     
-    if not OPENAI_API_KEY or not main_llm or not streaming_llm:
-        error_msg = "LLM 서비스가 초기화되지 않았습니다. API 키 설정을 확인하세요."
-        print(f"CRITICAL ({session_id}): {error_msg}")
-        yield {"type": "error", "session_id": session_id, "message": error_msg}
-        yield {"type": "final_state", "session_id": session_id, "data": {"error_message": error_msg, "is_final_turn_response": True, "messages": [AIMessage(content=error_msg)]}}
+    if not OPENAI_API_KEY or not main_llm or not streaming_llm: #
+        error_msg = "LLM 서비스가 초기화되지 않았습니다. API 키 설정을 확인하세요." #
+        yield {"type": "error", "session_id": session_id, "message": error_msg} #
+        yield {"type": "final_state", "session_id": session_id, "data": {"error_message": error_msg, "is_final_turn_response": True, "messages": [AIMessage(content=error_msg)]}} #
         return
 
-    # 1. 초기 상태 설정
-    if not LOAN_SCENARIO_DATA: # 시나리오 데이터 로드 확인
-        try: load_loan_scenario_sync()
-        except Exception as e:
-            yield {"type": "error", "session_id": session_id, "message": f"상담 서비스 초기화 실패 (시나리오 로드): {e}"}
+    if not ALL_SCENARIOS_DATA: #
+        try: load_all_scenarios_sync() #
+        except Exception as e: #
+            yield {"type": "error", "session_id": session_id, "message": f"상담 서비스 초기화 실패 (시나리오 로드): {e}"} #
             return
     
-    initial_messages: List[BaseMessage] = ([SystemMessage(content=LOAN_SCENARIO_DATA.get("system_prompt", ""))] 
-                                         if not (current_state_dict and current_state_dict.get("messages")) 
-                                         else list(current_state_dict["messages"]))
+    initial_messages: List[BaseMessage] = [] #
+    current_loan_type_from_session: Optional[Literal["didimdol", "jeonse"]] = None #
+    current_stage_id_from_session: Optional[str] = None #
+    collected_info_from_session: Dict[str, Any] = {} #
 
-    initial_input_for_graph: AgentState = cast(AgentState, {
-        "session_id": session_id or "default_session",
-        "user_input_text": user_input_text, # STT 결과 또는 텍스트 입력
-        "user_input_audio_b64": user_input_audio_b64, # 참고용으로 전달, 실제 STT는 chat.py에서
-        "stt_result": user_input_text, # stt_result에 사용자 발화 텍스트를 넣어줌
-        "messages": initial_messages,
-        "current_scenario_stage_id": (current_state_dict.get("current_scenario_stage_id", LOAN_SCENARIO_DATA.get("initial_stage_id", "greeting")) 
-                                      if current_state_dict else LOAN_SCENARIO_DATA.get("initial_stage_id", "greeting")),
-        "collected_loan_info": current_state_dict.get("collected_loan_info", {}) if current_state_dict else {},
-        "loan_scenario_data": LOAN_SCENARIO_DATA, # 전역에서 로드된 데이터 사용
-        # 턴 시작 시 초기화 필드
-        "main_agent_routing_decision": None, "main_agent_direct_response": None,
-        "scenario_agent_output": None, 
-        "final_response_text_for_tts": None, "is_final_turn_response": False, "error_message": None,
+    if current_state_dict: #
+        initial_messages = list(current_state_dict.get("messages", [])) #
+        current_loan_type_from_session = current_state_dict.get("current_loan_type") #
+        current_stage_id_from_session = current_state_dict.get("current_scenario_stage_id") #
+        collected_info_from_session = current_state_dict.get("collected_loan_info", {}) #
+
+    initial_input_for_graph: AgentState = cast(AgentState, { #
+        "session_id": session_id or "default_session", #
+        "user_input_text": user_input_text, #
+        "user_input_audio_b64": user_input_audio_b64, #
+        "stt_result": user_input_text, #
+        "messages": initial_messages, #
+        
+        "current_loan_type": current_loan_type_from_session, #
+        "current_scenario_stage_id": current_stage_id_from_session, #
+        "collected_loan_info": collected_info_from_session, #
+        "available_loan_types": ["didimdol", "jeonse"], #
+
+        "active_scenario_data": None, #
+        "active_knowledge_base_content": None, #
+        "active_scenario_name": None, #
+
+        "main_agent_routing_decision": None, "main_agent_direct_response": None, #
+        "scenario_agent_output": None,  #
+        "final_response_text_for_tts": None, "is_final_turn_response": False, "error_message": None, #
     })
     
-    print(f"\n--- [{session_id}] Agent Turn 시작 ---")
-    print(f"초기 입력 상태 (요약): stage='{initial_input_for_graph['current_scenario_stage_id']}', text='{user_input_text}'")
+    print(f"\n--- [{session_id}] Agent Turn 시작 ---") #
+    print(f"초기 입력 상태 (요약): loan_type='{current_loan_type_from_session}', stage='{current_stage_id_from_session}', text='{user_input_text}'") #
 
-    final_graph_output_state: Optional[AgentState] = None # 최종 상태 저장용
-    full_response_text_streamed = ""
+    final_graph_output_state: Optional[AgentState] = None #
+    full_response_text_streamed = "" #
 
     try:
-        graph_output_state: AgentState = await app_graph.ainvoke(initial_input_for_graph)
-        final_graph_output_state = graph_output_state # 중간 결과 저장
+        graph_output_state: AgentState = await app_graph.ainvoke(initial_input_for_graph) #
+        final_graph_output_state = graph_output_state #
 
-        print(f"LangGraph 실행 완료. 라우팅: '{graph_output_state.get('main_agent_routing_decision')}', 다음 단계 ID: '{graph_output_state.get('current_scenario_stage_id')}'")
+        print(f"LangGraph 실행 완료. 라우팅: '{graph_output_state.get('main_agent_routing_decision')}', 다음 대출유형: '{graph_output_state.get('current_loan_type')}', 다음 단계 ID: '{graph_output_state.get('current_scenario_stage_id')}'") #
 
-        # 3. 스트리밍 결정 및 실행
-        if graph_output_state.get("main_agent_routing_decision") == "invoke_qa_agent":
-            user_question_for_qa = graph_output_state.get("stt_result", "") # 최종 사용자 발화
-            if user_question_for_qa:
-                scenario_name_for_qa = graph_output_state.get("loan_scenario_data", {}).get("scenario_name", "디딤돌 대출")
-                print(f"QA 스트리밍 시작 (세션: {session_id}, 질문: '{user_question_for_qa[:50]}...')")
+        if graph_output_state.get("main_agent_routing_decision") == "invoke_qa_agent": #
+            user_question_for_qa = graph_output_state.get("stt_result", "") #
+            
+            qa_context_loan_type = graph_output_state.get("current_loan_type") #
+            qa_scenario_name = graph_output_state.get("active_scenario_name", "일반 금융 상담") #
+            
+            kb_content_for_qa: Optional[str] = None #
+            if qa_context_loan_type and qa_context_loan_type in KNOWLEDGE_BASE_FILES: #
+                kb_content_for_qa = await load_knowledge_base_content_async(qa_context_loan_type) #
+
+            if user_question_for_qa: #
+                print(f"QA 스트리밍 시작 (세션: {session_id}, 컨텍스트: '{qa_scenario_name}', 질문: '{user_question_for_qa[:50]}...')") #
+                yield {"type": "stream_start", "stream_type": "qa_answer"} #
                 
-                yield {"type": "stream_start", "stream_type": "qa_answer"}
-                async for chunk in invoke_qa_agent_streaming_logic(user_question_for_qa, scenario_name_for_qa):
-                    yield chunk 
-                    full_response_text_streamed += chunk
+                async for chunk in invoke_qa_agent_streaming_logic(user_question_for_qa, qa_scenario_name, kb_content_for_qa): #
+                    yield chunk  #
+                    full_response_text_streamed += chunk #
                 
-                # QA 후 최종 상태 업데이트
-                updated_messages_after_qa = list(graph_output_state.get("messages", []))
-                # QA 질문은 이미 HumanMessage로 들어가 있음, QA 답변을 AIMessage로 추가
-                if not updated_messages_after_qa or not (isinstance(updated_messages_after_qa[-1], AIMessage) and updated_messages_after_qa[-1].content == full_response_text_streamed):
-                    updated_messages_after_qa.append(AIMessage(content=full_response_text_streamed))
+                updated_messages_after_qa = list(graph_output_state.get("messages", [])) #
+                if not updated_messages_after_qa or not (isinstance(updated_messages_after_qa[-1], AIMessage) and updated_messages_after_qa[-1].content == full_response_text_streamed): #
+                    updated_messages_after_qa.append(AIMessage(content=full_response_text_streamed)) #
                 
+                next_stage_after_qa = "qa_listen" #
+                if qa_context_loan_type: #
+                    active_scenario = ALL_SCENARIOS_DATA.get(qa_context_loan_type) #
+                    if active_scenario: #
+                        specific_qa_listen_stage = f"qa_listen_{qa_context_loan_type}" #
+                        if specific_qa_listen_stage in active_scenario.get("stages", {}): #
+                            next_stage_after_qa = specific_qa_listen_stage #
+                        else: 
+                             current_stage_id = graph_output_state.get("current_scenario_stage_id") #
+                             if current_stage_id and str(current_stage_id) in active_scenario.get("stages", {}): #
+                                 next_stage_after_qa = active_scenario["stages"][str(current_stage_id)].get("default_next_stage_id", "qa_listen") #
+
                 final_graph_output_state = {
                     **graph_output_state, 
-                    "final_response_text_for_tts": full_response_text_streamed,
-                    "messages": updated_messages_after_qa, 
-                    "is_final_turn_response": True,
-                    "current_scenario_stage_id": LOAN_SCENARIO_DATA.get("stages",{}).get(graph_output_state.get("current_scenario_stage_id","qa_listen"),{}).get("default_next_stage_id", "qa_listen") # QA 후 다음 단계
+                    "final_response_text_for_tts": full_response_text_streamed, #
+                    "messages": updated_messages_after_qa,  #
+                    "is_final_turn_response": True, #
+                    "current_scenario_stage_id": next_stage_after_qa #
                 }
             else: 
-                err_msg_qa = graph_output_state.get("error_message") or "질문을 인식하지 못했습니다. 다시 질문해주시겠어요?"
-                yield {"type": "stream_start", "stream_type": "error_message"}
-                for char_chunk in err_msg_qa: yield char_chunk; await asyncio.sleep(0.01) # 가짜 스트리밍
-                full_response_text_streamed = err_msg_qa
-                final_graph_output_state = {**graph_output_state, "final_response_text_for_tts": full_response_text_streamed, "error_message": err_msg_qa, "is_final_turn_response": True}
+                pass
 
-        elif graph_output_state.get("final_response_text_for_tts"): # 시나리오, 칫챗, 폴백 등
-            text_to_stream = graph_output_state["final_response_text_for_tts"]
-            yield {"type": "stream_start", "stream_type": "general_response"}
-            chunk_size = 20 
-            for i in range(0, len(text_to_stream), chunk_size):
-                chunk = text_to_stream[i:i+chunk_size]
-                yield chunk
-                await asyncio.sleep(0.02) 
-                full_response_text_streamed += chunk
-            # final_graph_output_state는 이미 graph_output_state로 설정됨
+        elif graph_output_state.get("final_response_text_for_tts"): #
+            text_to_stream = graph_output_state["final_response_text_for_tts"] #
+            yield {"type": "stream_start", "stream_type": "general_response"} #
+            chunk_size = 20  #
+            for i in range(0, len(text_to_stream), chunk_size): #
+                chunk = text_to_stream[i:i+chunk_size] #
+                yield chunk #
+                await asyncio.sleep(0.02)  #
+                full_response_text_streamed += chunk #
+        else:
+            error_message_fallback = graph_output_state.get("error_message", "응답을 생성하지 못했습니다.") #
+            yield {"type": "stream_start", "stream_type": "critical_error"} #
+            for char_chunk in error_message_fallback: yield char_chunk; await asyncio.sleep(0.01) #
+            full_response_text_streamed = error_message_fallback #
+            final_graph_output_state = {**graph_output_state, "final_response_text_for_tts": full_response_text_streamed, "error_message": error_message_fallback, "is_final_turn_response": True} #
 
-        else: # 응답 텍스트가 없는 예외적 경우
-            error_message_fallback = graph_output_state.get("error_message", "응답을 생성하지 못했습니다.")
-            yield {"type": "stream_start", "stream_type": "critical_error"}
-            for char_chunk in error_message_fallback: yield char_chunk; await asyncio.sleep(0.01)
-            full_response_text_streamed = error_message_fallback
-            final_graph_output_state = {**graph_output_state, "final_response_text_for_tts": full_response_text_streamed, "error_message": error_message_fallback, "is_final_turn_response": True}
-
-        yield {"type": "stream_end", "full_text": full_response_text_streamed}
+        yield {"type": "stream_end", "full_text": full_response_text_streamed} #
 
     except Exception as e:
-        print(f"CRITICAL error in run_agent_streaming for session {session_id}: {e}")
-        import traceback; traceback.print_exc()
-        error_response = f"죄송합니다, 에이전트 처리 중 심각한 시스템 오류가 발생했습니다."
-        yield {"type": "stream_start", "stream_type": "critical_error"}
-        for char_chunk in error_response: yield char_chunk; await asyncio.sleep(0.01)
-        yield {"type": "stream_end", "full_text": error_response}
+        print(f"CRITICAL error in run_agent_streaming for session {session_id}: {e}") #
+        import traceback; traceback.print_exc() #
+        error_response = f"죄송합니다, 에이전트 처리 중 심각한 시스템 오류가 발생했습니다." #
+        yield {"type": "stream_start", "stream_type": "critical_error"} #
+        for char_chunk in error_response: yield char_chunk; await asyncio.sleep(0.01) #
+        yield {"type": "stream_end", "full_text": error_response} #
         
-        # 오류 발생 시 최종 상태 구성 (최대한 안전하게)
-        final_graph_output_state = initial_input_for_graph.copy() # type: ignore
-        final_graph_output_state["error_message"] = error_response # type: ignore
-        final_graph_output_state["final_response_text_for_tts"] = error_response # type: ignore
-        final_graph_output_state["is_final_turn_response"] = True # type: ignore
-        current_messages_on_error = list(initial_input_for_graph.get("messages", [])) # type: ignore
-        if not current_messages_on_error or not (isinstance(current_messages_on_error[-1], AIMessage) and current_messages_on_error[-1].content == error_response):
-            current_messages_on_error.append(AIMessage(content=error_response))
-        final_graph_output_state["messages"] = current_messages_on_error # type: ignore
-
+        final_graph_output_state = cast(AgentState, initial_input_for_graph.copy()) #
+        final_graph_output_state["error_message"] = error_response #
+        final_graph_output_state["final_response_text_for_tts"] = error_response #
+        final_graph_output_state["is_final_turn_response"] = True #
+        current_messages_on_error = list(initial_input_for_graph.get("messages", [])) #
+        if not current_messages_on_error or not (isinstance(current_messages_on_error[-1], AIMessage) and current_messages_on_error[-1].content == error_response): #
+            current_messages_on_error.append(AIMessage(content=error_response)) #
+        final_graph_output_state["messages"] = current_messages_on_error #
 
     finally:
-        # 최종 상태를 한번 더 yield (세션 저장용)
-        if final_graph_output_state:
-            # messages 필드가 Langchain 객체이므로 필요시 직렬화 (여기서는 그대로 전달)
-            # final_graph_output_state["messages"] = [msg.dict() for msg in final_graph_output_state.get("messages", [])]
-            
-            # TTS 관련 필드는 AgentState에 없음.
-            yield {"type": "final_state", "session_id": session_id, "data": final_graph_output_state}
-        else: # 예외로 인해 final_graph_output_state가 설정되지 않은 경우
-             yield {"type": "final_state", "session_id": session_id, "data": {"error_message": "Agent 실행 중 심각한 오류로 최종 상태 기록 불가", "is_final_turn_response": True}}
+        if final_graph_output_state: #
+            yield {"type": "final_state", "session_id": session_id, "data": final_graph_output_state} #
+        else: #
+             yield {"type": "final_state", "session_id": session_id, "data": {"error_message": "Agent 실행 중 심각한 오류로 최종 상태 기록 불가", "is_final_turn_response": True}} #
 
-        print(f"--- [{session_id}] Agent Turn 종료 (최종 AI 응답 텍스트 길이: {len(full_response_text_streamed)}) ---")
+        print(f"--- [{session_id}] Agent Turn 종료 (최종 AI 응답 텍스트 길이: {len(full_response_text_streamed)}) ---") #
