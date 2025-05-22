@@ -309,7 +309,8 @@ async def entry_point_node(state: AgentState) -> AgentState:
         "scenario_agent_output": None, "final_response_text_for_tts": None, #
         "is_final_turn_response": False, "error_message": None, #
         "active_scenario_data": None, "active_knowledge_base_content": None, "active_scenario_name": None, #
-        "available_loan_types": ["didimdol", "jeonse"] #
+        "available_loan_types": ["didimdol", "jeonse"], #
+        "loan_selection_is_fresh": False, # Reset flag at the start of the turn
     }
     
     current_loan_type = state.get("current_loan_type") #
@@ -439,9 +440,11 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
             if initial_decision.action == "proceed_with_loan_type_didimdol":
                 new_state_changes["current_loan_type"] = "didimdol" #
                 new_state_changes["main_agent_routing_decision"] = "set_loan_type_didimdol" #
+                new_state_changes["loan_selection_is_fresh"] = True # SET FLAG
             elif initial_decision.action == "proceed_with_loan_type_jeonse":
                 new_state_changes["current_loan_type"] = "jeonse" #
                 new_state_changes["main_agent_routing_decision"] = "set_loan_type_jeonse" #
+                new_state_changes["loan_selection_is_fresh"] = True # SET FLAG
             elif initial_decision.action == "invoke_qa_agent_general":
                 new_state_changes["main_agent_routing_decision"] = "invoke_qa_agent" #
                 new_state_changes["active_scenario_name"] = "일반 금융 상담" #
@@ -668,40 +671,77 @@ async def set_loan_type_node(state: AgentState) -> AgentState:
     
     if new_loan_type and new_loan_type in ALL_SCENARIOS_DATA: #
         active_scenario = ALL_SCENARIOS_DATA[new_loan_type] #
-        initial_stage_id = active_scenario.get("initial_stage_id") #
-        initial_prompt = active_scenario.get("stages", {}).get(str(initial_stage_id), {}).get("prompt") #
+        initial_stage_id_from_scenario = active_scenario.get("initial_stage_id") #
         
-        if not initial_prompt: #
-            initial_prompt = f"{active_scenario.get('scenario_name', new_loan_type + ' 대출')} 상담을 시작하겠습니다. 무엇을 도와드릴까요?" #
+        final_response_for_user: str
+        current_stage_id_for_state: str
 
-        print(f"대출 유형 '{new_loan_type}'으로 설정됨. 시작 단계: '{initial_stage_id}', 안내: '{initial_prompt[:50]}...'") #
+        user_just_selected = state.get("loan_selection_is_fresh", False)
+
+        if user_just_selected:
+            acknowledgement = f"네, {active_scenario.get('scenario_name', new_loan_type + ' 대출 상품')}에 대해 안내해 드리겠습니다. "
+            
+            first_question_stage_id: Optional[str] = None
+            # Determine the first *actual* question stage, skipping the initial greeting stage
+            if new_loan_type == "didimdol":
+                # 'greeting' transitions to 'ask_loan_purpose'
+                first_question_stage_id = "ask_loan_purpose"
+            elif new_loan_type == "jeonse":
+                # 'greeting_jeonse' can transition to 'ask_marital_status_jeonse' or default to 'ask_target_lease_deposit_jeonse'
+                # Let's pick 'ask_marital_status_jeonse' as a more conversational start after general loan selection.
+                first_question_stage_id = "ask_marital_status_jeonse"
+            
+            if first_question_stage_id and first_question_stage_id in active_scenario.get("stages", {}):
+                prompt_of_first_question = active_scenario["stages"][first_question_stage_id].get("prompt")
+                if prompt_of_first_question:
+                    final_response_for_user = acknowledgement + prompt_of_first_question
+                    current_stage_id_for_state = first_question_stage_id
+                else: # Fallback to scenario's initial greeting if specific prompt not found
+                    final_response_for_user = active_scenario.get("stages", {}).get(str(initial_stage_id_from_scenario), {}).get("prompt", "")
+                    current_stage_id_for_state = str(initial_stage_id_from_scenario)
+            else: # Fallback
+                final_response_for_user = active_scenario.get("stages", {}).get(str(initial_stage_id_from_scenario), {}).get("prompt", "")
+                current_stage_id_for_state = str(initial_stage_id_from_scenario)
+        else:
+            # Standard behavior: use the initial greeting of the (potentially switched) loan type
+            final_response_for_user = active_scenario.get("stages", {}).get(str(initial_stage_id_from_scenario), {}).get("prompt", "")
+            current_stage_id_for_state = str(initial_stage_id_from_scenario)
+
+        if not final_response_for_user: # Ultimate fallback
+            final_response_for_user = f"{active_scenario.get('scenario_name', new_loan_type + ' 대출')} 상담을 시작하겠습니다. 무엇을 도와드릴까요?" #
+            current_stage_id_for_state = str(initial_stage_id_from_scenario)
+            
+        print(f"대출 유형 '{new_loan_type}'으로 설정됨. 시작 단계: '{current_stage_id_for_state}', 안내: '{final_response_for_user[:70]}...'") #
         
         updated_messages = list(state.get("messages", [])) #
-        if not updated_messages or not (isinstance(updated_messages[-1], AIMessage) and updated_messages[-1].content == initial_prompt): #
-            updated_messages.append(AIMessage(content=initial_prompt)) #
+        # Ensure AI message isn't duplicated if it's somehow already the last one (e.g. error recovery)
+        if not updated_messages or not (isinstance(updated_messages[-1], AIMessage) and updated_messages[-1].content == final_response_for_user): #
+            updated_messages.append(AIMessage(content=final_response_for_user)) #
 
         return {
             **state,
             "current_loan_type": new_loan_type, #
             "active_scenario_data": active_scenario, #
             "active_scenario_name": active_scenario.get("scenario_name"), #
-            "current_scenario_stage_id": initial_stage_id, #
-            "collected_loan_info": {}, #
-            "final_response_text_for_tts": initial_prompt, #
+            "current_scenario_stage_id": current_stage_id_for_state, #
+            "collected_loan_info": {}, # Reset collected info for new/switched loan type
+            "final_response_text_for_tts": final_response_for_user, #
             "messages": updated_messages, #
             "is_final_turn_response": True  #
         }
     else:
         error_msg = f"요청하신 대출 유형('{new_loan_type}')을 처리할 수 없습니다." #
         print(error_msg) #
-        updated_messages = list(state.get("messages", [])) + [AIMessage(content=error_msg)] #
+        current_messages = list(state.get("messages", []))
+        if not current_messages or not (isinstance(current_messages[-1], AIMessage) and current_messages[-1].content == error_msg):
+            current_messages.append(AIMessage(content=error_msg))
         return {
             **state, 
             "error_message": error_msg,  #
             "final_response_text_for_tts": error_msg,  #
-            "messages": updated_messages, #
+            "messages": current_messages, #
             "is_final_turn_response": True, #
-            "current_loan_type": None #
+            "current_loan_type": state.get("current_loan_type") # Revert to previous loan type or None
         }
 
 

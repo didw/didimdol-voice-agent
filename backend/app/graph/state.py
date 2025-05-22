@@ -19,6 +19,7 @@ class AgentState(TypedDict):
     session_id: str # 세션 ID 추가
     user_input_text: Optional[str]
     user_input_audio_b64: Optional[str] # Base64 인코딩된 오디오 (STT용)
+    loan_selection_is_fresh: Optional[bool] # NEW: Flag to indicate if loan type was just selected
 
     # --- STT 결과 ---
     stt_result: Optional[str]

@@ -3,9 +3,12 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useChatStore } from '@/stores/chatStore' // 경로 확인
 import { storeToRefs } from 'pinia' // storeToRefs can be useful if not using computed for everything
 
+const chatInputRef = ref<HTMLInputElement | null>(null);
+const userInput = ref('');
 const chatStore = useChatStore()
 
 // Using computed properties for most store state as per the new script
+
 const messages = computed(() => chatStore.getMessages)
 const interimStt = computed(() => chatStore.getInterimStt) // Renamed from currentInterimStt for consistency
 const error = computed(() => chatStore.getError)
@@ -29,14 +32,54 @@ const scrollToBottom = async () => {
   }
 }
 
+const focusInput = async () => {
+  await nextTick();
+  console.log('Attempting to focus:', chatInputRef.value); // Log the element
+  if (chatInputRef.value) {
+    if (!chatInputRef.value.disabled) {
+      chatInputRef.value.focus();
+      console.log('document.activeElement:', document.activeElement); // Check what actually has focus
+    } else {
+      console.log('Focus skipped: Input is disabled.');
+    }
+  } else {
+    console.error('chatInputRef is null, cannot focus.');
+  }
+};
+
+const sendMessage = () => {
+  if (userInput.value.trim()) {
+    chatStore.sendWebSocketTextMessage(userInput.value.trim());
+    userInput.value = '';
+    // focusInput(); // Focus immediately after sending
+  }
+};
+
+watch(
+  () => chatStore.messages.length, // Watch the number of messages
+  async (newMessageCount, oldMessageCount) => {
+    if (newMessageCount > oldMessageCount) {
+      const lastMessage = chatStore.messages[chatStore.messages.length - 1];
+      if (lastMessage?.sender === 'ai' && !lastMessage.isStreaming) {
+        await focusInput();
+      } else if (lastMessage?.sender === 'user') { // This condition relies on a 'user' message being added
+         await focusInput();
+      }
+    }
+  }
+);
+
 watch(messages, scrollToBottom, { deep: true })
 watch(interimStt, scrollToBottom) // Scroll also on interim results
 
 // --- Lifecycle Hooks ---
-onMounted(() => {
-  chatStore.initializeSessionAndConnect()
-  scrollToBottom() // Initial scroll
-})
+onMounted(async () => {
+  chatStore.initializeSessionAndConnect();
+  await nextTick(); // Wait for initial rendering
+  messagesContainer.value = document.querySelector('.messages-area'); // Or use ref on messages-area
+  await scrollToBottom();
+  await focusInput(); // Focus on mount
+});
 
 onUnmounted(() => {
   chatStore.disconnectWebSocket()
@@ -47,18 +90,79 @@ onUnmounted(() => {
   }
 })
 
-// --- Text Message Handling ---
-const handleSendTextMessage = () => {
-  if (userInputText.value.trim()) {
-    chatStore.sendWebSocketTextMessage(userInputText.value.trim())
-    userInputText.value = ''
+const handleSendTextMessage = async () => {
+  if (userInputText.value.trim() && !chatInputRef.value?.disabled) {
+    chatStore.sendWebSocketTextMessage(userInputText.value.trim());
+    userInputText.value = '';
+    await focusInput();
   }
-}
+};
 
 // --- Voice Mode Toggle ---
 const toggleMicrophone = async () => {
   await chatStore.toggleVoiceMode()
 }
+
+// Scroll to bottom when messages change
+watch(messages, async () => {
+  await nextTick();
+  if (messagesContainer.value) {
+    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+  }
+}, { deep: true });
+
+
+// Watch for changes that should trigger a focus on the input
+watch(
+  [
+    () => chatStore.messages, // More direct way to watch messages array for changes
+    isProcessingLLM,         // Watch when LLM processing state changes
+    isVoiceModeActive        // Watch when voice mode changes (input might become enabled)
+  ],
+  async ([currentMessages, currentIsProcessingLLM, currentIsVoiceMode], [oldMessages, oldIsProcessingLLM, oldIsVoiceMode]) => {
+    await nextTick(); // Ensure DOM is updated based on these state changes
+
+    const lastMessage = currentMessages.length > 0 ? currentMessages[currentMessages.length - 1] : null;
+
+    // Scenario 1: AI has finished responding (and is not streaming)
+    // and LLM processing is now false.
+    if (
+      lastMessage?.sender === 'ai' &&
+      !lastMessage.isStreaming && // Ensure AI message streaming is complete
+      oldIsProcessingLLM === true && currentIsProcessingLLM === false // LLM just finished
+    ) {
+      // console.log('AI finished, attempting to focus input.');
+      await focusInput();
+      return; // Focused, no need for other checks this run
+    }
+
+    // Scenario 2: User just sent a message
+    // Check if a new user message was added
+    if (lastMessage?.sender === 'user' && currentMessages.length > (oldMessages?.length || 0)) {
+       // console.log('User message sent, attempting to focus input.');
+       await focusInput();
+       return;
+    }
+
+    // Scenario 3: Input becomes enabled after being disabled
+    // e.g., LLM processing finished, or voice mode deactivated
+    if (!chatInputRef.value?.disabled) {
+        // If the input was previously disabled by LLM processing and now it's not
+        if (oldIsProcessingLLM === true && currentIsProcessingLLM === false) {
+            // console.log('Input enabled after LLM processing, focusing.');
+            await focusInput();
+            return;
+        }
+        // If the input was previously disabled by voice mode and now it's not
+        if (oldIsVoiceMode === true && currentIsVoiceMode === false) {
+            // console.log('Input enabled after voice mode deactivation, focusing.');
+            await focusInput();
+            return;
+        }
+    }
+  },
+  { deep: true, immediate: false } // 'deep' for messages array, 'immediate: false' to run after initial setup
+);
 
 // --- Watch for user typing to potentially deactivate voice mode ---
 watch(userInputText, (newValue) => {
@@ -167,19 +271,14 @@ watch(isVoiceModeActive, (newValue) => {
   }
 })
 
-// Watcher from original for server-side EPD (if any specific UI reaction is needed beyond the indicator)
-// This was for stopping client recording, which is now handled by toggleVoiceMode / server instructions.
-// The EPD indicator div below is sufficient for the new requirements.
-// watch(isEPDDetectedByServer, (newVal) => {
-//   if (newVal && isRecording.value) { // isRecording from store
-//     console.log('EPD detected from server, (client recording might be stopped by store logic if applicable).')
-//     // chatStore.isEPDDetectedByServer = false // Reset in store if needed
-//   }
-// })
 </script>
 
 <template>
   <div class="chat-container">
+    <div class="input-area">
+      <input type="text" @keyup.enter="sendMessage" v-model="userInput" />
+      <button @click="sendMessage">Send</button>
+    </div>
     <header class="chat-header">
       <h2>
         디딤돌 대출 음성봇
@@ -236,7 +335,7 @@ watch(isVoiceModeActive, (newValue) => {
     <div class="input-area">
       <input
         type="text"
-        v-model="userInputText"
+        ref="chatInputRef" v-model="userInputText"
         @keyup.enter="handleSendTextMessage"
         placeholder="메시지를 입력하세요..."
         :disabled="isVoiceModeActive || isProcessingLLM || !isWebSocketConnected"
