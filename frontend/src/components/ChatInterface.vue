@@ -275,10 +275,6 @@ watch(isVoiceModeActive, (newValue) => {
 
 <template>
   <div class="chat-container">
-    <div class="input-area">
-      <input type="text" @keyup.enter="sendMessage" v-model="userInput" />
-      <button @click="sendMessage">Send</button>
-    </div>
     <header class="chat-header">
       <h2>
         디딤돌 대출 음성봇
