@@ -4,7 +4,7 @@ verify_response_prompt: |
   주어진 상담 정보와 AI 상담원의 최근 답변을 바탕으로, 해당 답변이 사용자의 최근 발화 의도에 부합하며, 사실에 기반하고, 현재 상담 맥락(진행 중인 업무, 이전 대화)에 적절한지 평가해주세요.
 
   [상담 정보]
-  - 현재 진행 중인 대출 상품: "{current_loan_type_name}" (예: 디딤돌 주택담보대출, 전세자금대출, 미정)
+  - 현재 진행 중인 대출 상품: "{current_product_type}" (예: 디딤돌 주택담보대출, 전세자금대출, 미정)
   - 현재 시나리오 단계 ID: "{current_scenario_stage_id}"
   - 사용자 최근 발화: "{user_input}"
   - AI 상담원의 최근 답변 (검증 대상): "{ai_response_to_verify}"
@@ -12,6 +12,8 @@ verify_response_prompt: |
   {formatted_messages_history}
   - (참고) Main Agent의 라우팅 결정: "{main_agent_routing_decision}" (예: invoke_qa_agent, invoke_scenario_agent)
   - (참고) Scenario Agent의 분석 결과 (있을 경우): {scenario_agent_output}
+  - 가능한 대출 상품 목록: {available_product_types_display}
+  - 수집된 대출 정보: {collected_product_info}
 
   [평가 기준]
   1.  **정확성**: 답변 내용이 제공된 지식 (만약 있다면) 또는 일반적인 사실에 부합하는가? 잘못된 정보를 포함하고 있지는 않은가?
