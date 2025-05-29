@@ -52,7 +52,7 @@ router_prompt: |
   - "select_product_type": 사용자가 아직 특정 금융 상품을 선택하지 않았고 ("{active_scenario_name}"이 "미정"인 경우), 사용자의 발화가 어떤 상품을 원하는지 명확하지 않거나, 단순히 "계좌" 또는 "대출"이라고만 했을 때 사용합니다. 'direct_response'에 "어떤 금융 상품에 대해 자세히 알아보고 싶으신가요? {available_product_types_display} 중에서 선택해주시거나, 원하시는 상품명을 말씀해주세요." 와 같은 안내를 포함합니다.
   - "set_product_type_didimdol": 사용자가 "디딤돌 주택담보대출" 상담을 명확히 시작하거나 전환하길 원할 때.
   - "set_product_type_jeonse": 사용자가 "전세자금대출" 상담을 명확히 시작하거나 전환하길 원할 때.
-  - "set_product_type_deposit_account": 사용자가 "입출금통장 개설" 상담을 명확히 시작하거나 전환하길 원할 때. # 신규 추가
+  - "set_product_type_deposit_account": 사용자가 "입출금통장 개설" 상담을 명확히 시작하거나 전환하길 원할 때.
   - "invoke_scenario_agent": 현재 진행 중인 "{active_scenario_name}" 시나리오의 "{current_stage_prompt}"에 대한 구체적인 답변으로 보이며, 정보 추출이나 복잡한 의도 파악이 필요할 때. (단, "{active_scenario_name}"이 "미정"이 아니어야 함)
   - "invoke_qa_agent": 사용자의 발화가 현재 "{active_scenario_name}" 또는 일반적인 금융 상품과 관련된 구체적인 질문으로, 저장된 지식 기반에서 답변을 찾아야 할 때. (만약 "{active_scenario_name}"이 "미정"이라면 일반적인 금융 QA로 처리)
   - "answer_directly_chit_chat": 사용자의 발화가 금융 상담과 직접적인 관련이 없거나, 시나리오 진행 또는 QA로 처리하기 부적절한 일반적인 대화, 질문, 요청일 경우.
@@ -71,12 +71,14 @@ router_prompt: |
   - 만약 "{active_scenario_name}"이 "미정"인 경우:
     - 사용자가 "디딤돌 대출" 또는 유사 키워드를 언급하면 "set_product_type_didimdol"을 선택합니다.
     - 사용자가 "전세자금 대출" 또는 유사 키워드를 언급하면 "set_product_type_jeonse"를 선택합니다.
-    - 사용자가 "입출금통장" 또는 "계좌개설" 등 유사 키워드를 언급하면 "set_product_type_deposit_account"를 선택합니다. # 신규 추가
+    - 사용자가 "입출금통장" 또는 "계좌개설" 등 유사 키워드를 언급하면 "set_product_type_deposit_account"를 선택합니다.
     - 사용자가 단순히 "대출" 또는 "계좌"라고만 하거나 어떤 상품인지 모호하면 "select_product_type"을 선택하고 안내합니다.
     - 그 외 일반 질문은 "invoke_qa_agent" (일반 QA), 잡담은 "answer_directly_chit_chat"으로 처리합니다.
   - 만약 "{active_scenario_name}"이 설정되어 있는 경우:
-    - 사용자가 현재 진행 중인 시나리오 질문 ("{current_stage_prompt}")에 명확히 답하면 시나리오 관련 action("invoke_scenario_agent", "process_next_scenario_step")을 우선 선택합니다.
-    - 사용자가 시나리오 질문에 답하지 않고 "{active_scenario_name}" 관련 구체적인 정보를 질문하면 "invoke_qa_agent"를 선택합니다. (이때 QA는 해당 상품 지식 기반 사용)
+    - 사용자가 현재 시나리오 질문 ("{current_stage_prompt}")에 대해 직접적인 답변(예: 예/아니오, 요청된 정보)을 제공하는 대신, 해당 질문의 조건, 의미, 결과, 또는 관련 정책에 대해 명확히 질문하는 경우 (예: "주택 있으면 안되나요?", "왜 그걸 물어보시죠?", "그게 무슨 뜻인가요?", "무주택이어야만 하나요?"), 이는 현 시나리오 단계에 대한 질문이므로 "invoke_qa_agent"를 최우선으로 선택합니다. (이때 QA는 "{active_scenario_name}" 관련 지식 기반을 사용합니다.)
+    - 사용자가 현재 진행 중인 시나리오 질문 ("{current_stage_prompt}")에 대한 명확한 답변으로 보이며, 정보 추출이나 다음 단계로의 진행을 위한 의도 파악이 필요할 때 "invoke_scenario_agent"를 선택합니다. (예: "네, 연봉은 5천입니다", "아니오, 해당사항 없습니다.")
+    - 사용자의 발화가 현재 시나리오 질문에 대한 매우 단순하고 명확한 긍정/부정 답변이거나, 다음 단계로 넘어가자는 명시적인 요청일 때 "process_next_scenario_step"를 선택합니다. (예: "네", "아니요", "다음으로 넘어가죠.")
+    - 사용자가 현재 시나리오 단계와는 직접 관련 없지만, 여전히 "{active_scenario_name}"과 관련된 다른 정보를 질문하는 경우 (예: 현재 소득 질문 중인데 갑자기 "금리는 어떻게 되나요?"라고 묻는 경우) "invoke_qa_agent"를 선택합니다.
     - 사용자가 명시적으로 다른 금융 상품 (예: 현재 '디딤돌' 상담 중인데 "입출금통장은요?" 라고 묻는 경우)으로 전환을 원하면, 해당 "set_product_type_..." 액션을 선택합니다.
     - 위 경우가 아니라면, "answer_directly_chit_chat" 또는 "unclear_input"을 고려합니다.
   - 'direct_response'는 'answer_directly_chit_chat' 또는 'select_product_type' action을 위해서만 사용됩니다.
