@@ -32,9 +32,26 @@
       },
       "process_service_choices": {
         "id": "process_service_choices",
-        "prompt": "",
+        "prompt": "", 
         "is_question": false,
-        "default_next_stage_id": "final_summary_deposit"
+        "transitions": [
+          {
+            "next_stage_id": "ask_cc_issuance_method",
+            "condition_description": "사용자가 '체크카드' 또는 '둘 다' 신청을 선택한 경우. (collected_product_info.additional_services_choice 확인)",
+            "example_phrases": ["체크카드만 신청", "둘 다 신청", "체크카드요"]
+          },
+          {
+            "next_stage_id": "ask_ib_notification",
+            "condition_description": "사용자가 '인터넷뱅킹만' 신청을 선택했고 체크카드는 선택하지 않은 경우. (collected_product_info.additional_services_choice 확인)",
+            "example_phrases": ["인터넷뱅킹만 신청", "인뱅만요"]
+          },
+          {
+            "next_stage_id": "final_summary_deposit",
+            "condition_description": "사용자가 부가서비스를 '아니요'라고 선택했거나, 다른 조건에 해당하지 않는 경우. (collected_product_info.additional_services_choice 확인)",
+            "example_phrases": ["아니요", "괜찮아요", "필요 없어요"]
+          }
+        ],
+        "default_next_stage_id": "final_summary_deposit" 
       },
       "ask_cc_issuance_method": {
         "id": "ask_cc_issuance_method",
@@ -68,12 +85,24 @@
         "input_type": "choice",
         "choices": ["자택", "직장"],
         "expected_info_key": "cc_address_type",
-        "default_next_stage_id": "check_next_service_or_summary_after_cc"
+        "default_next_stage_id": "check_next_service_or_summary_after_cc" 
       },
       "check_next_service_or_summary_after_cc": {
         "id": "check_next_service_or_summary_after_cc",
-        "prompt": "",
+        "prompt": "", 
         "is_question": false,
+        "transitions": [
+          {
+            "next_stage_id": "ask_ib_notification",
+            "condition_description": "사용자가 '둘 다 신청'을 선택했고, 체크카드 안내가 완료된 경우. (collected_product_info.additional_services_choice 확인)",
+            "example_phrases": ["둘 다 신청했을 때"]
+          },
+          {
+            "next_stage_id": "final_summary_deposit",
+            "condition_description": "사용자가 '체크카드만' 신청했거나, 다른 조건에 해당하지 않는 경우. (collected_product_info.additional_services_choice 확인)",
+            "example_phrases": ["체크카드만 신청했을 때", "인터넷뱅킹은 신청 안함"]
+          }
+        ],
         "default_next_stage_id": "final_summary_deposit"
       },
       "ask_ib_notification": {
@@ -115,9 +144,9 @@
         "is_question": true,
         "input_type": "text",
         "expected_info_key": "ib_transfer_limits",
-        "default_next_stage_id": "check_next_service_or_summary_after_ib"
+        "default_next_stage_id": "check_next_service_or_summary_after_ib" 
       },
-      "check_next_service_or_summary_after_ib": {
+      "check_next_service_or_summary_after_ib": { 
         "id": "check_next_service_or_summary_after_ib",
         "prompt": "",
         "is_question": false,
@@ -135,7 +164,7 @@
             "example_phrases": ["네", "맞아요", "진행해주세요"]
           },
           {
-            "next_stage_id": "greeting_deposit",
+            "next_stage_id": "greeting_deposit", 
             "condition_description": "사용자가 정보를 수정하거나 처음으로 돌아가길 원하는 경우",
             "example_phrases": ["아니요", "수정할래요", "다시 할래요"]
           }
@@ -144,7 +173,7 @@
       },
       "closing_deposit_confirmed": {
         "id": "closing_deposit_confirmed",
-        "prompt": "%{end_scenario_message}%",
+        "prompt": "%{end_scenario_message}%", 
         "is_question": false,
         "default_next_stage_id": "END_SCENARIO_COMPLETE_DEPOSIT_APPLICATION_FLAG_SET"
       }
