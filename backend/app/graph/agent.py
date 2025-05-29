@@ -232,10 +232,12 @@ async def invoke_scenario_agent_logic(
             format_instructions=format_instructions
         )
         response = await main_llm.ainvoke([HumanMessage(content=formatted_prompt)]) #
-        raw_content = response.content.strip() #
-        if raw_content.startswith("```json"): raw_content = raw_content.replace("```json", "").replace("```", "").strip() #
+        raw_response_content = response.content.strip() #
+        print(f"[{session_id}] LLM Raw Response: {raw_response_content}") # 로깅 추가
         
-        parsed_output_dict = scenario_output_parser.parse(raw_content).model_dump() #
+        if raw_response_content.startswith("```json"): raw_response_content = raw_response_content.replace("```json", "").replace("```", "").strip() #
+        
+        parsed_output_dict = scenario_output_parser.parse(raw_response_content).model_dump() #
         print(f"Scenario Agent 결과: {parsed_output_dict}") #
         return cast(ScenarioAgentOutput, parsed_output_dict)
     except Exception as e:
@@ -365,6 +367,7 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
     messages_history = state.get("messages", []) #
     current_product_type = state.get("current_product_type") #
     active_scenario_data = get_active_scenario_data(state) #
+    session_id = state.get("session_id", "")
     
     prompt_template_key = ""
     if not current_product_type: # 상품 유형 미선택 (초기 또는 사용자가 명확히 안했을 때)
@@ -426,6 +429,8 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
         
         response = await main_llm.ainvoke([HumanMessage(content=main_agent_prompt_filled)]) #
         raw_response_content = response.content.strip() #
+        print(f"[{session_id}] LLM Raw Response: {raw_response_content}") # 로깅 추가
+        
         if raw_response_content.startswith("```json"): raw_response_content = raw_response_content.replace("```json", "").replace("```", "").strip() #
         
         parsed_decision = response_parser.parse(raw_response_content) #
@@ -503,16 +508,15 @@ async def call_scenario_agent_node(state: AgentState) -> AgentState:
         if not current_stage_id: #
              return {**state, "error_message": f"'{current_product_type}' 상품의 시작 단계를 찾을 수 없습니다.", "main_agent_routing_decision": "unclear_input", "is_final_turn_response": True} #
 
-    current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {}) #
-    messages_history = state.get("messages", [])[:-1] #
-    scenario_name = active_scenario_data.get("scenario_name", "대출 상담") #
-    
+    current_stage_info = active_scenario_data.get("stages", {}) #
+    current_stage_id_for_state: str
+
     output = await invoke_scenario_agent_logic(
         user_input=user_input,
         current_stage_prompt=current_stage_info.get("prompt", ""),
         expected_info_key=current_stage_info.get("expected_info_key"),
-        messages_history=messages_history,
-        scenario_name=scenario_name
+        messages_history=state.get("messages", [])[:-1],
+        scenario_name=active_scenario_data.get("scenario_name", "대출 상담")
     ) #
     return {**state, "scenario_agent_output": output} #
 
@@ -599,9 +603,11 @@ async def main_agent_scenario_processing_node(state: AgentState) -> AgentState:
             )
             try:
                 response = await main_llm.ainvoke([HumanMessage(content=llm_prompt_for_next_stage)]) #
-                raw_content = response.content.strip() #
-                if raw_content.startswith("```json"): raw_content = raw_content.replace("```json", "").replace("```", "").strip() #
-                decision_data = next_stage_decision_parser.parse(raw_content)  #
+                raw_response_content = response.content.strip() #
+                print(f"[{session_id}] LLM Raw Response: {raw_response_content}") # 로깅 추가
+                
+                if raw_response_content.startswith("```json"): raw_response_content = raw_response_content.replace("```json", "").replace("```", "").strip() #
+                decision_data = next_stage_decision_parser.parse(raw_response_content)  #
                 determined_next_stage_id = decision_data.chosen_next_stage_id #
                 print(f"LLM 결정 다음 단계 ID ('{current_product_type}' 시나리오): '{determined_next_stage_id}'") #
                 if determined_next_stage_id not in stages_data and \
@@ -703,7 +709,7 @@ async def set_product_type_node(state: AgentState) -> AgentState: # AgentState �
                 first_question_stage_id = "ask_marital_status_jeonse" # 시나리오에 따라 조정
             elif new_product_type == "deposit_account": # 신규 추가
                 first_question_stage_id = "ask_lifelong_account" # 입출금 통장 시나리오의 첫 질문으로 바로 이동 (greeting_deposit은 선택 유도 후 실제 정보수집 시작점)
-                                                                  # greeting_deposit에서 부가서비스 선택에 따라 분기되므로, acknowledgemnet 이후 greeting_deposit의 prompt를 붙이는게 나을수도 있음
+                                                                  # greeting_deposit에서 부가서비스 선택에 따라 분기되므로, acknowledgemnet 이후 greeting_deposit의 prompt를 붙이는게 나을수도 있음.
                                                                   # 여기서는 일단 시나리오의 initial_stage_id를 따르도록 수정 (아래 로직과 통일)
                 first_question_stage_id = initial_stage_id_from_scenario
 
