@@ -29,22 +29,22 @@ scenario_output_parser = PydanticOutputParser(pydantic_object=ScenarioOutputMode
 
 class InitialTaskDecisionModel(BaseModel):
     action: Literal[
-        "proceed_with_loan_type_didimdol",
-        "proceed_with_loan_type_jeonse",
-        "proceed_with_loan_type_deposit_account", # 신규 추가
+        "proceed_with_product_type_didimdol",
+        "proceed_with_product_type_jeonse",
+        "proceed_with_product_type_deposit_account",
         "invoke_qa_agent_general",
         "answer_directly_chit_chat",
-        "clarify_loan_type"
+        "clarify_product_type"
     ] = PydanticField(description="결정된 Action")
     direct_response: Optional[str] = PydanticField(default=None, description="AI의 직접 응답 텍스트 (필요시)")
 initial_task_decision_parser = PydanticOutputParser(pydantic_object=InitialTaskDecisionModel)
 
 class MainRouterDecisionModel(BaseModel):
     action: Literal[
-        "select_loan_type",
-        "set_loan_type_didimdol",
-        "set_loan_type_jeonse",
-        "set_loan_type_deposit_account", # 신규 추가
+        "select_product_type",
+        "set_product_type_didimdol",
+        "set_product_type_jeonse",
+        "set_product_type_deposit_account",
         "invoke_scenario_agent",
         "invoke_qa_agent",
         "answer_directly_chit_chat",
@@ -233,7 +233,7 @@ async def invoke_scenario_agent_logic(
         )
         response = await main_llm.ainvoke([HumanMessage(content=formatted_prompt)]) #
         raw_response_content = response.content.strip() #
-        print(f"[{session_id}] LLM Raw Response: {raw_response_content}") # 로깅 추가
+        print(f"LLM Raw Response: {raw_response_content}") #
         
         if raw_response_content.startswith("```json"): raw_response_content = raw_response_content.replace("```json", "").replace("```", "").strip() #
         
@@ -604,7 +604,7 @@ async def main_agent_scenario_processing_node(state: AgentState) -> AgentState:
             try:
                 response = await main_llm.ainvoke([HumanMessage(content=llm_prompt_for_next_stage)]) #
                 raw_response_content = response.content.strip() #
-                print(f"[{session_id}] LLM Raw Response: {raw_response_content}") # 로깅 추가
+                print(f"LLM Raw Response: {raw_response_content}") # 로깅 추가
                 
                 if raw_response_content.startswith("```json"): raw_response_content = raw_response_content.replace("```json", "").replace("```", "").strip() #
                 decision_data = next_stage_decision_parser.parse(raw_response_content)  #

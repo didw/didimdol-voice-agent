@@ -6,28 +6,28 @@ initial_task_selection_prompt: |
   "{user_input}"
 
   [수행할 작업]
-  사용자의 발화를 분석하여 다음 중 가장 적합한 'action'을 결정하고, 필요한 경우 'selected_loan_type'을 포함하여 JSON 형식으로 응답해주세요.
+  사용자의 발화를 분석하여 다음 중 가장 적합한 'action'을 결정하고, 필요한 경우 'selected_product_type'을 포함하여 JSON 형식으로 응답해주세요.
 
   [결정 가능한 Action 종류 및 설명]
-  - "proceed_with_loan_type_didimdol": 사용자가 "디딤돌 주택담보대출" 관련 상담을 명확히 원할 때.
-  - "proceed_with_loan_type_jeonse": 사용자가 "전세자금대출" 관련 상담을 명확히 원할 때.
-  - "proceed_with_loan_type_deposit_account": 사용자가 "입출금통장 개설" 또는 "계좌 만들기" 등 입출금 계좌 신규 관련 상담을 명확히 원할 때. # 신규 추가
-  - "invoke_qa_agent_general": 사용자가 특정 상품을 언급하지 않고 일반적인 금융 질문을 하거나, 어떤 상품인지 불분명한 질문을 할 때.
+  - "proceed_with_product_type_didimdol": 사용자가 "디딤돌 주택담보대출" 관련 상담을 명확히 원할 때.
+  - "proceed_with_product_type_jeonse": 사용자가 "전세자금대출" 관련 상담을 명확히 원할 때.
+  - "proceed_with_product_type_deposit_account": 사용자가 "입출금통장 개설" 또는 "계좌 만들기" 등 입출금 계좌 신규 관련 상담을 명확히 원할 때.
+  - "invoke_qa_agent_general": 사용자가 특정 상품 혹은 일반적인 금융과 관련된 질문을 할 때.
   - "answer_directly_chit_chat": 사용자의 발화가 금융 상품과 무관한 일반 대화, 인사, 감사 등일 때.
-  - "clarify_loan_type": 사용자가 "대출" 또는 "계좌" 라고만 언급하거나 모호하게 말하여 어떤 상품인지 명확히 알 수 없을 때. 이 경우, 사용자에게 디딤돌 대출, 전세자금 대출, 입출금통장 중 어떤 것을 원하는지 다시 질문해야 합니다.
+  - "clarify_product_type": 사용자가 "대출" 또는 "계좌" 라고만 언급하거나 모호하게 말하여 어떤 상품인지 명확히 알 수 없을 때. 이 경우, 사용자에게 디딤돌 대출, 전세자금 대출, 입출금통장 중 사용자 요청에 적당한 상품 후보중 어떤 것을 원하는지 다시 질문해야 합니다.
 
   [JSON 출력 형식]
   {{
     "action": "결정된 Action (위 옵션 중 하나)",
-    "direct_response": "action이 'clarify_loan_type' 또는 'answer_directly_chit_chat'일 경우 AI의 직접 응답 텍스트, 그 외에는 null"
+    "direct_response": "action이 'clarify_product_type' 또는 'answer_directly_chit_chat'일 경우 AI의 직접 응답 텍스트, 그 외에는 null"
   }}
 
   [판단 가이드라인]
-  - "디딤돌", "주택 구입 자금", "내집마련" 등의 키워드는 "proceed_with_loan_type_didimdol"로 연결하세요.
-  - "전세", "전세자금", "임차보증금" 등의 키워드는 "proceed_with_loan_type_jeonse"로 연결하세요.
-  - "입출금통장", "계좌개설", "통장만들기", "계좌만들고싶어" 등의 키워드는 "proceed_with_loan_type_deposit_account"로 연결하세요. # 신규 추가
-  - 사용자가 단순히 "대출 받고 싶어요", "계좌 만들고 싶어요" 또는 "문의합니다" 와 같이 모호하게 말하면 "clarify_loan_type"를 선택하고, 'direct_response'에 "어떤 금융 상품에 대해 안내해 드릴까요? 디딤돌 주택담보대출, 전세자금대출, 입출금통장 개설 중 선택해주세요." 와 같이 안내합니다.
-  - 사용자의 질문이 특정 상품과 무관한 일반 금융 상식 (예: "금리가 뭔가요?")이거나, 어떤 상품인지 특정하기 어려운 금융 관련 질문일 경우 "invoke_qa_agent_general"을 사용하세요.
+  - "디딤돌", "주택 구입 자금", "내집마련" 등의 키워드는 "proceed_with_product_type_didimdol"로 연결하세요.
+  - "전세", "전세자금", "임차보증금" 등의 키워드는 "proceed_with_product_type_jeonse"로 연결하세요.
+  - "입출금통장", "계좌개설", "통장만들기", "계좌만들고싶어" 등의 키워드는 "proceed_with_product_type_deposit_account"로 연결하세요.
+  - 사용자가 단순히 "대출 받고 싶어요", "계좌 만들고 싶어요" 또는 "문의합니다" 와 같이 모호하게 말하면 "clarify_product_type"를 선택하고, 'direct_response'에 사용자가 요청한 상품과 유사한 상품 리스트를 나열하고 원하는 상품을 선택해달라고 안내합니다.
+  - 사용자의 질문이 특정 상품과 무관한 일반 금융 상식 (예: "금리가 뭔가요?")이거나, 기타 금융 관련 질문일 경우 "invoke_qa_agent_general"을 사용하세요.
 
 router_prompt: |
   당신은 사용자와 "{active_scenario_name}"에 대한 전문적인 상담을 진행하면서, 동시에 다양한 주제에 대해 자유롭고 자연스러운 대화도 가능한 다재다능한 AI 어시스턴트입니다.
@@ -49,10 +49,10 @@ router_prompt: |
   사용자의 최근 발화("{user_input}")를 면밀히 분석하여, 다음 중 가장 적합한 'action'을 결정하고, 관련된 추가 정보를 포함하여 JSON 형식으로 응답해주세요.
 
   [결정 가능한 Action 종류 및 설명]
-  - "select_loan_type": 사용자가 아직 특정 금융 상품을 선택하지 않았고 ("{active_scenario_name}"이 "미정"인 경우), 사용자의 발화가 어떤 상품을 원하는지 명확하지 않거나, 단순히 "계좌" 또는 "대출"이라고만 했을 때 사용합니다. 'direct_response'에 "어떤 금융 상품에 대해 자세히 알아보고 싶으신가요? {available_product_types_display} 중에서 선택해주시거나, 원하시는 상품명을 말씀해주세요." 와 같은 안내를 포함합니다.
-  - "set_loan_type_didimdol": 사용자가 "디딤돌 주택담보대출" 상담을 명확히 시작하거나 전환하길 원할 때.
-  - "set_loan_type_jeonse": 사용자가 "전세자금대출" 상담을 명확히 시작하거나 전환하길 원할 때.
-  - "set_loan_type_deposit_account": 사용자가 "입출금통장 개설" 상담을 명확히 시작하거나 전환하길 원할 때. # 신규 추가
+  - "select_product_type": 사용자가 아직 특정 금융 상품을 선택하지 않았고 ("{active_scenario_name}"이 "미정"인 경우), 사용자의 발화가 어떤 상품을 원하는지 명확하지 않거나, 단순히 "계좌" 또는 "대출"이라고만 했을 때 사용합니다. 'direct_response'에 "어떤 금융 상품에 대해 자세히 알아보고 싶으신가요? {available_product_types_display} 중에서 선택해주시거나, 원하시는 상품명을 말씀해주세요." 와 같은 안내를 포함합니다.
+  - "set_product_type_didimdol": 사용자가 "디딤돌 주택담보대출" 상담을 명확히 시작하거나 전환하길 원할 때.
+  - "set_product_type_jeonse": 사용자가 "전세자금대출" 상담을 명확히 시작하거나 전환하길 원할 때.
+  - "set_product_type_deposit_account": 사용자가 "입출금통장 개설" 상담을 명확히 시작하거나 전환하길 원할 때. # 신규 추가
   - "invoke_scenario_agent": 현재 진행 중인 "{active_scenario_name}" 시나리오의 "{current_stage_prompt}"에 대한 구체적인 답변으로 보이며, 정보 추출이나 복잡한 의도 파악이 필요할 때. (단, "{active_scenario_name}"이 "미정"이 아니어야 함)
   - "invoke_qa_agent": 사용자의 발화가 현재 "{active_scenario_name}" 또는 일반적인 금융 상품과 관련된 구체적인 질문으로, 저장된 지식 기반에서 답변을 찾아야 할 때. (만약 "{active_scenario_name}"이 "미정"이라면 일반적인 금융 QA로 처리)
   - "answer_directly_chit_chat": 사용자의 발화가 금융 상담과 직접적인 관련이 없거나, 시나리오 진행 또는 QA로 처리하기 부적절한 일반적인 대화, 질문, 요청일 경우.
@@ -64,22 +64,22 @@ router_prompt: |
   {{
     "action": "결정된 Action (위 옵션 중 하나)",
     "extracted_value": "action이 'process_next_scenario_step'일 경우 사용자의 단순 답변에서 추출된 값, 그 외에는 null",
-    "direct_response": "action이 'answer_directly_chit_chat' 또는 'select_loan_type'일 경우 AI의 직접 응답 텍스트, 그 외에는 null"
+    "direct_response": "action이 'answer_directly_chit_chat' 또는 'select_product_type'일 경우 AI의 직접 응답 텍스트, 그 외에는 null"
   }}
 
   [판단 가이드라인 및 추가 지침]
   - 만약 "{active_scenario_name}"이 "미정"인 경우:
-    - 사용자가 "디딤돌 대출" 또는 유사 키워드를 언급하면 "set_loan_type_didimdol"을 선택합니다.
-    - 사용자가 "전세자금 대출" 또는 유사 키워드를 언급하면 "set_loan_type_jeonse"를 선택합니다.
-    - 사용자가 "입출금통장" 또는 "계좌개설" 등 유사 키워드를 언급하면 "set_loan_type_deposit_account"를 선택합니다. # 신규 추가
-    - 사용자가 단순히 "대출" 또는 "계좌"라고만 하거나 어떤 상품인지 모호하면 "select_loan_type"을 선택하고 안내합니다.
+    - 사용자가 "디딤돌 대출" 또는 유사 키워드를 언급하면 "set_product_type_didimdol"을 선택합니다.
+    - 사용자가 "전세자금 대출" 또는 유사 키워드를 언급하면 "set_product_type_jeonse"를 선택합니다.
+    - 사용자가 "입출금통장" 또는 "계좌개설" 등 유사 키워드를 언급하면 "set_product_type_deposit_account"를 선택합니다. # 신규 추가
+    - 사용자가 단순히 "대출" 또는 "계좌"라고만 하거나 어떤 상품인지 모호하면 "select_product_type"을 선택하고 안내합니다.
     - 그 외 일반 질문은 "invoke_qa_agent" (일반 QA), 잡담은 "answer_directly_chit_chat"으로 처리합니다.
   - 만약 "{active_scenario_name}"이 설정되어 있는 경우:
     - 사용자가 현재 진행 중인 시나리오 질문 ("{current_stage_prompt}")에 명확히 답하면 시나리오 관련 action("invoke_scenario_agent", "process_next_scenario_step")을 우선 선택합니다.
     - 사용자가 시나리오 질문에 답하지 않고 "{active_scenario_name}" 관련 구체적인 정보를 질문하면 "invoke_qa_agent"를 선택합니다. (이때 QA는 해당 상품 지식 기반 사용)
-    - 사용자가 명시적으로 다른 금융 상품 (예: 현재 '디딤돌' 상담 중인데 "입출금통장은요?" 라고 묻는 경우)으로 전환을 원하면, 해당 "set_loan_type_..." 액션을 선택합니다.
+    - 사용자가 명시적으로 다른 금융 상품 (예: 현재 '디딤돌' 상담 중인데 "입출금통장은요?" 라고 묻는 경우)으로 전환을 원하면, 해당 "set_product_type_..." 액션을 선택합니다.
     - 위 경우가 아니라면, "answer_directly_chit_chat" 또는 "unclear_input"을 고려합니다.
-  - 'direct_response'는 'answer_directly_chit_chat' 또는 'select_loan_type' action을 위해서만 사용됩니다.
+  - 'direct_response'는 'answer_directly_chit_chat' 또는 'select_product_type' action을 위해서만 사용됩니다.
 
 determine_next_scenario_stage: |
   당신은 "{active_scenario_name}" 상담 시나리오의 흐름을 관리하는 지능형 의사결정 모듈입니다.
