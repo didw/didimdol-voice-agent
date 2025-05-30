@@ -117,10 +117,10 @@ export const useChatStore = defineStore('chat', {
       this.webSocket = new WebSocket(fullWebSocketUrl)
 
       this.webSocket.onopen = () => {
-        console.log('WebSocket connection established for session:', this.sessionId)
-        this.isWebSocketConnected = true
-        this.error = null
-      }
+        console.log('ONOPEN: WebSocket connection established for session:', this.sessionId); // 확인용 로그 추가
+        this.isWebSocketConnected = true;
+        this.error = null;
+      };
 
       this.webSocket.onmessage = (event) => {
         try {
@@ -207,7 +207,7 @@ export const useChatStore = defineStore('chat', {
         }
       }
       this.webSocket.onerror = (errorEvent) => {
-        console.error('WebSocket error:', errorEvent)
+        console.error('ONERROR: WebSocket error. Event:', errorEvent);
         this.error = 'WebSocket 연결 중 오류가 발생했습니다.'
         this.isWebSocketConnected = false
         this.isProcessingLLM = false
@@ -216,12 +216,18 @@ export const useChatStore = defineStore('chat', {
         this.stopRecording()
       }
       this.webSocket.onclose = (closeEvent) => {
-        console.log('WebSocket connection closed:', closeEvent.code, closeEvent.reason)
+        console.log(
+          'ONCLOSE: WebSocket connection closed. Code:', closeEvent.code,
+          'Reason:', closeEvent.reason,
+          'WasClean:', closeEvent.wasClean
+        );
         this.isWebSocketConnected = false
         this.isProcessingLLM = false
         this.isPlayingTTS = false
         if (!closeEvent.wasClean) {
-          this.error = 'WebSocket 연결이 비정상적으로 종료되었습니다.'
+          // 이전에는 "비정상적으로 종료" 오류가 있었으므로, 이 메시지가 여전히 나올 수 있음
+          // 하지만 이제는 연결 자체는 성공 후 다른 이유로 닫힐 수 있음
+          this.error = 'WebSocket 연결이 예상치 않게 종료되었습니다. (Code: ' + closeEvent.code + ')';
         }
         this.isVoiceModeActive = false
         this.stopRecording()
