@@ -221,7 +221,7 @@ class StreamTTSService:
                  language_code: str = "ko-KR",
                  voice_name: str = "ko-KR-Chirp3-HD-Orus", # Updated voice model
                  audio_encoding: tts.AudioEncoding = tts.AudioEncoding.MP3, 
-                 speaking_rate: float = 1.0,
+                 speaking_rate: float = 1.2,
                  pitch: float = 0.0):
         
         self.session_id = session_id
@@ -242,9 +242,9 @@ class StreamTTSService:
         self.on_error = on_error
         self._current_tts_task: Optional[asyncio.Task] = None
         # Increased chunk size for potentially smoother delivery of MP3
-        self.simulated_chunk_size_bytes = 16384 # Example: 16KB
+        self.simulated_chunk_size_bytes = 32768 # <--- 변경된 기본값 (예: 32KB)
 
-        print(f"StreamTTSService ({self.session_id}) initialized. Voice: {voice_name}, Encoding: {audio_encoding.name}")
+        print(f"StreamTTSService ({self.session_id}) initialized. Voice: {voice_name}, Encoding: {audio_encoding.name}, Speaking Rate: {speaking_rate}, Chunk Size: {self.simulated_chunk_size_bytes}") #
 
     async def _generate_and_stream_audio(self, text: str):
         if not GOOGLE_SERVICES_AVAILABLE: 
@@ -390,7 +390,8 @@ async def synthesize_text_to_audio_bytes_non_streaming(text: str) -> bytes:
         name="ko-KR-Chirp3-HD-Orus", # Updated voice model
     )
     audio_config = tts.AudioConfig(
-        audio_encoding=tts.AudioEncoding.MP3
+        audio_encoding=tts.AudioEncoding.MP3,
+        speaking_rate=1.2 # <--- 단건 처리 함수에도 반영
     )
     print(f"Google TTS (단건) 요청 중 (텍스트: {text[:30]}...)")
     try:
