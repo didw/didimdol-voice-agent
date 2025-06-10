@@ -9,7 +9,12 @@ app = FastAPI(title="Didimdol Voice Agent API")
 # CORS 미들웨어 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "https://6438-3-36-29-2.ngrok-free.app"], # 개발 프론트엔드 주소
+    allow_origins=[
+        "http://localhost:5173", 
+        "http://127.0.0.1:5173", 
+        "https://6438-3-36-29-2.ngrok-free.app",
+        "https://3.36.13.147"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
