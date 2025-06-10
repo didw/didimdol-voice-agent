@@ -169,6 +169,17 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     await tts_service.stop_tts_stream() 
                 else: print(f"[{session_id}] TTS stop_tts, TTS service N/A.")
     except WebSocketDisconnect: print(f"WebSocket disconnected by client: {session_id}")
+    except RuntimeError as e:
+        # 클라이언트의 비정상 종료로 인한 특정 RuntimeError를 정상적인 연결 종료로 처리
+        if 'Cannot call "receive" once a disconnect message has been received' in str(e):
+            print(f"WebSocket closed abruptly, handled as a normal disconnect: {session_id}")
+        else:
+            # 그 외의 다른 RuntimeError는 실제 에러로 간주하고 로그를 남김
+            print(f"An unexpected WebSocket RuntimeError occurred for session {session_id}: {e}")
+            import traceback; traceback.print_exc()
+            try: 
+                await manager.send_json_to_client(session_id, {"type": "error", "message": f"Server runtime error: {str(e)}"})
+            except Exception: pass 
     except Exception as e:
         print(f"WebSocket Error for session {session_id}: {e}")
         import traceback; traceback.print_exc()
