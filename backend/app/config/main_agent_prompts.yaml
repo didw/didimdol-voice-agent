@@ -16,18 +16,16 @@ initial_task_selection_prompt: |
   - "answer_directly_chit_chat": 사용자의 발화가 금융 상품과 무관한 일반 대화, 인사, 감사 등일 때.
   - "clarify_product_type": 사용자가 "대출" 또는 "계좌" 라고만 언급하거나 모호하게 말하여 어떤 상품인지 명확히 알 수 없을 때. 이 경우, 사용자에게 디딤돌 대출, 전세자금 대출, 입출금통장 중 사용자 요청에 적당한 상품 후보중 어떤 것을 원하는지 다시 질문해야 합니다.
 
-  [JSON 출력 형식]
-  {{
-    "action": "결정된 Action (위 옵션 중 하나)",
-    "direct_response": "action이 'clarify_product_type' 또는 'answer_directly_chit_chat'일 경우 AI의 직접 응답 텍스트, 그 외에는 null"
-  }}
-
   [판단 가이드라인]
   - "디딤돌", "주택 구입 자금", "내집마련" 등의 키워드는 "proceed_with_product_type_didimdol"로 연결하세요.
   - "전세", "전세자금", "임차보증금" 등의 키워드는 "proceed_with_product_type_jeonse"로 연결하세요.
   - "입출금통장", "계좌개설", "통장만들기", "계좌만들고싶어" 등의 키워드는 "proceed_with_product_type_deposit_account"로 연결하세요.
   - 사용자가 단순히 "대출 받고 싶어요", "계좌 만들고 싶어요" 또는 "문의합니다" 와 같이 모호하게 말하면 "clarify_product_type"를 선택하고, 'direct_response'에 사용자가 요청한 상품과 유사한 상품 리스트를 나열하고 원하는 상품을 선택해달라고 안내합니다.
   - 사용자의 질문이 특정 상품과 무관한 일반 금융 상식 (예: "금리가 뭔가요?")이거나, 기타 금융 관련 질문일 경우 "invoke_qa_agent_general"을 사용하세요.
+
+  [Output format]
+  - Your final answer must be a JSON object that strictly adheres to the following format.
+  {format_instructions}
 
 router_prompt: |
   당신은 사용자와 "{active_scenario_name}"에 대한 전문적인 상담을 진행하면서, 동시에 다양한 주제에 대해 자유롭고 자연스러운 대화도 가능한 다재다능한 AI 어시스턴트입니다.
@@ -60,13 +58,6 @@ router_prompt: |
   - "end_conversation": 사용자가 명확한 상담 종료 의사를 표현했을 때.
   - "unclear_input": 사용자 발화 의도가 위의 어떤 경우에도 해당하지 않고 정말로 불분명할 때.
 
-  [JSON 출력 형식]
-  {{
-    "action": "결정된 Action (위 옵션 중 하나)",
-    "extracted_value": "action이 'process_next_scenario_step'일 경우 사용자의 단순 답변에서 추출된 값, 그 외에는 null",
-    "direct_response": "action이 'answer_directly_chit_chat' 또는 'select_product_type'일 경우 AI의 직접 응답 텍스트, 그 외에는 null"
-  }}
-
   [판단 가이드라인 및 추가 지침]
   - 만약 "{active_scenario_name}"이 "미정"인 경우:
     - 사용자가 "디딤돌 대출" 또는 유사 키워드를 언급하면 "set_product_type_didimdol"을 선택합니다.
@@ -82,6 +73,10 @@ router_prompt: |
     - 사용자가 명시적으로 다른 금융 상품 (예: 현재 '디딤돌' 상담 중인데 "입출금통장은요?" 라고 묻는 경우)으로 전환을 원하면, 해당 "set_product_type_..." 액션을 선택합니다.
     - 위 경우가 아니라면, "answer_directly_chit_chat" 또는 "unclear_input"을 고려합니다.
   - 'direct_response'는 'answer_directly_chit_chat' 또는 'select_product_type' action을 위해서만 사용됩니다.
+
+  [Output format]
+  - Your final answer must be a JSON object that strictly adheres to the following format.
+  {format_instructions}
 
 determine_next_scenario_stage: |
   당신은 "{active_scenario_name}" 상담 시나리오의 흐름을 관리하는 지능형 의사결정 모듈입니다.

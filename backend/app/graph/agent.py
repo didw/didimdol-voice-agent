@@ -412,9 +412,15 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
     response_parser = None
     try:
         if prompt_template_key == 'initial_task_selection_prompt':
-            main_agent_prompt_filled = prompt_template.format(user_input=user_input) #
             response_parser = initial_task_decision_parser #
+            format_instructions = response_parser.get_format_instructions()
+            main_agent_prompt_filled = prompt_template.format(
+                user_input=user_input,
+                format_instructions=format_instructions # 주입
+            )
         else: # router_prompt
+            response_parser = main_router_decision_parser #
+            format_instructions = response_parser.get_format_instructions()
             main_agent_prompt_filled = prompt_template.format(
                 user_input=user_input, #
                 active_scenario_name=active_scenario_name_for_prompt, #
@@ -423,9 +429,9 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
                 current_stage_prompt=current_stage_prompt_for_prompt, #
                 collected_product_info=str(state.get("collected_product_info", {})), #
                 expected_info_key=expected_info_key_for_prompt, #
-                available_product_types_display=available_product_types_display #
+                available_product_types_display=available_product_types_display, #
+                format_instructions=format_instructions # 주입
             )
-            response_parser = main_router_decision_parser #
         
         response = await main_llm.ainvoke([HumanMessage(content=main_agent_prompt_filled)]) #
         raw_response_content = response.content.strip() #
