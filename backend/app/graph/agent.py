@@ -188,13 +188,20 @@ async def get_active_knowledge_base(state: AgentState) -> Optional[str]:
     return None
 
 
-def format_messages_for_prompt(messages: Sequence[BaseMessage], max_history: int = 3) -> str:
+def format_messages_for_prompt(messages: Sequence[BaseMessage], max_history: int = 5) -> str: # max_history 증가 고려
     history_str = []
-    relevant_messages = [m for m in messages if isinstance(m, (HumanMessage, AIMessage))][-(max_history * 2):] #
+    # 이제 SystemMessage도 포함하여 최근 히스토리를 구성
+    relevant_messages = [m for m in messages if isinstance(m, (HumanMessage, AIMessage, SystemMessage))][-(max_history * 2):]
     for msg in relevant_messages:
-        role = "사용자" if isinstance(msg, HumanMessage) else "상담원" #
+        if isinstance(msg, HumanMessage):
+            role = "사용자"
+        elif isinstance(msg, AIMessage):
+            role = "상담원"
+        else: # SystemMessage
+            role = "시스템"
         history_str.append(f"{role}: {msg.content}")
-    return "\n".join(history_str) if history_str else "이전 대화 없음." #
+    return "\n".join(history_str) if history_str else "이전 대화 없음."
+
 
 def format_transitions_for_prompt(transitions: List[Dict[str, Any]], current_stage_prompt: str) -> str:
     if not transitions:
@@ -439,7 +446,12 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
         
         if raw_response_content.startswith("```json"): raw_response_content = raw_response_content.replace("```json", "").replace("```", "").strip() #
         
-        parsed_decision = response_parser.parse(raw_response_content) #
+
+
+        parsed_decision = response_parser.parse(raw_response_content)
+        
+        # return {**state, **new_state_changes}
+
         
         new_state_changes: Dict[str, Any] = {"main_agent_routing_decision": parsed_decision.action} #
         if hasattr(parsed_decision, 'direct_response') and parsed_decision.direct_response: #
@@ -455,6 +467,18 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
                     "is_scenario_related": True #
                 })
         
+        # Action 결정 내용을 SystemMessage로 만들어 히스토리에 추가
+        system_log_message = f"Main Agent 판단 결과: action='{parsed_decision.action}'"
+        if hasattr(parsed_decision, 'direct_response') and parsed_decision.direct_response:
+            system_log_message += f", direct_response='{parsed_decision.direct_response[:30]}...'"
+
+        # 기존 메시지 목록에 시스템 메시지 추가
+        updated_messages = list(state.get("messages", []))
+        updated_messages.append(SystemMessage(content=system_log_message))
+        new_state_changes["messages"] = updated_messages # 상태 업데이트에 포함
+
+        print(f"Main Agent 최종 결정: {new_state_changes.get('main_agent_routing_decision')}")
+
         if prompt_template_key == 'initial_task_selection_prompt':
             initial_decision = cast(InitialTaskDecisionModel, parsed_decision) #
             if initial_decision.action == "proceed_with_product_type_didimdol":
