@@ -87,12 +87,13 @@ PROMPT_FILES = {
 # --- LLM 초기화 ---
 if not OPENAI_API_KEY:
     print("CRITICAL: OPENAI_API_KEY가 설정되지 않았습니다. .env 파일을 확인하세요.")
-main_llm = ChatOpenAI(
+json_llm = ChatOpenAI(
     model=LLM_MODEL_NAME, openai_api_key=OPENAI_API_KEY, temperature=0.1,
     model_kwargs={"response_format": {"type": "json_object"}}
 ) if OPENAI_API_KEY else None
 
-streaming_llm = ChatOpenAI(
+# 일반 텍스트 생성을 위한 LLM (스트리밍 및 일반 호출 겸용)
+generative_llm = ChatOpenAI(
     model=LLM_MODEL_NAME, openai_api_key=OPENAI_API_KEY, temperature=0.3, streaming=True
 ) if OPENAI_API_KEY else None
 
@@ -174,14 +175,14 @@ load_all_scenarios_sync()
 synthesizer_prompt_template = ChatPromptTemplate.from_template(ALL_PROMPTS.get('main_agent', {}).get('synthesizer_prompt', ''))
 synthesizer_chain = (
     {
-        "chat_history": lambda x: x["chat_history"],
+        "chat_history": lambda x: format_messages_for_prompt(x["chat_history"]),
         "user_question": lambda x: x["user_question"],
         "contextual_response": lambda x: x["contextual_response"],
         "factual_response": lambda x: x["factual_response"],
     }
     | synthesizer_prompt_template
-    | main_llm
-) if main_llm else None
+    | generative_llm  # JSON 강제가 없는 LLM 사용
+) if generative_llm else None
 
 def get_active_scenario_data(state: AgentState) -> Optional[Dict]:
     loan_type = state.get("current_product_type")
@@ -232,7 +233,7 @@ async def invoke_scenario_agent_logic(
     user_input: str, current_stage_prompt: str, expected_info_key: Optional[str],
     messages_history: Sequence[BaseMessage], scenario_name: str
 ) -> ScenarioAgentOutput:
-    if not main_llm:
+    if not json_llm:
         return cast(ScenarioAgentOutput, {"intent": "error_llm_not_initialized", "entities": {}, "is_scenario_related": False}) #
     
     print(f"--- Scenario Agent 호출 (시나리오: '{scenario_name}', 입력: '{user_input[:50]}...') ---")
@@ -249,7 +250,7 @@ async def invoke_scenario_agent_logic(
             formatted_messages_history=formatted_history, user_input=user_input,
             format_instructions=format_instructions
         )
-        response = await main_llm.ainvoke([HumanMessage(content=formatted_prompt)]) #
+        response = await json_llm.ainvoke([HumanMessage(content=formatted_prompt)]) #
         raw_response_content = response.content.strip() #
         print(f"LLM Raw Response: {raw_response_content}") #
         
@@ -264,7 +265,7 @@ async def invoke_scenario_agent_logic(
 
 
 async def invoke_qa_agent_streaming_logic(user_question: str, scenario_name: str, knowledge_base_text: Optional[str]) -> AsyncGenerator[str, None]:
-    if not streaming_llm:
+    if not generative_llm:
         yield "죄송합니다, 답변 생성 서비스가 현재 사용할 수 없습니다. (LLM 초기화 오류)" #
         return
     
@@ -293,7 +294,7 @@ async def invoke_qa_agent_streaming_logic(user_question: str, scenario_name: str
             )
             try:
                 print(f"QA Agent (일반): 프롬프트 전송 (특정 문서 없음)")
-                async for chunk in streaming_llm.astream([HumanMessage(content=formatted_prompt)]):
+                async for chunk in generative_llm.astream([HumanMessage(content=formatted_prompt)]):
                     if isinstance(chunk, AIMessageChunk) and chunk.content:
                         yield str(chunk.content)
             except Exception as e:
@@ -317,7 +318,7 @@ async def invoke_qa_agent_streaming_logic(user_question: str, scenario_name: str
         scenario_name=scenario_name, context_for_llm=knowledge_base_text, user_question=user_question
     ) #
     try:
-        async for chunk in streaming_llm.astream([HumanMessage(content=formatted_prompt)]): #
+        async for chunk in generative_llm.astream([HumanMessage(content=formatted_prompt)]): #
             if isinstance(chunk, AIMessageChunk) and chunk.content: #
                 yield str(chunk.content)
     except Exception as e:
@@ -379,9 +380,9 @@ async def entry_point_node(state: AgentState) -> AgentState:
 
 async def main_agent_router_node(state: AgentState) -> AgentState:
     print("--- 노드: Main Agent Router ---") #
-    if not main_llm:
-        return {**state, "error_message": "라우터 서비스 사용 불가 (LLM 미초기화)", "final_response_text_for_tts": "시스템 설정 오류입니다.", "main_agent_routing_decision": "unclear_input", "is_final_turn_response": True} #
-
+    if not json_llm: # 수정: json_llm 사용
+        return {**state, "error_message": "라우터 서비스 사용 불가 (LLM 미초기화)", "final_response_text_for_tts": "시스템 설정 오류입니다.", "is_final_turn_response": True}
+ 
     user_input = state.get("stt_result", "") #
     messages_history = state.get("messages", []) #
     current_product_type = state.get("current_product_type") #
@@ -451,8 +452,7 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
                 available_product_types_display=available_product_types_display, #
                 format_instructions=format_instructions # 주입
             )
-        
-        response = await main_llm.ainvoke([HumanMessage(content=main_agent_prompt_filled)]) #
+        response = await json_llm.ainvoke([HumanMessage(content=main_agent_prompt_filled)])
         raw_response_content = response.content.strip() #
         print(f"[{session_id}] LLM Raw Response: {raw_response_content}") # 로깅 추가
         
@@ -569,9 +569,9 @@ async def factual_answer_node(state: AgentState) -> dict:
     user_question = state.get("stt_result", "")
     qa_context_product_type = state.get("current_product_type")
     qa_scenario_name = state.get("active_scenario_name", "일반 금융 상담")
-    factual_response = "관련 정보를 찾지 못했습니다." # 기본값
+    factual_response = "관련 정보를 찾지 못했습니다."
 
-    if not main_llm:
+    if not generative_llm: # 수정: generative_llm 사용
         print("Factual Answer Node 오류: LLM이 초기화되지 않았습니다.")
         return {"factual_response": "답변 생성 서비스에 문제가 발생했습니다."}
 
@@ -581,32 +581,19 @@ async def factual_answer_node(state: AgentState) -> dict:
             kb_content_for_qa = await load_knowledge_base_content_async(cast(Literal["didimdol", "jeonse"], qa_context_product_type))
         
         rag_prompt_template_str = ALL_PROMPTS.get('qa_agent', {}).get('rag_answer_generation')
-        if not rag_prompt_template_str:
-            raise ValueError("RAG 프롬프트를 찾을 수 없습니다.")
+        if not rag_prompt_template_str: raise ValueError("RAG 프롬프트를 찾을 수 없습니다.")
 
         rag_prompt = ChatPromptTemplate.from_template(rag_prompt_template_str)
-        
         context_for_llm = kb_content_for_qa or "특정 상품 문서가 제공되지 않았습니다. 사용자의 질문에만 기반하여 일반적인 답변을 해주세요."
-            
         formatted_prompt = rag_prompt.format(
             scenario_name=qa_scenario_name,
             context_for_llm=context_for_llm,
             user_question=user_question
         )
 
-        response = await main_llm.ainvoke([HumanMessage(content=formatted_prompt)])
+        response = await generative_llm.ainvoke([HumanMessage(content=formatted_prompt)]) # 수정: generative_llm 사용
         if response and response.content:
-            raw_response_content = response.content.strip()
-            if raw_response_content.startswith("```json"):
-                raw_response_content = raw_response_content.replace("```json", "").replace("```", "").strip()
-            # JSON 객체 형태의 응답을 가정하고 content만 추출 (만약 일반 텍스트면 이 부분 조정 필요)
-            try:
-                # LLM이 JSON 문자열을 반환할 경우
-                parsed_json = json.loads(raw_response_content)
-                factual_response = parsed_json.get("answer", raw_response_content)
-            except json.JSONDecodeError:
-                # LLM이 일반 텍스트를 반환할 경우
-                factual_response = raw_response_content
+            factual_response = response.content.strip() # 수정: JSON 파싱 로직 제거
 
         print(f"QA Agent 답변: {factual_response}")
 
@@ -624,9 +611,7 @@ async def synthesize_answer_node(state: AgentState) -> dict:
         print("Synthesize Answer Node 오류: Synthesizer chain이 초기화되지 않았습니다.")
         return {"final_response_text_for_tts": state.get("main_agent_direct_response", "죄송합니다. 답변 생성에 오류가 발생했습니다."), "is_final_turn_response": True}
         
-    chat_history = format_messages_for_prompt(state.get('messages', [])[:-1])
-    user_question = state.get("messages", [])[-1].content
-    
+    user_question = state["messages"][-1].content
     contextual_response = state.get("main_agent_direct_response") or "정보 없음"
     factual_response = state.get("factual_response") or "정보 없음"
 
@@ -635,31 +620,23 @@ async def synthesize_answer_node(state: AgentState) -> dict:
          final_answer = "죄송하지만, 문의하신 내용에 대해 지금 답변을 드리기 어렵습니다. 다시 질문해주시겠어요?"
     else:
         response = await synthesizer_chain.ainvoke({
-            "chat_history": chat_history,
+            "chat_history": state['messages'][:-1],
             "user_question": user_question,
             "contextual_response": contextual_response,
             "factual_response": factual_response,
         })
-        # 응답이 JSON 형식일 수 있으므로 content 추출
-        raw_response_content = response.content.strip()
-        if raw_response_content.startswith("```json"):
-            raw_response_content = raw_response_content.replace("```json", "").replace("```", "").strip()
-        try:
-            parsed_json = json.loads(raw_response_content)
-            final_answer = parsed_json.get("answer", raw_response_content) # "answer" 필드가 있다는 가정
-        except json.JSONDecodeError:
-            final_answer = raw_response_content
+        final_answer = response.content.strip() # 수정: JSON 파싱 로직 제거
         
     print(f"최종 합성 답변: {final_answer}")
     
-    updated_messages = list(state.get('messages', [])) + [AIMessage(content=final_answer)]
+    updated_messages = list(state['messages']) + [AIMessage(content=final_answer)]
     
     return {"final_response_text_for_tts": final_answer, "messages": updated_messages, "is_final_turn_response": True}
 
 
 async def main_agent_scenario_processing_node(state: AgentState) -> AgentState:
     print("--- 노드: Main Agent 시나리오 처리 (다음 단계 결정 및 응답 생성) ---") #
-    if not main_llm:
+    if not json_llm:
          return {**state, "error_message": "시나리오 처리 서비스 사용 불가 (LLM 미초기화)", "final_response_text_for_tts": "시스템 설정 오류로 다음 안내를 드릴 수 없습니다.", "is_final_turn_response": True} #
 
     user_input = state.get("stt_result", "") #
@@ -711,7 +688,7 @@ async def main_agent_scenario_processing_node(state: AgentState) -> AgentState:
                 default_next_stage_id=current_stage_info.get("default_next_stage_id", "None") #
             )
             try:
-                response = await main_llm.ainvoke([HumanMessage(content=llm_prompt_for_next_stage)]) #
+                response = await json_llm.ainvoke([HumanMessage(content=llm_prompt_for_next_stage)]) #
                 raw_response_content = response.content.strip() #
                 print(f"LLM Raw Response: {raw_response_content}") # 로깅 추가
                 
@@ -934,11 +911,8 @@ def route_from_main_agent_router(state: AgentState) -> str:
             state["main_agent_direct_response"] = "먼저 어떤 상품에 대해 상담하고 싶으신지 알려주시겠어요? (디딤돌 대출, 전세자금 대출, 입출금통장 개설)"
             return "prepare_direct_response_node"
         return "call_scenario_agent_node"
-    # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-    # 수정: invoke_qa_agent 결정을 factual_answer_node로 라우팅
     if decision == "invoke_qa_agent":
         return "factual_answer_node"
-    # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
     if decision == "end_conversation":
         return "prepare_end_conversation_node"
     
@@ -1038,7 +1012,7 @@ async def run_agent_streaming(
     current_state_dict: Optional[Dict[str, Any]] = None
 ) -> AsyncGenerator[Union[Dict[str, Any], str], None]:
     
-    if not OPENAI_API_KEY or not main_llm or not streaming_llm: #
+    if not OPENAI_API_KEY or not json_llm or not generative_llm: #
         error_msg = "LLM 서비스가 초기화되지 않았습니다. API 키 설정을 확인하세요." #
         yield {"type": "error", "session_id": session_id, "message": error_msg} #
         yield {"type": "final_state", "session_id": session_id, "data": {"error_message": error_msg, "is_final_turn_response": True, "messages": [AIMessage(content=error_msg)]}} #
