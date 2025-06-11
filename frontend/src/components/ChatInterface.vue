@@ -367,7 +367,6 @@ watch(isVoiceModeActive, (newValue) => {
 .chat-container {
   display: flex;
   flex-direction: column;
-  /* height: 90vh; Adjust as needed, or use 100% if parent has height */
   height: 100%;
   width: 100%;
   max-width: 700px;
@@ -375,8 +374,8 @@ watch(isVoiceModeActive, (newValue) => {
   border: 1px solid #ccc;
   border-radius: 8px;
   overflow: hidden;
-  background-color: #f9f9f9; /* Added from original for consistency */
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); /* Added from original */
+  background-color: var(--color-background-soft);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
 }
 
 /* Header styles from original, slightly adapted if needed */
@@ -432,8 +431,8 @@ watch(isVoiceModeActive, (newValue) => {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 10px; /* Gap from original */
-  background-color: #ffffff; /* Original background */
+  gap: 10px;
+  background-color: var(--color-background);
 }
 
 .message {
@@ -449,16 +448,15 @@ watch(isVoiceModeActive, (newValue) => {
 
 .message.user {
   background-color: #dcf8c6;
+  color: #181818;
   align-self: flex-end;
-  /* border-bottom-right-radius: 0; */ /* From new, but original had full radius */
-  margin-left: auto; /* Original alignment */
+  margin-left: auto;
 }
 
 .message.ai {
-  background-color: #ececec; /* Original AI color */
+  background-color: var(--color-background-mute);
   align-self: flex-start;
-  /* border-bottom-left-radius: 0; */ /* From new, but original had full radius */
-  margin-right: auto; /* Original alignment */
+  margin-right: auto;
 }
 
 .message.interim-stt p {

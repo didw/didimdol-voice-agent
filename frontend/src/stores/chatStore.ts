@@ -20,7 +20,7 @@ interface ChatState {
   sessionId: string | null
   messages: Message[]
   isProcessingLLM: boolean
-  // isSynthesizingTTS: boolean // Indicates if server is *currently* sending any TTS chunk for *any* sentence
+  isSynthesizingTTS: boolean // TTS 합성 중 상태 추가
   
   // New state for sentence-based TTS playback
   ttsAudioSegmentQueue: AudioSegment[] // Queue of complete sentence audio data
@@ -60,7 +60,7 @@ export const useChatStore = defineStore('chat', {
     sessionId: null,
     messages: [],
     isProcessingLLM: false,
-    // isSynthesizingTTS: false, // Replaced by queue logic mostly
+    isSynthesizingTTS: false, // 초기값 추가
 
     ttsAudioSegmentQueue: [],
     _incomingTTSChunksForSentence: [],
@@ -621,5 +621,6 @@ export const useChatStore = defineStore('chat', {
     getIsVoiceModeActive: (state): boolean => state.isVoiceModeActive,
     getIsRecording: (state): boolean => state.isRecording,
     getIsEPDDetectedByServer: (state): boolean => state.isEPDDetectedByServer,
+    getIsSynthesizingTTS: (state) => state.isSynthesizingTTS,
   },
 })
