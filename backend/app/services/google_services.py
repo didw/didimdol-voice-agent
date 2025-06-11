@@ -46,7 +46,7 @@ class StreamSTTService:
 
         # --- VAD 인스턴스 생성 및 설정 ---
         self.vad = webrtcvad.Vad()
-        self.vad.set_mode(3)
+        self.vad.set_mode(1)
         
         # VAD는 10, 20, 30ms 프레임에서 작동합니다.
         self.frame_duration_ms = 30 
@@ -81,13 +81,19 @@ class StreamSTTService:
         self._stop_event = asyncio.Event()
         
         # --- 오디오 저장을 위한 파일 핸들러 추가 ---
-        try:
-            self.debug_audio_file = open("debug_audio.raw", "wb")
-            print("🔊 디버그 오디오 파일 'debug_audio.raw'가 생성되었습니다.")
-        except Exception as e:
-            self.debug_audio_file = None
-            print(f"⚠️ 디버그 오디오 파일을 생성할 수 없습니다: {e}")
+        # try:
+        #     self.debug_audio_file = open("debug_audio.raw", "wb")
+        #     print("🔊 디버그 오디오 파일 'debug_audio.raw'가 생성되었습니다.")
+        # except Exception as e:
+        #     self.debug_audio_file = None
+        #     print(f"⚠️ 디버그 오디오 파일을 생성할 수 없습니다: {e}")
         # --- 추가 끝 ---
+
+        self._is_speech_active = False # 현재 음성 구간인지 상태
+        self._silence_frames_after_speech = 0 # 음성 후 묵음 프레임 카운터
+        self.SPEECH_FRAMES_TRIGGER = 2  # 2프레임(60ms) 연속 음성이면 발화 시작으로 판단
+        self.SILENCE_FRAMES_TRIGGER = 10 # 10프레임(300ms) 연속 묵음이면 발화 종료로 판단
+        self._speech_frames_buffer = [] # 음성 시작점 보정을 위한 버퍼
 
         print(f"StreamSTTService ({self.session_id}) initialized. Encoding: {audio_encoding.name}, Sample Rate: {sample_rate_hertz}")
 
@@ -209,22 +215,36 @@ class StreamSTTService:
         # print(f"--- Chunk Received (size: {len(chunk)} bytes) ---")
         self._internal_buffer += chunk
         
+        ENERGY_THRESHOLD = 500 
+
         # 버퍼에 처리할 프레임이 충분히 쌓였는지 확인
         while len(self._internal_buffer) >= self.frame_bytes:
             frame_to_process = self._internal_buffer[:self.frame_bytes]
             self._internal_buffer = self._internal_buffer[self.frame_bytes:]
 
             try:
+                # --- 에너지 필터링 로직 추가 ---
+                # 16-bit 오디오 데이터를 numpy 배열로 변환
+                audio_as_np_int16 = np.frombuffer(frame_to_process, dtype=np.int16)
+                # RMS 에너지 계산
+                rms = np.sqrt(np.mean(audio_as_np_int16.astype(np.float64)**2))
+                
+                # 에너지가 임계값보다 낮으면 무시 (노이즈로 간주)
+                if rms < ENERGY_THRESHOLD:
+                    # print(f"VAD: Dropped frame due to low energy (RMS: {rms:.2f})")
+                    continue
+                # --- 로직 추가 끝 ---
+
                 # VAD로 음성인지 아닌지 판단
                 is_speech = self.vad.is_speech(frame_to_process, self.config.sample_rate_hertz)
                 
                 # 음성인 경우에만 Google STT로 전송
                 if is_speech:
                     # --- 파일에 쓰기 로직 추가 ---
-                    if self.debug_audio_file:
-                        self.debug_audio_file.write(frame_to_process)
+                    # if self.debug_audio_file:
+                    #     self.debug_audio_file.write(frame_to_process)
                     # --- 추가 끝 ---
-                    print(f"✅ VAD: Speech detected! Queueing frame (size: {len(frame_to_process)} bytes)")
+                    # print(f"✅ VAD: Speech detected! Queueing frame (size: {len(frame_to_process)} bytes)")
                     self._audio_queue.put_nowait(frame_to_process)
                 # else:
                 #    print("VAD: Noise chunk detected and dropped.")
@@ -236,10 +256,10 @@ class StreamSTTService:
 
     async def stop_stream(self):
         # --- 파일 닫기 로직 추가 ---
-        if self.debug_audio_file:
-            print("🔊 디버그 오디오 파일을 닫습니다.")
-            self.debug_audio_file.close()
-            self.debug_audio_file = None
+        # if self.debug_audio_file:
+        #     print("🔊 디버그 오디오 파일을 닫습니다.")
+        #     self.debug_audio_file.close()
+        #     self.debug_audio_file = None
         # --- 추가 끝 ---
         if not GOOGLE_SERVICES_AVAILABLE or not self._is_active:
             self._is_active = False 
