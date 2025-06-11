@@ -368,14 +368,22 @@ watch(isVoiceModeActive, (newValue) => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  width: 100%;
-  max-width: 700px;
+  width: 100%; /* 모바일에서는 화면 전체 너비 사용 */
   margin: auto;
   border: 1px solid #ccc;
   border-radius: 8px;
   overflow: hidden;
   background-color: var(--color-background-soft);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+/* 데스크톱 화면에서만 최대 너비 제한 */
+@media (min-width: 768px) {
+  .chat-container {
+    max-width: 700px; /* 기존 최대 너비 */
+    max-height: 90vh; /* 화면 높이의 90%를 넘지 않도록 설정 */
+    border-radius: 8px;
+  }
 }
 
 /* Header styles from original, slightly adapted if needed */
@@ -427,13 +435,13 @@ watch(isVoiceModeActive, (newValue) => {
 
 .messages-area {
   flex-grow: 1;
-  padding: 15px; /* Original padding */
+  padding: 10px; /* 패딩 조정 */
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background-color: var(--color-background);
 }
+
 
 .message {
   padding: 10px 15px; /* Original padding */
@@ -499,8 +507,10 @@ watch(isVoiceModeActive, (newValue) => {
   display: flex;
   padding: 10px;
   border-top: 1px solid #ccc;
-  background-color: #f0f0f0; /* Original bg */
+  background-color: #f0f0f0;
+  flex-shrink: 0; /* 입력창 영역의 크기가 줄어들지 않도록 방지 */
 }
+
 
 .input-area input[type='text'] {
   /* Target input specifically */

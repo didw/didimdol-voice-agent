@@ -1,10 +1,14 @@
+/* src/assets/main.css */
 @import './base.css';
 
+/* 모바일 기본 스타일 */
 #app {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
+  width: 100%; /* 너비를 100%로 설정 */
+  padding: 0; /* 모바일에서는 패딩 제거 또는 최소화 */
+  margin: 0;
   font-weight: normal;
+  display: flex;
+  height: 100%;
 }
 
 a,
@@ -21,16 +25,19 @@ a,
   }
 }
 
+/* 데스크톱 화면용 스타일 (예: 1024px 이상) */
 @media (min-width: 1024px) {
+  #app {
+    max-width: 1280px;
+    margin: 0 auto; /* 데스크톱에서는 중앙 정렬 */
+    padding: 2rem; /* 데스크톱에서만 패딩 적용 */
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
   body {
     display: flex;
     place-items: center;
-  }
-
-  #app {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    padding: 0 2rem;
   }
 }
 

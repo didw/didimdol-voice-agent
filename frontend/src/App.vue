@@ -15,28 +15,19 @@ import { RouterView } from 'vue-router'
 #app-container {
   display: flex;
   flex-direction: column;
-  height: 100vh; /* 전체 화면 높이 */
-  width: 100vw; /* 전체 화면 너비 */
+  height: 100vh;
+  width: 100vw;
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
-header {
-  /* background-color: #f0f0f0;
-  padding: 1rem;
-  text-align: center; */
-  flex-shrink: 0; /* 헤더 크기 고정 */
-}
-
 main {
-  flex-grow: 1; /* 메인 콘텐츠가 남은 공간 모두 차지 */
-  overflow-y: auto; /* 내용 많을 시 스크롤 */
-  padding: 1rem; /* 내부 여백 */
+  flex-grow: 1;
+  overflow-y: auto; /* 중요: 이 부분은 유지하여 내용이 많을 때 스크롤되게 함 */
   display: flex;
-  justify-content: center; /* 가운데 정렬 */
-  align-items: center; /* 가운데 정렬 */
+  justify-content: center;
+  align-items: center;
+  /* padding 제거 */
 }
-
-/* 필요시 추가 스타일 */
 </style>
