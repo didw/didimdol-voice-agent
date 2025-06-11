@@ -87,7 +87,7 @@ interface ChatState {
   isVoiceModeActive: boolean
   isRecording: boolean
   audioContext: AudioContext | null
-  scriptProcessorNode: ScriptProcessorNode | null
+  audioWorkletNode: AudioWorkletNode | null
   audioStream: MediaStream | null 
   
   isPlayingTTS: boolean // True if any audio element is currently playing a chunk
@@ -128,7 +128,7 @@ export const useChatStore = defineStore('chat', {
     isVoiceModeActive: false,
     isRecording: false,
     audioContext: null,
-    scriptProcessorNode: null,
+    audioWorkletNode: null,
     audioStream: null,
 
     isPlayingTTS: false,
@@ -352,58 +352,36 @@ export const useChatStore = defineStore('chat', {
       if (this.isRecording || !this.isVoiceModeActive) return
 
       try {
-        // 백엔드에서 16000Hz로 설정했으므로, 여기서도 맞춰주는 것이 가장 좋습니다.
         const constraints = { audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 } }
         this.audioStream = await navigator.mediaDevices.getUserMedia(constraints)
         
         if (this.isPlayingTTS) {
-            console.log("사용자 녹음 시작 중 TTS 재생 감지. Barge-in을 위해 TTS 중단.")
-            this.stopClientSideTTSPlayback(true)
+          console.log("사용자 녹음 시작 중 TTS 재생 감지. Barge-in을 위해 TTS 중단.")
+          this.stopClientSideTTSPlayback(true)
         }
 
-        // --- MediaRecorder 로직을 Web Audio API 로직으로 전면 교체 ---
         this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
         
-        // ScriptProcessorNode 생성 (bufferSize, inputChannels, outputChannels)
-        // bufferSize는 2의 거듭제곱이어야 함 (e.g., 4096)
-        const bufferSize = 4096
-        this.scriptProcessorNode = this.audioContext.createScriptProcessor(bufferSize, 1, 1)
-
-        // 마이크 스트림을 AudioContext의 소스로 연결
+        // AudioWorklet 등록
+        await this.audioContext.audioWorklet.addModule('audio-processor.js')
+        
         const source = this.audioContext.createMediaStreamSource(this.audioStream)
-        source.connect(this.scriptProcessorNode)
-
-        // scriptProcessorNode를 audioContext의 최종 목적지에 연결
-        this.scriptProcessorNode.connect(this.audioContext.destination)
-
-        // 오디오 데이터가 버퍼에 채워질 때마다 이 이벤트가 발생
-        this.scriptProcessorNode.onaudioprocess = (event) => {
-          if (!this.isRecording) return // 녹음이 중지되면 전송 안 함
-
-          // --- 리샘플링 로직 추가 ---
-          const inputData = event.inputBuffer.getChannelData(0)
+        this.audioWorkletNode = new AudioWorkletNode(this.audioContext, 'audio-processor')
+        
+        this.audioWorkletNode.port.onmessage = (event) => {
+          if (!this.isRecording) return
           
-          // 실제 녹음된 샘플레이트(e.g. 44100)를 가져옴
-          const sourceSampleRate = this.audioContext?.sampleRate || 44100;
-          const targetSampleRate = 16000;
-
-          // 16000Hz로 리샘플링
-          const resampledData = resampleBuffer(inputData, sourceSampleRate, targetSampleRate)
-          
-          // 리샘플링된 데이터를 Int16 형식으로 변환
-          const int16Data = convertFloat32ToInt16(resampledData)
-          // --- 수정 끝 ---
-
-          // 변환된 데이터를 웹소켓으로 전송
-          if (int16Data.byteLength > 0 && this.isWebSocketConnected && this.isVoiceModeActive) {
-            this.sendAudioChunk(int16Data)
+          const { audioData } = event.data
+          if (audioData.byteLength > 0 && this.isWebSocketConnected && this.isVoiceModeActive) {
+            this.sendAudioChunk(audioData)
           }
         }
-
+        
+        source.connect(this.audioWorkletNode)
+        this.audioWorkletNode.connect(this.audioContext.destination)
+        
         this.isRecording = true
-        console.log('Raw PCM recording started using Web Audio API.')
-        // --- 교체 끝 ---
-
+        console.log('Raw PCM recording started using AudioWorklet.')
       } catch (err) {
         console.error('Error starting recording:', err)
         this.error = '마이크 접근에 실패했습니다. 브라우저 설정을 확인해주세요.'
@@ -416,23 +394,19 @@ export const useChatStore = defineStore('chat', {
 
       this.isRecording = false
 
-      // --- scriptProcessorNode 연결 해제 및 AudioContext 종료 ---
-      if (this.scriptProcessorNode) {
-        this.scriptProcessorNode.disconnect()
-        this.scriptProcessorNode.onaudioprocess = null
-        this.scriptProcessorNode = null
+      if (this.audioWorkletNode) {
+        this.audioWorkletNode.disconnect()
+        this.audioWorkletNode = null
       }
       if (this.audioContext && this.audioContext.state !== 'closed') {
-        this.audioContext.close()
+        await this.audioContext.close()
         this.audioContext = null
       }
-      // --- 교체 끝 ---
 
-      // If VAD is using audioStream, it should be stopped before or when audioStream is nullified
-      this.stopClientSideVAD() 
-      if (this.audioStream) { // Ensure audioStream tracks are stopped
-          this.audioStream.getTracks().forEach(track => track.stop())
-          this.audioStream = null
+      this.stopClientSideVAD()
+      if (this.audioStream) {
+        this.audioStream.getTracks().forEach(track => track.stop())
+        this.audioStream = null
       }
       console.log('Recording stopped.')
     },
