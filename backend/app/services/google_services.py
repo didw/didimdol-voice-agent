@@ -46,7 +46,7 @@ class StreamSTTService:
 
         # --- VAD 인스턴스 생성 및 설정 ---
         self.vad = webrtcvad.Vad()
-        self.vad.set_mode(3)  # 0(가장 덜 민감) ~ 3(가장 민감)
+        self.vad.set_mode(1)
         
         # VAD는 10, 20, 30ms 프레임에서 작동합니다.
         self.frame_duration_ms = 30 
@@ -212,8 +212,8 @@ class StreamSTTService:
                 # 음성인 경우에만 Google STT로 전송
                 if is_speech:
                     self._audio_queue.put_nowait(frame_to_process)
-                # else:
-                #    print("VAD: Noise chunk detected and dropped.") # 디버깅용
+                else:
+                   print("VAD: Noise chunk detected and dropped.")
 
             except asyncio.QueueFull:
                 print(f"STT audio queue full for session {self.session_id}. Dropping frame.")
