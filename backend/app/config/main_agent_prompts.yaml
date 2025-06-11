@@ -99,12 +99,13 @@ determine_next_scenario_stage: |
 
   [지시사항]
   1. 사용자의 답변("{user_input}")과 Scenario Agent의 분석 결과(의도: "{scenario_agent_intent}", 정보: {scenario_agent_entities})를 최우선으로 고려합니다.
-  2. "{active_scenario_name}"의 "이동 가능한 다음 단계(Transitions)" 목록을 주의 깊게 살펴보고, 사용자의 답변 및 분석 결과와 가장 일치하는 **단 하나의** "다음 단계 ID"를 선택합니다.
-  3. 만약 어떤 Transition 조건과도 명확히 일치하지 않는다면, "{active_scenario_name}"의 "기본 다음 단계 ID"("{default_next_stage_id}")를 선택합니다.
-  4. 만약 "기본 다음 단계 ID"도 유효하지 않고(예: "None" 또는 비어있음), 어떤 Transition과도 일치하지 않는다면, 현재 상황을 벗어날 수 없으므로 현재 단계 ID인 "{current_stage_id}"를 반환하거나, 시나리오 설계에 따라 특별한 처리(예: "END_SCENARIO_COMPLETE" 또는 "qa_listen")를 제안할 수 있습니다.
+  2. **매우 중요:** 만약 Scenario Agent의 분석 결과 'intent'가 "확인_긍정" 또는 "확인_부정"과 같이 명확한 긍정/부정의 답변이라면, 사용자의 세부적인 발화 내용보다는 이 'intent'를 기준으로 Transition 조건을 판단하세요. 예를 들어, 'intent'가 "확인_긍정"이라면 '사용자가 긍정적으로 답변한 경우'나 '주택 구입 목적임을 확인한 경우'에 해당하는 Transition을 선택해야 합니다.
+  3. "{active_scenario_name}"의 "이동 가능한 다음 단계(Transitions)" 목록을 주의 깊게 살펴보고, 위 가이드라인에 따라 가장 일치하는 **단 하나의** "다음 단계 ID"를 선택합니다.
+  4. 만약 어떤 Transition 조건과도 명확히 일치하지 않는다면, "{active_scenario_name}"의 "기본 다음 단계 ID"("{default_next_stage_id}")를 선택합니다.
+  5. 만약 "기본 다음 단계 ID"도 유효하지 않고(예: "None" 또는 비어있음), 어떤 Transition과도 일치하지 않는다면, 현재 상황을 벗어날 수 없으므로 현재 단계 ID인 "{current_stage_id}"를 반환하거나, 시나리오 설계에 따라 특별한 처리(예: "END_SCENARIO_COMPLETE" 또는 "qa_listen")를 제안할 수 있습니다.
 
   # [[[ START OF NEW GUIDANCE FOR DEPOSIT ACCOUNT SCENARIO ]]]
-  5. **만약 현재 "{active_scenario_name}"이 "신한은행 입출금통장 신규 상담"이고, 현재 시나리오 단계 ID ("{current_stage_id}")가 다음과 같은 경우 특별히 주의하여 다음 단계를 결정합니다:**
+  6. **만약 현재 "{active_scenario_name}"이 "신한은행 입출금통장 신규 상담"이고, 현재 시나리오 단계 ID ("{current_stage_id}")가 다음과 같은 경우 특별히 주의하여 다음 단계를 결정합니다:**
      - **현재 단계 ID가 `process_service_choices`일 때:**
        - `collected_product_info` 객체에서 `additional_services_choice` 키의 값을 확인합니다.
        - 만약 `additional_services_choice` 값이 "체크카드"를 포함하거나 "둘 다"와 유사한 의미 (예: "모두 신청", "체크카드와 인터넷뱅킹")이면, `ask_cc_issuance_method`로 이동하는 Transition을 선택합니다.
@@ -119,7 +120,7 @@ determine_next_scenario_stage: |
 
   # [[[ END OF NEW GUIDANCE FOR DEPOSIT ACCOUNT SCENARIO ]]]
 
-  6. 최종적으로 결정된 "다음 단계 ID" 만을 아래 JSON 형식으로 반환해야 합니다. 다른 설명이나 추가 텍스트는 포함하지 마세요.
+  7. 최종적으로 결정된 "다음 단계 ID" 만을 아래 JSON 형식으로 반환해야 합니다. 다른 설명이나 추가 텍스트는 포함하지 마세요.
 
   [JSON 출력 형식]
   {{
