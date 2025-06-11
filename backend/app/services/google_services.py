@@ -206,7 +206,7 @@ class StreamSTTService:
             print(f"STT stream ({self.session_id}): Dropping audio chunk, stream task not healthy.")
             return
 
-        print(f"--- Chunk Received (size: {len(chunk)} bytes) ---")
+        # print(f"--- Chunk Received (size: {len(chunk)} bytes) ---")
         self._internal_buffer += chunk
         
         # 버퍼에 처리할 프레임이 충분히 쌓였는지 확인
@@ -226,8 +226,8 @@ class StreamSTTService:
                     # --- 추가 끝 ---
                     print(f"✅ VAD: Speech detected! Queueing frame (size: {len(frame_to_process)} bytes)")
                     self._audio_queue.put_nowait(frame_to_process)
-                else:
-                   print("VAD: Noise chunk detected and dropped.")
+                # else:
+                #    print("VAD: Noise chunk detected and dropped.")
 
             except asyncio.QueueFull:
                 print(f"STT audio queue full for session {self.session_id}. Dropping frame.")
