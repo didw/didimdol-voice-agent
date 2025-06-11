@@ -2,58 +2,6 @@
 import { defineStore } from 'pinia'
 import { v4 as uuidv4 } from 'uuid'
 
-/**
- * Float32Array 형식의 PCM 오디오 데이터를 Int16Array 형식으로 변환합니다.
- * @param buffer - Float32Array 형식의 오디오 데이터
- * @returns Int16Array 형식의 오디오 데이터 ArrayBuffer
- */
-function convertFloat32ToInt16(buffer: Float32Array): ArrayBuffer {
-  let l = buffer.length
-  const buf = new Int16Array(l)
-  while (l--) {
-    // Float32 값(-1.0 ~ 1.0)을 Int16 값(-32768 ~ 32767)으로 변환
-    buf[l] = Math.min(1, buffer[l]) * 0x7FFF;
-  }
-  return buf.buffer;
-}
-
-// --- 이 함수를 새로 추가 ---
-/**
- * 오디오 버퍼를 목표 샘플레이트로 리샘플링합니다.
- * @param audioBuffer - 원본 Float32Array 오디오 데이터
- * @param fromSampleRate - 원본 샘플레이트 (e.g., 44100)
- * @param toSampleRate - 목표 샘플레이트 (e.g., 16000)
- * @returns 리샘플링된 Float32Array 오디오 데이터
- */
-function resampleBuffer(audioBuffer: Float32Array, fromSampleRate: number, toSampleRate: number): Float32Array {
-  if (fromSampleRate === toSampleRate) {
-    return audioBuffer;
-  }
-  
-  const sampleRateRatio = fromSampleRate / toSampleRate;
-  const newLength = Math.round(audioBuffer.length / sampleRateRatio);
-  const result = new Float32Array(newLength);
-  
-  let offsetResult = 0;
-  let offsetBuffer = 0;
-  
-  while (offsetResult < result.length) {
-    const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
-    let accum = 0, count = 0;
-    
-    for (let i = offsetBuffer; i < nextOffsetBuffer && i < audioBuffer.length; i++) {
-      accum += audioBuffer[i];
-      count++;
-    }
-    
-    result[offsetResult] = accum / count;
-    offsetResult++;
-    offsetBuffer = nextOffsetBuffer;
-  }
-  
-  return result;
-}
-// --- 추가 끝 ---
 
 interface Message {
   id: string
@@ -73,11 +21,10 @@ interface ChatState {
   sessionId: string | null
   messages: Message[]
   isProcessingLLM: boolean
-  isSynthesizingTTS: boolean // TTS 합성 중 상태 추가
-  
-  // New state for sentence-based TTS playback
-  ttsAudioSegmentQueue: AudioSegment[] // Queue of complete sentence audio data
-  _incomingTTSChunksForSentence: string[] // Temp buffer for chunks of the sentence currently being received from server
+  isSynthesizingTTS: boolean
+
+  ttsAudioSegmentQueue: AudioSegment[]
+  _incomingTTSChunksForSentence: string[] 
   
   error: string | null
   currentInterimStt: string
@@ -87,12 +34,13 @@ interface ChatState {
   isVoiceModeActive: boolean
   isRecording: boolean
   audioContext: AudioContext | null
+  // --- 변경점: ScriptProcessorNode를 AudioWorkletNode로 교체 ---
   audioWorkletNode: AudioWorkletNode | null
   audioStream: MediaStream | null 
   
-  isPlayingTTS: boolean // True if any audio element is currently playing a chunk
+  isPlayingTTS: boolean
   currentPlayingAudioElement: HTMLAudioElement | null 
-  _currentPlayingAudioSegmentChunks: string[] // Chunks of the sentence currently being played by audio element
+  _currentPlayingAudioSegmentChunks: string[]
 
   isEPDDetectedByServer: boolean
 
@@ -114,7 +62,7 @@ export const useChatStore = defineStore('chat', {
     sessionId: null,
     messages: [],
     isProcessingLLM: false,
-    isSynthesizingTTS: false, // 초기값 추가
+    isSynthesizingTTS: false,
 
     ttsAudioSegmentQueue: [],
     _incomingTTSChunksForSentence: [],
@@ -128,6 +76,7 @@ export const useChatStore = defineStore('chat', {
     isVoiceModeActive: false,
     isRecording: false,
     audioContext: null,
+    // --- 변경점: 초기 상태값 변경 ---
     audioWorkletNode: null,
     audioStream: null,
 
@@ -172,7 +121,7 @@ export const useChatStore = defineStore('chat', {
       this.webSocket = new WebSocket(fullWebSocketUrl)
 
       this.webSocket.onopen = () => {
-        console.log('ONOPEN: WebSocket connection established for session:', this.sessionId); // 확인용 로그 추가
+        console.log('ONOPEN: WebSocket connection established for session:', this.sessionId);
         this.isWebSocketConnected = true;
         this.error = null;
       };
@@ -180,8 +129,6 @@ export const useChatStore = defineStore('chat', {
       this.webSocket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data as string)
-          // console.log('WebSocket message received:', data); // Can be too verbose for chunks
-
           switch (data.type) {
             case 'session_initialized':
               this.addMessage('ai', data.message)
@@ -205,24 +152,20 @@ export const useChatStore = defineStore('chat', {
             case 'llm_response_end':
               this.finalizeAiMessage()
               this.isProcessingLLM = false
-              // Backend will now start sending TTS sentence by sentence if in voice mode.
               break
-            case 'tts_audio_chunk': // Chunk for the current sentence from backend
-              // console.log("Received TTS audio chunk from server.");
+            case 'tts_audio_chunk': 
               this._incomingTTSChunksForSentence.push(data.audio_chunk_base64);
               break;
-            case 'tts_stream_end': // All chunks for *one sentence* have been received
-              console.log("End of TTS audio stream for one sentence received from server.");
+            case 'tts_stream_end':
               if (this._incomingTTSChunksForSentence.length > 0) {
                 this.ttsAudioSegmentQueue.push({
                   id: uuidv4(),
                   audioChunks: [...this._incomingTTSChunksForSentence],
                 });
-                this._incomingTTSChunksForSentence = []; // Reset for next sentence
+                this._incomingTTSChunksForSentence = [];
               }
               this.playNextQueuedAudioSegment();
               break;
-
             case 'epd_detected': 
               console.log('EPD detected by server (Google STT for previous user utterance)');
               this.isEPDDetectedByServer = true; 
@@ -244,7 +187,7 @@ export const useChatStore = defineStore('chat', {
             case 'error':
               this.error = data.message
               this.isProcessingLLM = false
-              this.isPlayingTTS = false // Stop TTS on error
+              this.isPlayingTTS = false
               this._incomingTTSChunksForSentence = [];
               this._currentPlayingAudioSegmentChunks = [];
               this.ttsAudioSegmentQueue = [];
@@ -280,8 +223,6 @@ export const useChatStore = defineStore('chat', {
         this.isProcessingLLM = false
         this.isPlayingTTS = false
         if (!closeEvent.wasClean) {
-          // 이전에는 "비정상적으로 종료" 오류가 있었으므로, 이 메시지가 여전히 나올 수 있음
-          // 하지만 이제는 연결 자체는 성공 후 다른 이유로 닫힐 수 있음
           this.error = 'WebSocket 연결이 예상치 않게 종료되었습니다. (Code: ' + closeEvent.code + ')';
         }
         this.isVoiceModeActive = false
@@ -290,413 +231,403 @@ export const useChatStore = defineStore('chat', {
     },
 
     async toggleVoiceMode() {
-        if (!this.isWebSocketConnected || (this.webSocket && this.webSocket.readyState !== WebSocket.OPEN) ) {
-            this.initializeSessionAndConnect();
-            // Wait for connection to establish
-            await new Promise(resolve => {
-                const interval = setInterval(() => {
-                    if (this.isWebSocketConnected) {
-                        clearInterval(interval);
-                        resolve(true);
-                    }
-                }, 100);
-                setTimeout(() => { // Timeout for connection attempt
-                    clearInterval(interval);
-                    if (!this.isWebSocketConnected) resolve(false);
-                }, 3000); // 3 seconds timeout
-            });
-        }
+      if (!this.isWebSocketConnected || (this.webSocket && this.webSocket.readyState !== WebSocket.OPEN) ) {
+          this.initializeSessionAndConnect();
+          await new Promise(resolve => {
+              const interval = setInterval(() => {
+                  if (this.isWebSocketConnected) {
+                      clearInterval(interval);
+                      resolve(true);
+                  }
+              }, 100);
+              setTimeout(() => {
+                  clearInterval(interval);
+                  if (!this.isWebSocketConnected) resolve(false);
+              }, 3000);
+          });
+      }
 
-        if (!this.isWebSocketConnected) { 
-            this.error = "서버 연결 실패. 음성 인식을 시작할 수 없습니다.";
-            console.error(this.error);
-            return;
-        }
+      if (!this.isWebSocketConnected) { 
+          this.error = "서버 연결 실패. 음성 인식을 시작할 수 없습니다.";
+          console.error(this.error);
+          return;
+      }
 
-        if (this.isVoiceModeActive) {
-            await this.deactivateVoiceRecognition();
-        } else {
-            await this.activateVoiceRecognition();
-        }
-    },
+      if (this.isVoiceModeActive) {
+          await this.deactivateVoiceRecognition();
+      } else {
+          await this.activateVoiceRecognition();
+      }
+  },
 
-    async activateVoiceRecognition() {
-        if (!this.isWebSocketConnected || !this.webSocket || this.webSocket.readyState !== WebSocket.OPEN) {
-            this.error = "음성 인식을 시작하려면 서버에 연결되어 있어야 합니다.";
-            return;
-        }
-        // Stop any ongoing TTS playback before activating voice input
-        if (this.isPlayingTTS) {
-            console.log("Activating voice recognition, stopping current TTS playback.");
-            this.stopClientSideTTSPlayback(true); // Notify server to stop sending more TTS
-        }
-        this.isVoiceModeActive = true;
-        this.webSocket.send(JSON.stringify({ type: 'activate_voice' }));
-        await this.startRecording(); 
-        this.currentInterimStt = "듣고 있어요...";
-        this.error = null;
-    },
+  async activateVoiceRecognition() {
+    if (!this.isWebSocketConnected || !this.webSocket || this.webSocket.readyState !== WebSocket.OPEN) {
+        this.error = "음성 인식을 시작하려면 서버에 연결되어 있어야 합니다.";
+        return;
+    }
+    if (this.isPlayingTTS) {
+        console.log("Activating voice recognition, stopping current TTS playback.");
+        this.stopClientSideTTSPlayback(true);
+    }
+    this.isVoiceModeActive = true;
+    this.webSocket.send(JSON.stringify({ type: 'activate_voice' }));
+    await this.startRecording(); 
+    this.currentInterimStt = "듣고 있어요...";
+    this.error = null;
+},
 
-    async deactivateVoiceRecognition() {
-        await this.stopRecording(); 
-        if (this.webSocket && this.webSocket.readyState === WebSocket.OPEN && this.isVoiceModeActive) { 
-            this.webSocket.send(JSON.stringify({ type: 'deactivate_voice' }));
-        }
-        this.isVoiceModeActive = false; 
-        this.currentInterimStt = "";
-        this.isEPDDetectedByServer = false;
-        this.stopClientSideVAD();
-    },
+async deactivateVoiceRecognition() {
+  await this.stopRecording(); 
+  if (this.webSocket && this.webSocket.readyState === WebSocket.OPEN && this.isVoiceModeActive) { 
+      this.webSocket.send(JSON.stringify({ type: 'deactivate_voice' }));
+  }
+  this.isVoiceModeActive = false; 
+  this.currentInterimStt = "";
+  this.isEPDDetectedByServer = false;
+  this.stopClientSideVAD();
+},
 
-    async startRecording() {
-      if (this.isRecording || !this.isVoiceModeActive) return
+async startRecording() {
+  if (this.isRecording || !this.isVoiceModeActive) return;
+
+  try {
+    const constraints = { audio: { echoCancellation: true, noiseSuppression: true } };
+    this.audioStream = await navigator.mediaDevices.getUserMedia(constraints);
+    
+    if (this.isPlayingTTS) {
+        console.log("사용자 녹음 시작 중 TTS 재생 감지. Barge-in을 위해 TTS 중단.");
+        this.stopClientSideTTSPlayback(true);
+    }
+
+    // --- 변경점: Web Audio API 로직을 AudioWorklet으로 전면 교체 ---
+    this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    
+    // AudioWorklet 모듈을 로드합니다. 파일 경로는 public 폴더를 기준으로 합니다.
+    await this.audioContext.audioWorklet.addModule('/audio-processor.js');
+    
+    // 'audio-processor'라는 이름으로 등록된 커스텀 노드를 생성합니다.
+    this.audioWorkletNode = new AudioWorkletNode(this.audioContext, 'audio-processor');
+
+    // 마이크 스트림을 AudioContext의 소스로 연결합니다.
+    const source = this.audioContext.createMediaStreamSource(this.audioStream);
+    
+    // 소스를 워크릿 노드에 연결하여 오디오 데이터 처리를 시작합니다.
+    source.connect(this.audioWorkletNode);
+
+    // (선택사항) 워크릿 노드를 스피커(destination)에 연결하면 마이크 소리를 들을 수 있습니다.
+    // 디버깅 용도가 아니라면 주석 처리하는 것이 좋습니다.
+    // this.audioWorkletNode.connect(this.audioContext.destination);
+
+    // 워크릿에서 처리된 오디오 데이터를 받을 리스너를 설정합니다.
+    this.audioWorkletNode.port.onmessage = (event) => {
+      // 녹음 중이 아닐 때는 데이터를 무시합니다.
+      if (!this.isRecording) return;
+
+      // event.data는 워크릿에서 보낸 ArrayBuffer입니다.
+      const audioChunk = event.data as ArrayBuffer;
+
+      if (audioChunk.byteLength > 0 && this.isWebSocketConnected && this.isVoiceModeActive) {
+        this.sendAudioChunk(audioChunk);
+      }
+    };
+    
+    this.audioWorkletNode.port.onmessageerror = (error) => {
+        console.error("Error receiving message from AudioWorklet:", error);
+    };
+
+    this.isRecording = true;
+    console.log('Recording started using AudioWorklet.');
+    // --- 교체 끝 ---
+
+  } catch (err) {
+    console.error('Error starting recording or setting up AudioWorklet:', err);
+    this.error = '마이크 접근 또는 오디오 처리 모듈 설정에 실패했습니다.';
+    if(this.isVoiceModeActive) this.isVoiceModeActive = false;
+    await this.stopRecording(); // 실패 시 자원 정리
+  }
+},
+
+async stopRecording() {
+  if (!this.isRecording && !this.audioContext) return;
+
+  this.isRecording = false;
+
+  // --- 변경점: AudioWorkletNode 및 AudioContext 정리 로직으로 수정 ---
+  if (this.audioWorkletNode) {
+    this.audioWorkletNode.port.close(); // 포트 닫기
+    this.audioWorkletNode.disconnect();
+    this.audioWorkletNode = null;
+  }
+  if (this.audioContext && this.audioContext.state !== 'closed') {
+    // close()는 Promise를 반환하는 비동기 작업입니다.
+    await this.audioContext.close();
+    this.audioContext = null;
+  }
+  // --- 교체 끝 ---
+
+  this.stopClientSideVAD(); 
+  if (this.audioStream) {
+      this.audioStream.getTracks().forEach(track => track.stop());
+      this.audioStream = null;
+  }
+  console.log('Recording stopped.');
+},
+
+sendAudioChunk(audioChunk: ArrayBuffer) {
+  if (this.webSocket && this.webSocket.readyState === WebSocket.OPEN && this.isVoiceModeActive) {
+    this.webSocket.send(audioChunk);
+    this.error = null;
+  } else if (!this.isVoiceModeActive) {
+    // console.log("Audio chunk not sent: Voice mode is not active.");
+  } else {
+    this.handleWebSocketNotConnected('오디오 데이터');
+  }
+},
+
+sendWebSocketTextMessage(text: string) {
+  if (this.webSocket && this.webSocket.readyState === WebSocket.OPEN) {
+    if (this.isVoiceModeActive) { 
+        this.deactivateVoiceRecognition();
+    }
+    if (this.isPlayingTTS) {
+        this.stopClientSideTTSPlayback(true);
+    }
+    this.addMessage('user', text);
+    this.webSocket.send(JSON.stringify({ type: 'process_text', text: text, input_mode: 'text' }));
+    this.isProcessingLLM = true;
+    this.error = null;
+  } else {
+    this.handleWebSocketNotConnected('텍스트 메시지');
+  }
+},
+
+sendAudioBlob(audioBlob: Blob) {
+  if (this.webSocket && this.webSocket.readyState === WebSocket.OPEN && this.isVoiceModeActive) {
+    this.webSocket.send(audioBlob);
+    this.error = null;
+  } else if (!this.isVoiceModeActive) {
+    // console.log("Audio blob not sent: Voice mode is not active.");
+  } else {
+    this.handleWebSocketNotConnected('오디오 데이터');
+  }
+},
+
+stopClientSideTTSPlayback(notifyServer: boolean) {
+  console.log(`Client attempting to stop TTS. Notify server: ${notifyServer}. Currently playing: ${this.isPlayingTTS}`);
+  if (this.currentPlayingAudioElement) {
+      this.currentPlayingAudioElement.pause();
+      this.currentPlayingAudioElement.removeAttribute('src'); 
+      this.currentPlayingAudioElement.load(); 
+      this.currentPlayingAudioElement.onended = null; 
+      this.currentPlayingAudioElement.onerror = null;
+      this.currentPlayingAudioElement = null;
+  }
+  this._currentPlayingAudioSegmentChunks = []; 
+  this.ttsAudioSegmentQueue = []; 
+  this._incomingTTSChunksForSentence = [];
+  
+  this.isPlayingTTS = false;
+
+  this.stopClientSideVAD(); 
+
+  if (notifyServer && this.webSocket && this.webSocket.readyState === WebSocket.OPEN) {
+      this.webSocket.send(JSON.stringify({ type: 'stop_tts' }));
+      console.log('Sent stop_tts to server.');
+  }
+},
+
+playNextQueuedAudioSegment() {
+  if (this.isPlayingTTS || this.ttsAudioSegmentQueue.length === 0) {
+    if (this.ttsAudioSegmentQueue.length === 0 && !this.isPlayingTTS) {
+        console.log("All TTS audio segments played.");
+        if(this.isVoiceModeActive && !this.isRecording) {
+        }
+    }
+    return;
+  }
+
+  const segmentToPlay = this.ttsAudioSegmentQueue.shift();
+  if (segmentToPlay && segmentToPlay.audioChunks.length > 0) {
+    this._currentPlayingAudioSegmentChunks = [...segmentToPlay.audioChunks];
+    console.log(`Starting playback for new audio segment with ${this._currentPlayingAudioSegmentChunks.length} chunks.`);
+    this.playNextChunkFromCurrentSegment();
+  } else {
+    this.playNextQueuedAudioSegment();
+  }
+},
+
+playNextChunkFromCurrentSegment() {
+  if (this._currentPlayingAudioSegmentChunks.length === 0) {
+    console.log("Finished all chunks for the current audio segment.");
+    if(this.currentPlayingAudioElement) {
+        this.currentPlayingAudioElement.onended = null;
+        this.currentPlayingAudioElement.onerror = null;
+    }
+    this.isPlayingTTS = false; 
+    this.playNextQueuedAudioSegment();
+    return;
+  }
+
+  this.isPlayingTTS = true;
+  const audioBase64 = this._currentPlayingAudioSegmentChunks.shift();
+  
+  if (audioBase64) {
+    const audioSrc = `data:audio/mp3;base64,${audioBase64}`;
+    this.currentPlayingAudioElement = new Audio(audioSrc); 
+    
+    this.currentPlayingAudioElement.play()
+        .then(() => { })
+        .catch(error => {
+            console.error("Error playing TTS audio chunk:", error);
+            this.isPlayingTTS = false;
+            this._currentPlayingAudioSegmentChunks = [];
+            this.playNextQueuedAudioSegment();
+        });
+
+    this.currentPlayingAudioElement.onended = () => {
+        this.playNextChunkFromCurrentSegment();
+    };
+    this.currentPlayingAudioElement.onerror = (e) => {
+        console.error("Error during TTS audio element playback:", e);
+        this.error = "TTS 오디오 재생 중 오류가 발생했습니다.";
+        this.isPlayingTTS = false;
+        this._currentPlayingAudioSegmentChunks = [];
+        this.playNextQueuedAudioSegment();
+    };
+    
+    if(this.isVoiceModeActive) {
+        this.startClientSideVAD();
+    }
+
+  } else { 
+    this.isPlayingTTS = false;
+    this.playNextQueuedAudioSegment();
+  }
+},
+
+startClientSideVAD() {
+  this.stopClientSideVAD(); 
+
+  if (!this.isVoiceModeActive || !this.isPlayingTTS || !this.audioStream) {
+      return;
+  }
+
+  this.vadContext.vadActivationTimeoutId = window.setTimeout(() => {
+      if (!this.isVoiceModeActive || !this.isPlayingTTS || !this.audioStream || this.audioStream.getAudioTracks().every(t => t.readyState === 'ended')) {
+          this.stopClientSideVAD(); 
+          return;
+      }
 
       try {
-        const constraints = { audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 } }
-        this.audioStream = await navigator.mediaDevices.getUserMedia(constraints)
-        
-        if (this.isPlayingTTS) {
-          console.log("사용자 녹음 시작 중 TTS 재생 감지. Barge-in을 위해 TTS 중단.")
-          this.stopClientSideTTSPlayback(true)
-        }
-
-        this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
-        
-        // AudioWorklet 등록
-        await this.audioContext.audioWorklet.addModule('audio-processor.js')
-        
-        const source = this.audioContext.createMediaStreamSource(this.audioStream)
-        this.audioWorkletNode = new AudioWorkletNode(this.audioContext, 'audio-processor')
-        
-        this.audioWorkletNode.port.onmessage = (event) => {
-          if (!this.isRecording) return
-          
-          const { audioData } = event.data
-          if (audioData.byteLength > 0 && this.isWebSocketConnected && this.isVoiceModeActive) {
-            this.sendAudioChunk(audioData)
+          if (!this.vadContext.audioContext || this.vadContext.audioContext.state === 'closed') {
+            this.vadContext.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
           }
-        }
-        
-        source.connect(this.audioWorkletNode)
-        this.audioWorkletNode.connect(this.audioContext.destination)
-        
-        this.isRecording = true
-        console.log('Raw PCM recording started using AudioWorklet.')
-      } catch (err) {
-        console.error('Error starting recording:', err)
-        this.error = '마이크 접근에 실패했습니다. 브라우저 설정을 확인해주세요.'
-        if(this.isVoiceModeActive) this.isVoiceModeActive = false
+          if (!this.vadContext.analyserNode) { 
+              this.vadContext.analyserNode = this.vadContext.audioContext.createAnalyser();
+              this.vadContext.analyserNode.fftSize = 512; 
+              this.vadContext.analyserNode.smoothingTimeConstant = 0.5;
+              this.vadContext.dataArray = new Uint8Array(this.vadContext.analyserNode.frequencyBinCount);
+              if (this.audioStream && this.audioStream.getAudioTracks().length > 0 && this.audioStream.getAudioTracks()[0].readyState === 'live') {
+                  const source = this.vadContext.audioContext.createMediaStreamSource(this.audioStream);
+                  source.connect(this.vadContext.analyserNode);
+              } else {
+                  console.warn("VAD: AudioStream not valid for creating source.");
+                  this.stopClientSideVAD();
+                  return;
+              }
+          }
+      } catch (e) {
+          console.error("Error setting up VAD audio context:", e);
+          this.stopClientSideVAD();
+          return;
       }
-    },
-
-    async stopRecording() {
-      if (!this.isRecording) return
-
-      this.isRecording = false
-
-      if (this.audioWorkletNode) {
-        this.audioWorkletNode.disconnect()
-        this.audioWorkletNode = null
-      }
-      if (this.audioContext && this.audioContext.state !== 'closed') {
-        await this.audioContext.close()
-        this.audioContext = null
-      }
-
-      this.stopClientSideVAD()
-      if (this.audioStream) {
-        this.audioStream.getTracks().forEach(track => track.stop())
-        this.audioStream = null
-      }
-      console.log('Recording stopped.')
-    },
-
-    // 함수 이름은 그대로 두되, 받는 타입을 ArrayBuffer로 변경
-    sendAudioChunk(audioChunk: ArrayBuffer) {
-      if (this.webSocket && this.webSocket.readyState === WebSocket.OPEN && this.isVoiceModeActive) {
-        this.webSocket.send(audioChunk)
-        this.error = null
-      } else if (!this.isVoiceModeActive) {
-        // console.log("Audio chunk not sent: Voice mode is not active.");
-      } else {
-        this.handleWebSocketNotConnected('오디오 데이터')
-      }
-    },
-
-    sendWebSocketTextMessage(text: string) {
-      if (this.webSocket && this.webSocket.readyState === WebSocket.OPEN) {
-        if (this.isVoiceModeActive) { 
-            this.deactivateVoiceRecognition();
-        }
-        // If TTS is playing when user sends text, stop it for barge-in
-        if (this.isPlayingTTS) {
-            this.stopClientSideTTSPlayback(true);
-        }
-        this.addMessage('user', text);
-        this.webSocket.send(JSON.stringify({ type: 'process_text', text: text, input_mode: 'text' }));
-        this.isProcessingLLM = true;
-        this.error = null;
-      } else {
-        this.handleWebSocketNotConnected('텍스트 메시지');
-      }
-    },
-
-    sendAudioBlob(audioBlob: Blob) {
-      if (this.webSocket && this.webSocket.readyState === WebSocket.OPEN && this.isVoiceModeActive) {
-        this.webSocket.send(audioBlob);
-        this.error = null;
-      } else if (!this.isVoiceModeActive) {
-        // console.log("Audio blob not sent: Voice mode is not active.");
-      } else {
-        this.handleWebSocketNotConnected('오디오 데이터');
-      }
-    },
-    
-    stopClientSideTTSPlayback(notifyServer: boolean) {
-        console.log(`Client attempting to stop TTS. Notify server: ${notifyServer}. Currently playing: ${this.isPlayingTTS}`);
-        if (this.currentPlayingAudioElement) {
-            this.currentPlayingAudioElement.pause();
-            this.currentPlayingAudioElement.removeAttribute('src'); // More robust than src = ''
-            this.currentPlayingAudioElement.load(); // Advised after changing src
-            this.currentPlayingAudioElement.onended = null; 
-            this.currentPlayingAudioElement.onerror = null;
-            this.currentPlayingAudioElement = null;
-        }
-        this._currentPlayingAudioSegmentChunks = []; // Clear chunks of the sentence that was playing
-        this.ttsAudioSegmentQueue = []; // Clear queue of upcoming sentences
-        this._incomingTTSChunksForSentence = []; // Clear any partially received sentence
-        
-        this.isPlayingTTS = false;
-        // this.isSynthesizingTTS = false; // Only backend truly knows this; client stops expecting
-
-        this.stopClientSideVAD(); 
-
-        if (notifyServer && this.webSocket && this.webSocket.readyState === WebSocket.OPEN) {
-            this.webSocket.send(JSON.stringify({ type: 'stop_tts' }));
-            console.log('Sent stop_tts to server.');
-        }
-    },
-    
-    playNextQueuedAudioSegment() {
-      if (this.isPlayingTTS || this.ttsAudioSegmentQueue.length === 0) {
-        if (this.ttsAudioSegmentQueue.length === 0 && !this.isPlayingTTS) {
-            console.log("All TTS audio segments played.");
-            // Potentially enable VAD again if in voice mode and expecting user input
-            if(this.isVoiceModeActive && !this.isRecording) {
-                // This case is tricky: if AI just finished speaking, should VAD auto-start for user?
-                // Typically, user clicks mic button or there's hotword detection.
-                // For now, we don't auto-start VAD here.
-            }
-        }
-        return;
-      }
-
-      const segmentToPlay = this.ttsAudioSegmentQueue.shift();
-      if (segmentToPlay && segmentToPlay.audioChunks.length > 0) {
-        this._currentPlayingAudioSegmentChunks = [...segmentToPlay.audioChunks];
-        console.log(`Starting playback for new audio segment with ${this._currentPlayingAudioSegmentChunks.length} chunks.`);
-        this.playNextChunkFromCurrentSegment();
-      } else {
-        // Segment was empty or undefined, try next
-        this.playNextQueuedAudioSegment();
-      }
-    },
-
-    playNextChunkFromCurrentSegment() {
-      if (this._currentPlayingAudioSegmentChunks.length === 0) {
-        console.log("Finished all chunks for the current audio segment.");
-        // this.isPlayingTTS should be set to false before trying to play the next segment
-        // to avoid race conditions / re-entry issues in playNextQueuedAudioSegment.
-        if(this.currentPlayingAudioElement) { // Clean up previous audio element
-            this.currentPlayingAudioElement.onended = null;
-            this.currentPlayingAudioElement.onerror = null;
-        }
-        this.isPlayingTTS = false; 
-        this.playNextQueuedAudioSegment(); // Attempt to play the next sentence/segment
-        return;
-      }
-
-      this.isPlayingTTS = true; // Mark as playing *before* taking a chunk
-      const audioBase64 = this._currentPlayingAudioSegmentChunks.shift();
       
-      if (audioBase64) {
-        const audioSrc = `data:audio/mp3;base64,${audioBase64}`;
-        this.currentPlayingAudioElement = new Audio(audioSrc); 
-        
-        this.currentPlayingAudioElement.play()
-            .then(() => { /* console.log("TTS audio chunk playing."); */ })
-            .catch(error => {
-                console.error("Error playing TTS audio chunk:", error);
-                this.isPlayingTTS = false; // Error, so not playing
-                this._currentPlayingAudioSegmentChunks = []; // Clear rest of this problematic segment
-                this.playNextQueuedAudioSegment(); // Try next sentence
-            });
+      const VAD_THRESHOLD = 10;
+      const SPEECH_FRAMES_NEEDED_FOR_BARGE_IN = 2;
+      let consecutiveSpeechFrames = 0;
 
-        this.currentPlayingAudioElement.onended = () => {
-            // console.log("TTS audio chunk finished playing.");
-            // isPlayingTTS is managed by the start of this function and when segment is fully done.
-            // Don't set isPlayingTTS to false here, as more chunks for the *same sentence* might follow.
-            this.playNextChunkFromCurrentSegment(); // Play next chunk of the same sentence
-        };
-        this.currentPlayingAudioElement.onerror = (e) => {
-            console.error("Error during TTS audio element playback:", e);
-            this.error = "TTS 오디오 재생 중 오류가 발생했습니다.";
-            this.isPlayingTTS = false; // Error, so not playing
-            this._currentPlayingAudioSegmentChunks = []; // Clear rest of this problematic segment
-            this.playNextQueuedAudioSegment(); // Try next sentence
-        };
-        
-        // Start client-side VAD if in voice mode (will only run if also this.isPlayingTTS is true)
-        if(this.isVoiceModeActive) {
-            this.startClientSideVAD();
-        }
+      this.vadContext.vadIntervalId = window.setInterval(() => {
+          if (!this.vadContext.analyserNode || !this.vadContext.dataArray || !this.isPlayingTTS || !this.isVoiceModeActive) {
+              this.stopClientSideVAD();
+              return;
+          }
+          this.vadContext.analyserNode.getByteFrequencyData(this.vadContext.dataArray);
+          let sum = 0;
+          for (let i = 0; i < this.vadContext.dataArray.length; i++) { sum += this.vadContext.dataArray[i]; }
+          const average = this.vadContext.dataArray.length > 0 ? sum / this.vadContext.dataArray.length : 0;
+          
+          if (average > VAD_THRESHOLD) {
+              consecutiveSpeechFrames++;
+              if (consecutiveSpeechFrames >= SPEECH_FRAMES_NEEDED_FOR_BARGE_IN) {
+                 console.log(`Client VAD: User speaking detected (avg: ${average.toFixed(2)}). Stopping TTS for barge-in.`);
+                 this.stopClientSideTTSPlayback(true); 
+              }
+          } else {
+              consecutiveSpeechFrames = 0;
+          }
+      }, 100);
+  }, 300);
+},
 
-      } else { // Should not happen if length check is done, but as a safeguard
-        this.isPlayingTTS = false;
-        this.playNextQueuedAudioSegment();
-      }
-    },
+stopClientSideVAD() {
+  if (this.vadContext.vadActivationTimeoutId) {
+      clearTimeout(this.vadContext.vadActivationTimeoutId);
+      this.vadContext.vadActivationTimeoutId = null;
+  }
+  if (this.vadContext.vadIntervalId) {
+      clearInterval(this.vadContext.vadIntervalId);
+      this.vadContext.vadIntervalId = null;
+  }
+},
 
-    startClientSideVAD() {
-        this.stopClientSideVAD(); 
-
-        if (!this.isVoiceModeActive || !this.isPlayingTTS || !this.audioStream) {
-            // console.log("VAD prerequisites not met. VAD not started.");
-            return;
-        }
-        // console.log("Attempting to start client-side VAD.");
-
-        this.vadContext.vadActivationTimeoutId = window.setTimeout(() => {
-            if (!this.isVoiceModeActive || !this.isPlayingTTS || !this.audioStream || this.audioStream.getAudioTracks().every(t => t.readyState === 'ended')) {
-                this.stopClientSideVAD(); 
-                // console.log("VAD activation timed out or conditions changed. VAD stopped.");
-                return;
-            }
-
-            try {
-                if (!this.vadContext.audioContext || this.vadContext.audioContext.state === 'closed') {
-                  this.vadContext.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-                }
-                if (!this.vadContext.analyserNode) { // Only create if not exists or context was recreated
-                    this.vadContext.analyserNode = this.vadContext.audioContext.createAnalyser();
-                    this.vadContext.analyserNode.fftSize = 512; 
-                    this.vadContext.analyserNode.smoothingTimeConstant = 0.5; // Adjust for responsiveness
-                    this.vadContext.dataArray = new Uint8Array(this.vadContext.analyserNode.frequencyBinCount);
-                    // Ensure audioStream is still valid and has tracks
-                    if (this.audioStream && this.audioStream.getAudioTracks().length > 0 && this.audioStream.getAudioTracks()[0].readyState === 'live') {
-                        const source = this.vadContext.audioContext.createMediaStreamSource(this.audioStream);
-                        source.connect(this.vadContext.analyserNode);
-                    } else {
-                        console.warn("VAD: AudioStream not valid for creating source.");
-                        this.stopClientSideVAD();
-                        return;
-                    }
-                }
-            } catch (e) {
-                console.error("Error setting up VAD audio context:", e);
-                this.stopClientSideVAD();
-                return;
-            }
-            
-            const VAD_THRESHOLD = 10; // Adjusted threshold, test this value
-            const SPEECH_FRAMES_NEEDED_FOR_BARGE_IN = 2; // Consecutive speech frames for barge-in
-            let consecutiveSpeechFrames = 0;
-
-            // console.log("VAD interval starting.");
-            this.vadContext.vadIntervalId = window.setInterval(() => {
-                if (!this.vadContext.analyserNode || !this.vadContext.dataArray || !this.isPlayingTTS || !this.isVoiceModeActive) {
-                    // console.log("VAD stopping due to state change.");
-                    this.stopClientSideVAD();
-                    return;
-                }
-                this.vadContext.analyserNode.getByteFrequencyData(this.vadContext.dataArray);
-                let sum = 0;
-                for (let i = 0; i < this.vadContext.dataArray.length; i++) { sum += this.vadContext.dataArray[i]; }
-                const average = this.vadContext.dataArray.length > 0 ? sum / this.vadContext.dataArray.length : 0;
-                
-                if (average > VAD_THRESHOLD) {
-                    consecutiveSpeechFrames++;
-                    // console.log(`Client VAD: Potential speech (avg: ${average.toFixed(2)}, count: ${consecutiveSpeechFrames})`);
-                    if (consecutiveSpeechFrames >= SPEECH_FRAMES_NEEDED_FOR_BARGE_IN) {
-                       console.log(`Client VAD: User speaking detected (avg: ${average.toFixed(2)}). Stopping TTS for barge-in.`);
-                       this.stopClientSideTTSPlayback(true); 
-                       // VAD interval will be cleared by stopClientSideTTSPlayback calling stopClientSideVAD
-                    }
-                } else {
-                    consecutiveSpeechFrames = 0; // Reset counter on silence
-                    // console.log(`Client VAD: silence (avg: ${average.toFixed(2)})`);
-                }
-            }, 100); // Check every 100ms
-        }, 300); // VAD 활성화까지 300ms 지연 (TTS 시작음 무시)
-    },
-
-    stopClientSideVAD() {
-        if (this.vadContext.vadActivationTimeoutId) {
-            clearTimeout(this.vadContext.vadActivationTimeoutId);
-            this.vadContext.vadActivationTimeoutId = null;
-        }
-        if (this.vadContext.vadIntervalId) {
-            clearInterval(this.vadContext.vadIntervalId);
-            this.vadContext.vadIntervalId = null;
-        }
-        // Do not close audioContext here if it's meant to be reused by MediaRecorder.
-        // MediaRecorder should ideally get its own stream or share the context carefully.
-        // For VAD, it's safer to disconnect the analyser if the stream stops or VAD stops.
-        // if (this.vadContext.analyserNode) {
-        //     this.vadContext.analyserNode.disconnect(); // Disconnect to free up resources
-        //     // this.vadContext.analyserNode = null; // Nullify if it needs recreation
-        // }
-        // console.log("Client-side VAD stopped/cleaned.");
-    },
-    
-    handleWebSocketNotConnected(actionDescription: string) {
-      console.error(`Cannot send ${actionDescription}: WebSocket is not connected.`)
-      this.error = `서버와 연결되지 않아 ${actionDescription}을 전송할 수 없습니다. 페이지를 새로고침하거나 잠시 후 다시 시도해주세요.`
-    },
-    addMessage(sender: 'user' | 'ai', text: string) {
-      const newMessage: Message = { id: uuidv4(), sender, text, timestamp: new Date(), isStreaming: false, isInterimStt: false, };
-      this.messages.push(newMessage);
-    },
-    appendAiMessageChunk(chunk: string) {
-      const lastMessage = this.messages[this.messages.length - 1];
-      if (lastMessage && lastMessage.sender === 'ai' && lastMessage.isStreaming) {
-        lastMessage.text += chunk;
-      } else {
-        this.finalizeAiMessage(); 
-        this.messages.push({ id: uuidv4(), sender: 'ai', text: chunk, timestamp: new Date(), isStreaming: true, });
-      }
-    },
-    finalizeAiMessage() {
-      const lastMessage = this.messages[this.messages.length - 1];
-      if (lastMessage && lastMessage.sender === 'ai' && lastMessage.isStreaming) {
-        lastMessage.isStreaming = false;
-      }
-    },
-    disconnectWebSocket() {
-      if (this.isVoiceModeActive) { this.deactivateVoiceRecognition(); }
-      this.stopClientSideTTSPlayback(false); 
-      if (this.webSocket) {
-        this.webSocket.onopen = null; this.webSocket.onmessage = null; this.webSocket.onerror = null; this.webSocket.onclose = null;
-        if (this.webSocket.readyState === WebSocket.OPEN || this.webSocket.readyState === WebSocket.CONNECTING) {
-            this.webSocket.close(1000, 'Client initiated disconnect');
-        }
-        this.webSocket = null; 
-      }
-      this.isWebSocketConnected = false;
-      console.log('WebSocket disconnected by client action.');
-    },
-  },
-  getters: {
-    getMessages: (state): Message[] => state.messages,
-    getIsProcessingLLM: (state): boolean => state.isProcessingLLM,
-    getIsPlayingTTS: (state): boolean => state.isPlayingTTS, 
-    getError: (state): string | null => state.error,
-    getSessionId: (state): string | null => state.sessionId,
-    getInterimStt: (state): string => state.currentInterimStt,
-    getIsWebSocketConnected: (state): boolean => state.isWebSocketConnected,
-    getIsVoiceModeActive: (state): boolean => state.isVoiceModeActive,
-    getIsRecording: (state): boolean => state.isRecording,
-    getIsEPDDetectedByServer: (state): boolean => state.isEPDDetectedByServer,
-    getIsSynthesizingTTS: (state) => state.isSynthesizingTTS,
-  },
+handleWebSocketNotConnected(actionDescription: string) {
+console.error(`Cannot send ${actionDescription}: WebSocket is not connected.`)
+this.error = `서버와 연결되지 않아 ${actionDescription}을 전송할 수 없습니다. 페이지를 새로고침하거나 잠시 후 다시 시도해주세요.`
+},
+addMessage(sender: 'user' | 'ai', text: string) {
+const newMessage: Message = { id: uuidv4(), sender, text, timestamp: new Date(), isStreaming: false, isInterimStt: false, };
+this.messages.push(newMessage);
+},
+appendAiMessageChunk(chunk: string) {
+const lastMessage = this.messages[this.messages.length - 1];
+if (lastMessage && lastMessage.sender === 'ai' && lastMessage.isStreaming) {
+  lastMessage.text += chunk;
+} else {
+  this.finalizeAiMessage(); 
+  this.messages.push({ id: uuidv4(), sender: 'ai', text: chunk, timestamp: new Date(), isStreaming: true, });
+}
+},
+finalizeAiMessage() {
+const lastMessage = this.messages[this.messages.length - 1];
+if (lastMessage && lastMessage.sender === 'ai' && lastMessage.isStreaming) {
+  lastMessage.isStreaming = false;
+}
+},
+disconnectWebSocket() {
+if (this.isVoiceModeActive) { this.deactivateVoiceRecognition(); }
+this.stopClientSideTTSPlayback(false); 
+if (this.webSocket) {
+  this.webSocket.onopen = null; this.webSocket.onmessage = null; this.webSocket.onerror = null; this.webSocket.onclose = null;
+  if (this.webSocket.readyState === WebSocket.OPEN || this.webSocket.readyState === WebSocket.CONNECTING) {
+      this.webSocket.close(1000, 'Client initiated disconnect');
+  }
+  this.webSocket = null; 
+}
+this.isWebSocketConnected = false;
+console.log('WebSocket disconnected by client action.');
+},
+},
+getters: {
+getMessages: (state): Message[] => state.messages,
+getIsProcessingLLM: (state): boolean => state.isProcessingLLM,
+getIsPlayingTTS: (state): boolean => state.isPlayingTTS, 
+getError: (state): string | null => state.error,
+getSessionId: (state): string | null => state.sessionId,
+getInterimStt: (state): string => state.currentInterimStt,
+getIsWebSocketConnected: (state): boolean => state.isWebSocketConnected,
+getIsVoiceModeActive: (state): boolean => state.isVoiceModeActive,
+getIsRecording: (state): boolean => state.isRecording,
+getIsEPDDetectedByServer: (state): boolean => state.isEPDDetectedByServer,
+getIsSynthesizingTTS: (state) => state.isSynthesizingTTS,
+},
 })
