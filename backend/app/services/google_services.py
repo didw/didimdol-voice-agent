@@ -225,15 +225,15 @@ class StreamSTTService:
             try:
                 # --- 에너지 필터링 로직 추가 ---
                 # 16-bit 오디오 데이터를 numpy 배열로 변환
-                audio_as_np_int16 = np.frombuffer(frame_to_process, dtype=np.int16)
-                # RMS 에너지 계산
-                rms = np.sqrt(np.mean(audio_as_np_int16.astype(np.float64)**2))
+                # audio_as_np_int16 = np.frombuffer(frame_to_process, dtype=np.int16)
+                # # RMS 에너지 계산
+                # rms = np.sqrt(np.mean(audio_as_np_int16.astype(np.float64)**2))
                 
-                # 에너지가 임계값보다 낮으면 무시 (노이즈로 간주)
-                if rms < ENERGY_THRESHOLD:
-                    # print(f"VAD: Dropped frame due to low energy (RMS: {rms:.2f})")
-                    continue
-                # --- 로직 추가 끝 ---
+                # # 에너지가 임계값보다 낮으면 무시 (노이즈로 간주)
+                # if rms < ENERGY_THRESHOLD:
+                #     # print(f"VAD: Dropped frame due to low energy (RMS: {rms:.2f})")
+                #     continue
+                # # --- 로직 추가 끝 ---
 
                 # VAD로 음성인지 아닌지 판단
                 is_speech = self.vad.is_speech(frame_to_process, self.config.sample_rate_hertz)
