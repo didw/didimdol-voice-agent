@@ -197,7 +197,7 @@ class StreamSTTService:
             print(f"STT stream ({self.session_id}): Dropping audio chunk, stream task not healthy.")
             return
 
-        # --- VAD 필터링 로직 추가 ---
+        print(f"--- Chunk Received (size: {len(chunk)} bytes) ---")
         self._internal_buffer += chunk
         
         # 버퍼에 처리할 프레임이 충분히 쌓였는지 확인
@@ -211,6 +211,7 @@ class StreamSTTService:
                 
                 # 음성인 경우에만 Google STT로 전송
                 if is_speech:
+                    print(f"✅ VAD: Speech detected! Queueing frame (size: {len(frame_to_process)} bytes)")
                     self._audio_queue.put_nowait(frame_to_process)
                 else:
                    print("VAD: Noise chunk detected and dropped.")
