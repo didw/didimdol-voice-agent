@@ -6,6 +6,8 @@ import asyncio
 import base64
 from typing import Callable, Optional, AsyncGenerator, Union, List, Awaitable # Added List and Awaitable
 import queue # 동기 큐
+import webrtcvad
+import numpy as np
 
 from ..core.config import GOOGLE_APPLICATION_CREDENTIALS
 
@@ -27,13 +29,13 @@ else:
 class StreamSTTService:
     def __init__(self,
                  session_id: str,
-                 on_interim_result: Callable[[str], None],
-                 on_final_result: Callable[[str], None],
-                 on_error: Callable[[str], None],
-                 on_epd_detected: Optional[Callable[[], None]] = None,
+                 on_interim_result: Callable[[str], Awaitable[None]], # Awaitable로 타입 수정
+                 on_final_result: Callable[[str], Awaitable[None]], # Awaitable로 타입 수정
+                 on_error: Callable[[str], Awaitable[None]], # Awaitable로 타입 수정
+                 on_epd_detected: Optional[Callable[[], Awaitable[None]]] = None, # Awaitable로 타입 수정
                  language_code: str = "ko-KR",
-                 audio_encoding: speech.RecognitionConfig.AudioEncoding = speech.RecognitionConfig.AudioEncoding.WEBM_OPUS,
-                 sample_rate_hertz: int = 48000): # EPD, Barge-in을 위해선 높은 샘플레이트 및 적절한 인코딩
+                 audio_encoding: speech.RecognitionConfig.AudioEncoding = speech.RecognitionConfig.AudioEncoding.LINEAR16,
+                 sample_rate_hertz: int = 16000): # VAD 권장 샘플레이트: 8000, 16000, 32000
         
         self._is_active = False # 스트림 활성화 상태
         self.session_id = session_id
@@ -41,6 +43,19 @@ class StreamSTTService:
         if not GOOGLE_SERVICES_AVAILABLE:
             print(f"StreamSTTService ({self.session_id}) 초기화 실패: Google 서비스 사용 불가.")
             return
+
+        # --- VAD 인스턴스 생성 및 설정 ---
+        self.vad = webrtcvad.Vad()
+        self.vad.set_mode(3)  # 0(가장 덜 민감) ~ 3(가장 민감)
+        
+        # VAD는 10, 20, 30ms 프레임에서 작동합니다.
+        self.frame_duration_ms = 30 
+        self.frame_size = int(sample_rate_hertz * self.frame_duration_ms / 1000)
+        # 16-bit 오디오이므로 바이트 크기는 샘플 수의 2배
+        self.frame_bytes = self.frame_size * 2 
+        # 클라이언트에서 오는 청크를 처리하기 위한 내부 버퍼
+        self._internal_buffer = b'' 
+        # --- VAD 설정 끝 ---
 
         self.client = speech.SpeechAsyncClient() # 비동기 클라이언트 사용
         self.config = speech.RecognitionConfig(
@@ -50,6 +65,7 @@ class StreamSTTService:
             enable_automatic_punctuation=True,
             model="latest_long",
         )
+        
         self.streaming_config = speech.StreamingRecognitionConfig(
             config=self.config,
             interim_results=True,
@@ -180,12 +196,29 @@ class StreamSTTService:
         if not self._processing_task or self._processing_task.done():
             print(f"STT stream ({self.session_id}): Dropping audio chunk, stream task not healthy.")
             return
-        try:
-            self._audio_queue.put_nowait(chunk)
-        except asyncio.QueueFull:
-            print(f"STT audio queue full for session {self.session_id}. Dropping chunk.")
-        except Exception as e:
-            print(f"Error putting audio chunk to STT queue ({self.session_id}): {e}")
+
+        # --- VAD 필터링 로직 추가 ---
+        self._internal_buffer += chunk
+        
+        # 버퍼에 처리할 프레임이 충분히 쌓였는지 확인
+        while len(self._internal_buffer) >= self.frame_bytes:
+            frame_to_process = self._internal_buffer[:self.frame_bytes]
+            self._internal_buffer = self._internal_buffer[self.frame_bytes:]
+
+            try:
+                # VAD로 음성인지 아닌지 판단
+                is_speech = self.vad.is_speech(frame_to_process, self.config.sample_rate_hertz)
+                
+                # 음성인 경우에만 Google STT로 전송
+                if is_speech:
+                    self._audio_queue.put_nowait(frame_to_process)
+                # else:
+                #    print("VAD: Noise chunk detected and dropped.") # 디버깅용
+
+            except asyncio.QueueFull:
+                print(f"STT audio queue full for session {self.session_id}. Dropping frame.")
+            except Exception as e:
+                print(f"Error during VAD processing or queueing ({self.session_id}): {e}")
 
     async def stop_stream(self):
         if not GOOGLE_SERVICES_AVAILABLE or not self._is_active:

@@ -127,7 +127,13 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         async def _on_epd_detected():
             print(f"EPD detected by Google STT for session {session_id}")
             await manager.send_json_to_client(session_id, {"type": "epd_detected"})
-        stt_service = StreamSTTService(session_id=session_id, on_interim_result=_on_stt_interim_result, on_final_result=handle_stt_final_result_with_tts_wrapper, on_error=_on_stt_error, on_epd_detected=_on_epd_detected)
+        stt_service = StreamSTTService(
+            session_id=session_id, 
+            on_interim_result=_on_stt_interim_result, 
+            on_final_result=handle_stt_final_result_with_tts_wrapper, 
+            on_error=_on_stt_error, 
+            on_epd_detected=_on_epd_detected
+        )
     else:
         print(f"[{session_id}] Google STT/TTS 서비스가 비활성화되어 음성 관련 기능이 제한됩니다.")
         await manager.send_json_to_client(session_id, { "type": "warning", "message": "음성 인식 및 합성이 현재 지원되지 않습니다. 텍스트로 입력해주세요."})
