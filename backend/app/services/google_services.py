@@ -79,6 +79,15 @@ class StreamSTTService:
         self._audio_queue = asyncio.Queue() 
         self._processing_task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
+        
+        # --- 오디오 저장을 위한 파일 핸들러 추가 ---
+        try:
+            self.debug_audio_file = open("debug_audio.raw", "wb")
+            print("🔊 디버그 오디오 파일 'debug_audio.raw'가 생성되었습니다.")
+        except Exception as e:
+            self.debug_audio_file = None
+            print(f"⚠️ 디버그 오디오 파일을 생성할 수 없습니다: {e}")
+        # --- 추가 끝 ---
 
         print(f"StreamSTTService ({self.session_id}) initialized. Encoding: {audio_encoding.name}, Sample Rate: {sample_rate_hertz}")
 
@@ -211,6 +220,10 @@ class StreamSTTService:
                 
                 # 음성인 경우에만 Google STT로 전송
                 if is_speech:
+                    # --- 파일에 쓰기 로직 추가 ---
+                    if self.debug_audio_file:
+                        self.debug_audio_file.write(frame_to_process)
+                    # --- 추가 끝 ---
                     print(f"✅ VAD: Speech detected! Queueing frame (size: {len(frame_to_process)} bytes)")
                     self._audio_queue.put_nowait(frame_to_process)
                 else:
@@ -222,6 +235,12 @@ class StreamSTTService:
                 print(f"Error during VAD processing or queueing ({self.session_id}): {e}")
 
     async def stop_stream(self):
+        # --- 파일 닫기 로직 추가 ---
+        if self.debug_audio_file:
+            print("🔊 디버그 오디오 파일을 닫습니다.")
+            self.debug_audio_file.close()
+            self.debug_audio_file = None
+        # --- 추가 끝 ---
         if not GOOGLE_SERVICES_AVAILABLE or not self._is_active:
             self._is_active = False 
             return
