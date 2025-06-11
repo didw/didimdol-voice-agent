@@ -48,11 +48,10 @@ class MainRouterDecisionModel(BaseModel):
         "invoke_scenario_agent",
         "invoke_qa_agent",
         "answer_directly_chit_chat",
-        "process_next_scenario_step",
         "end_conversation",
         "unclear_input"
     ] = PydanticField(description="결정된 Action")
-    extracted_value: Optional[str] = PydanticField(default=None, description="단순 응답 값 (process_next_scenario_step용)")
+    extracted_value: Optional[str] = PydanticField(default=None, description="단순 응답 값 (현재는 거의 사용되지 않음)")
     direct_response: Optional[str] = PydanticField(default=None, description="직접 응답 텍스트")
 main_router_decision_parser = PydanticOutputParser(pydantic_object=MainRouterDecisionModel)
 
@@ -846,31 +845,23 @@ def route_from_main_agent_router(state: AgentState) -> str:
 
     if decision == "set_product_type_didimdol" or \
        decision == "set_product_type_jeonse" or \
-       decision == "set_product_type_deposit_account": # 신규 추가
+       decision == "set_product_type_deposit_account":
         return "set_product_type_node"
-    if decision == "select_product_type" or decision == "answer_directly_chit_chat": #
-        return "prepare_direct_response_node" #
-    if decision == "invoke_scenario_agent": #
+    if decision == "select_product_type" or decision == "answer_directly_chit_chat":
+        return "prepare_direct_response_node"
+    if decision == "invoke_scenario_agent":
         # 상품 유형이 설정되어 있는지 확인
         if not state.get("current_product_type"):
             print("경고: invoke_scenario_agent 요청되었으나 current_product_type 미설정. select_product_type으로 재라우팅.")
             state["main_agent_direct_response"] = "먼저 어떤 상품에 대해 상담하고 싶으신지 알려주시겠어요? (디딤돌 대출, 전세자금 대출 등)"
             return "prepare_direct_response_node" # 사용자에게 다시 선택 요청
-        return "call_scenario_agent_node" #
-    if decision == "process_next_scenario_step": #
-        if not state.get("current_product_type"):
-            print("경고: process_next_scenario_step 요청되었으나 current_product_type 미설정. select_product_type으로 재라우팅.")
-            state["main_agent_direct_response"] = "어떤 상품의 다음 단계로 진행할까요? 먼저 상품을 선택해주세요."
-            return "prepare_direct_response_node"
-        return "main_agent_scenario_processing_node" #
-    if decision == "invoke_qa_agent": #
-        return "call_qa_agent_node"  #
-    if decision == "end_conversation": #
-        return "prepare_end_conversation_node" #
+        return "call_scenario_agent_node"
+    if decision == "invoke_qa_agent":
+        return "call_qa_agent_node"
+    if decision == "end_conversation":
+        return "prepare_end_conversation_node"
     
-    # qa_error_no_kb는 call_qa_agent_node에서 발생하지 않고, run_agent_streaming에서 처리됨.
-    # 따라서 여기서 별도 라우팅 불필요. invoke_qa_agent 결과는 END로 감.
-    return "prepare_fallback_response_node" #
+    return "prepare_fallback_response_node"
 
 def route_from_scenario_agent_call(state: AgentState) -> str:
     scenario_output = state.get("scenario_agent_output") #

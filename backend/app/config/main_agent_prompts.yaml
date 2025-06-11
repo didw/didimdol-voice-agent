@@ -52,12 +52,12 @@ router_prompt: |
   - "set_product_type_didimdol": "디딤돌 주택담보대출" 상담을 시작/전환할 때.
   - "set_product_type_jeonse": "전세자금대출" 상담을 시작/전환할 때.
   - "set_product_type_deposit_account": "입출금통장 개설" 상담을 시작/전환할 때.
-  - "invoke_scenario_agent": 진행 중인 시나리오 질문에 대한 답변으로, 정보 추출이나 복잡한 의도 파악이 필요할 때. (시나리오 진행 중에만 사용)
+  - "invoke_scenario_agent": **진행 중인 시나리오 질문에 대해 사용자가 답변했을 때. 답변이 "네/아니오"처럼 단순하더라도 이 액션을 사용합니다.** (시나리오 진행 중에만 사용)
   - "invoke_qa_agent": 상품 관련 구체적인 질문에 답변해야 할 때. (시나리오 진행 중에도 가능)
   - "answer_directly_chit_chat": 금융과 무관한 일상 대화, 잡담일 경우.
-  - "process_next_scenario_step": **사용자의 답변이 "네/아니오"와 같이 매우 단순하여 별도 분석 없이 다음 단계로 넘어가도 될 때.** (시나리오 진행 중에만 사용)
   - "end_conversation": 사용자가 명확히 상담 종료를 원할 때.
   - "unclear_input": **사용자 의도가 정말 불분명하여, 되묻기가 필요할 때. 'direct_response'에 "죄송하지만 한 번 더 말씀해주시겠어요?" 와 같은 질문을 포함합니다.**
+
 
   [판단 가이드라인]
   - !!중요!! 최우선 규칙: 사용자가 시나리오 진행 중 특정 단계("{current_stage_prompt}")에 대해 "그게 무슨 뜻인가요?", "왜 필요한가요?", "조건이 어떻게 되나요?" 와 같이 역으로 질문하는 경우, 이는 시나리오에 대한 질문이므로 주저 없이 "invoke_qa_agent"를 선택하세요.
@@ -66,8 +66,7 @@ router_prompt: |
     - 단순히 "대출", "계좌"라고만 하면 "select_product_type"으로 안내합니다.
     - 일반 금융 상식 질문은 "invoke_qa_agent", 잡담은 "answer_directly_chit_chat"으로 처리합니다.
   - 만약 "active_scenario_name"이 설정되어 있다면 (시나리오 진행 중):
-    - 사용자가 현재 질문("{current_stage_prompt}")에 대한 구체적인 정보(예: "연봉은 5천만원입니다", "아니요, 집 없습니다")를 제공하면 "invoke_scenario_agent"를 선택합니다.
-    - 사용자의 답변이 "네", "아니요", "없어요", "다음" 과 같이 매우 단순하다면 "process_next_scenario_step"을 선택하여 빠르게 진행합니다.
+    - 사용자가 현재 질문("{current_stage_prompt}")에 대한 구체적인 정보(예: "연봉은 5천만원입니다", "아니요, 집 없습니다", "네", "없어요")를 제공하면 **무조건 "invoke_scenario_agent"를 선택합니다.**
     - !!중요!! 현재 단계와 직접적 관련은 없지만, 상담 중인 상품에 대한 다른 질문(예: 소득을 묻는 단계에서 "금리는요?"라고 묻는 경우)을 하면 "invoke_qa_agent"를 선택합니다.
     - 명시적으로 다른 상품(예: 디딤돌 상담 중 "전세대출도 알려줘")을 언급하면 해당 "set_product_type_..." 액션으로 전환합니다.
   - 'direct_response' 필드는 'answer_directly_chit_chat', 'select_product_type', 'unclear_input' 액션에서만 사용됩니다.
