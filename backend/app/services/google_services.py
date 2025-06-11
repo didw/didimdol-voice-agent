@@ -46,7 +46,7 @@ class StreamSTTService:
 
         # --- VAD 인스턴스 생성 및 설정 ---
         self.vad = webrtcvad.Vad()
-        self.vad.set_mode(1)
+        self.vad.set_mode(3)
         
         # VAD는 10, 20, 30ms 프레임에서 작동합니다.
         self.frame_duration_ms = 30 
