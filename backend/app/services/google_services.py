@@ -215,7 +215,7 @@ class StreamSTTService:
         # print(f"--- Chunk Received (size: {len(chunk)} bytes) ---")
         self._internal_buffer += chunk
         
-        ENERGY_THRESHOLD = 500 
+        ENERGY_THRESHOLD = 100 
 
         # 버퍼에 처리할 프레임이 충분히 쌓였는지 확인
         while len(self._internal_buffer) >= self.frame_bytes:
