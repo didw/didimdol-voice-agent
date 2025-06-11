@@ -17,6 +17,44 @@ function convertFloat32ToInt16(buffer: Float32Array): ArrayBuffer {
   return buf.buffer;
 }
 
+// --- 이 함수를 새로 추가 ---
+/**
+ * 오디오 버퍼를 목표 샘플레이트로 리샘플링합니다.
+ * @param audioBuffer - 원본 Float32Array 오디오 데이터
+ * @param fromSampleRate - 원본 샘플레이트 (e.g., 44100)
+ * @param toSampleRate - 목표 샘플레이트 (e.g., 16000)
+ * @returns 리샘플링된 Float32Array 오디오 데이터
+ */
+function resampleBuffer(audioBuffer: Float32Array, fromSampleRate: number, toSampleRate: number): Float32Array {
+  if (fromSampleRate === toSampleRate) {
+    return audioBuffer;
+  }
+  
+  const sampleRateRatio = fromSampleRate / toSampleRate;
+  const newLength = Math.round(audioBuffer.length / sampleRateRatio);
+  const result = new Float32Array(newLength);
+  
+  let offsetResult = 0;
+  let offsetBuffer = 0;
+  
+  while (offsetResult < result.length) {
+    const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+    let accum = 0, count = 0;
+    
+    for (let i = offsetBuffer; i < nextOffsetBuffer && i < audioBuffer.length; i++) {
+      accum += audioBuffer[i];
+      count++;
+    }
+    
+    result[offsetResult] = accum / count;
+    offsetResult++;
+    offsetBuffer = nextOffsetBuffer;
+  }
+  
+  return result;
+}
+// --- 추가 끝 ---
+
 interface Message {
   id: string
   sender: 'user' | 'ai'
@@ -342,11 +380,19 @@ export const useChatStore = defineStore('chat', {
         this.scriptProcessorNode.onaudioprocess = (event) => {
           if (!this.isRecording) return // 녹음이 중지되면 전송 안 함
 
-          // Float32 형식의 PCM 데이터 가져오기
-          const pcmData = event.inputBuffer.getChannelData(0)
+          // --- 리샘플링 로직 추가 ---
+          const inputData = event.inputBuffer.getChannelData(0)
           
-          // Int16 형식으로 변환
-          const int16Data = convertFloat32ToInt16(pcmData)
+          // 실제 녹음된 샘플레이트(e.g. 44100)를 가져옴
+          const sourceSampleRate = this.audioContext?.sampleRate || 44100;
+          const targetSampleRate = 16000;
+
+          // 16000Hz로 리샘플링
+          const resampledData = resampleBuffer(inputData, sourceSampleRate, targetSampleRate)
+          
+          // 리샘플링된 데이터를 Int16 형식으로 변환
+          const int16Data = convertFloat32ToInt16(resampledData)
+          // --- 수정 끝 ---
 
           // 변환된 데이터를 웹소켓으로 전송
           if (int16Data.byteLength > 0 && this.isWebSocketConnected && this.isVoiceModeActive) {
