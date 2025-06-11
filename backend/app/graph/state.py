@@ -46,6 +46,7 @@ class AgentState(TypedDict):
         "unclear_input"
     ]]
     main_agent_direct_response: Optional[str]
+    factual_response: Optional[str]
     
     # --- Scenario Agent (NLU) 출력 ---
     scenario_agent_output: Optional[ScenarioAgentOutput]
@@ -66,3 +67,4 @@ class AgentState(TypedDict):
     # --- 오류 상태 ---
     error_message: Optional[str]
     is_final_turn_response: bool
+    

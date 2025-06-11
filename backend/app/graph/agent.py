@@ -1,4 +1,3 @@
-# backend/app/graph/agent.py
 import json
 import yaml
 import asyncio
@@ -6,6 +5,8 @@ from pathlib import Path
 from typing import Dict, Optional, Sequence, Literal, Any, List, Union, cast, AsyncGenerator
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, AIMessageChunk
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
 from langchain_core.output_parsers import PydanticOutputParser
@@ -170,6 +171,17 @@ async def load_knowledge_base_content_async(loan_type: Literal["didimdol", "jeon
 load_all_prompts_sync()
 load_all_scenarios_sync()
 
+synthesizer_prompt_template = ChatPromptTemplate.from_template(ALL_PROMPTS.get('main_agent', {}).get('synthesizer_prompt', ''))
+synthesizer_chain = (
+    {
+        "chat_history": lambda x: x["chat_history"],
+        "user_question": lambda x: x["user_question"],
+        "contextual_response": lambda x: x["contextual_response"],
+        "factual_response": lambda x: x["factual_response"],
+    }
+    | synthesizer_prompt_template
+    | main_llm
+) if main_llm else None
 
 def get_active_scenario_data(state: AgentState) -> Optional[Dict]:
     loan_type = state.get("current_product_type")
@@ -322,12 +334,13 @@ async def entry_point_node(state: AgentState) -> AgentState:
         return {**state, "error_message": error_msg, "final_response_text_for_tts": error_msg, "is_final_turn_response": True} #
 
     turn_specific_defaults: Dict[str, Any] = {
-        "stt_result": None, "main_agent_routing_decision": None, "main_agent_direct_response": None, #
-        "scenario_agent_output": None, "final_response_text_for_tts": None, #
-        "is_final_turn_response": False, "error_message": None, #
-        "active_scenario_data": None, "active_knowledge_base_content": None, "active_scenario_name": None, #
-        "available_product_types": ["didimdol", "jeonse", "deposit_account"], # 신규 추가
-        "loan_selection_is_fresh": False, # Reset flag at the start of the turn
+        "stt_result": None, "main_agent_routing_decision": None, "main_agent_direct_response": None,
+        "scenario_agent_output": None, "final_response_text_for_tts": None,
+        "is_final_turn_response": False, "error_message": None,
+        "active_scenario_data": None, "active_knowledge_base_content": None, "active_scenario_name": None,
+        "available_product_types": ["didimdol", "jeonse", "deposit_account"],
+        "loan_selection_is_fresh": False,
+        "factual_response": None,
     }
     
     current_product_type = state.get("current_product_type") #
@@ -549,32 +562,99 @@ async def call_scenario_agent_node(state: AgentState) -> AgentState:
     ) #
     return {**state, "scenario_agent_output": output} #
 
-async def call_qa_agent_node(state: AgentState) -> AgentState:
-    print("--- 노드: QA Agent 호출 준비 (스트리밍은 run_agent_streaming에서 직접 처리) ---") #
-    current_product_type = state.get("current_product_type") #
-    active_scenario_name = state.get("active_scenario_name", "일반 금융 상담") #
 
-    # active_knowledge_base_content는 run_agent_streaming에서 kb_content_for_qa로 직접 로드하여
-    # invoke_qa_agent_streaming_logic에 전달됩니다.
-    # 따라서 이 노드에서 kb를 로드하거나 state에 저장할 필요는 없습니다.
-    # 다만, kb 로드 실패 시의 처리를 위해 여기서 미리 체크해볼 수는 있습니다.
-    if current_product_type:
-        # 여기서 kb를 미리 로드해서 state.active_knowledge_base_content에 넣을 수도 있으나,
-        # 스트리밍 함수에서 직접 로드하는 것이 비동기 흐름에 더 적합할 수 있음.
-        # kb 로드 실패에 대한 처리는 invoke_qa_agent_streaming_logic 내부 또는
-        # run_agent_streaming 함수에서 이루어지도록 함.
-        pass
+async def factual_answer_node(state: AgentState) -> dict:
+    """QA Agent(RAG)를 호출하여 사실 기반 답변을 생성하고 상태에 저장합니다."""
+    print("--- 노드: Factual Answer (QA Agent) ---")
+    user_question = state.get("stt_result", "")
+    qa_context_product_type = state.get("current_product_type")
+    qa_scenario_name = state.get("active_scenario_name", "일반 금융 상담")
+    factual_response = "관련 정보를 찾지 못했습니다." # 기본값
+
+    if not main_llm:
+        print("Factual Answer Node 오류: LLM이 초기화되지 않았습니다.")
+        return {"factual_response": "답변 생성 서비스에 문제가 발생했습니다."}
+
+    try:
+        kb_content_for_qa = None
+        if qa_context_product_type and qa_context_product_type in KNOWLEDGE_BASE_FILES:
+            kb_content_for_qa = await load_knowledge_base_content_async(cast(Literal["didimdol", "jeonse"], qa_context_product_type))
+        
+        rag_prompt_template_str = ALL_PROMPTS.get('qa_agent', {}).get('rag_answer_generation')
+        if not rag_prompt_template_str:
+            raise ValueError("RAG 프롬프트를 찾을 수 없습니다.")
+
+        rag_prompt = ChatPromptTemplate.from_template(rag_prompt_template_str)
+        
+        context_for_llm = kb_content_for_qa or "특정 상품 문서가 제공되지 않았습니다. 사용자의 질문에만 기반하여 일반적인 답변을 해주세요."
+            
+        formatted_prompt = rag_prompt.format(
+            scenario_name=qa_scenario_name,
+            context_for_llm=context_for_llm,
+            user_question=user_question
+        )
+
+        response = await main_llm.ainvoke([HumanMessage(content=formatted_prompt)])
+        if response and response.content:
+            raw_response_content = response.content.strip()
+            if raw_response_content.startswith("```json"):
+                raw_response_content = raw_response_content.replace("```json", "").replace("```", "").strip()
+            # JSON 객체 형태의 응답을 가정하고 content만 추출 (만약 일반 텍스트면 이 부분 조정 필요)
+            try:
+                # LLM이 JSON 문자열을 반환할 경우
+                parsed_json = json.loads(raw_response_content)
+                factual_response = parsed_json.get("answer", raw_response_content)
+            except json.JSONDecodeError:
+                # LLM이 일반 텍스트를 반환할 경우
+                factual_response = raw_response_content
+
+        print(f"QA Agent 답변: {factual_response}")
+
+    except Exception as e:
+        print(f"Factual Answer Node 실행 중 오류 발생: {e}")
+        factual_response = "정보를 찾는 중 시스템 오류가 발생했습니다."
+
+    return {"factual_response": factual_response}
+
+
+async def synthesize_answer_node(state: AgentState) -> dict:
+    """문맥적 답변과 사실적 답변을 조합하여 최종 답변을 생성합니다."""
+    print("--- 노드: Synthesize Answer ---")
+    if not synthesizer_chain:
+        print("Synthesize Answer Node 오류: Synthesizer chain이 초기화되지 않았습니다.")
+        return {"final_response_text_for_tts": state.get("main_agent_direct_response", "죄송합니다. 답변 생성에 오류가 발생했습니다."), "is_final_turn_response": True}
+        
+    chat_history = format_messages_for_prompt(state.get('messages', [])[:-1])
+    user_question = state.get("messages", [])[-1].content
     
-    # 만약 KB 로드 실패가 routing 결정에 영향을 줘야 한다면, 여기서 로드 시도하고
-    # 실패 시 state에 에러 메시지를 설정하고 다른 노드로 라우팅할 수 있음.
-    # 현재는 run_agent_streaming에서 QA 로직 실행 시 KB를 로드함.
-    # 로그에서 "컨텍스트: '일반 금융 상담'"으로 나오는 것은 active_scenario_name이 그렇게 설정되었기 때문.
-    # current_product_type이 None일 때 active_scenario_name이 "일반 금융 상담"으로 설정됨.
-    # invoke_qa_agent_streaming_logic은 이 scenario_name과 None인 knowledge_base_text를 받음.
-    # invoke_qa_agent_streaming_logic 내부에서 knowledge_base_text가 None이고 scenario_name이 "일반 금융 상담"일 때
-    # 적절한 일반 응답을 생성하도록 수정 필요.
+    contextual_response = state.get("main_agent_direct_response") or "정보 없음"
+    factual_response = state.get("factual_response") or "정보 없음"
 
-    return state #
+    final_answer: str
+    if contextual_response == "정보 없음" and factual_response == "정보 없음":
+         final_answer = "죄송하지만, 문의하신 내용에 대해 지금 답변을 드리기 어렵습니다. 다시 질문해주시겠어요?"
+    else:
+        response = await synthesizer_chain.ainvoke({
+            "chat_history": chat_history,
+            "user_question": user_question,
+            "contextual_response": contextual_response,
+            "factual_response": factual_response,
+        })
+        # 응답이 JSON 형식일 수 있으므로 content 추출
+        raw_response_content = response.content.strip()
+        if raw_response_content.startswith("```json"):
+            raw_response_content = raw_response_content.replace("```json", "").replace("```", "").strip()
+        try:
+            parsed_json = json.loads(raw_response_content)
+            final_answer = parsed_json.get("answer", raw_response_content) # "answer" 필드가 있다는 가정
+        except json.JSONDecodeError:
+            final_answer = raw_response_content
+        
+    print(f"최종 합성 답변: {final_answer}")
+    
+    updated_messages = list(state.get('messages', [])) + [AIMessage(content=final_answer)]
+    
+    return {"final_response_text_for_tts": final_answer, "messages": updated_messages, "is_final_turn_response": True}
 
 
 async def main_agent_scenario_processing_node(state: AgentState) -> AgentState:
@@ -838,26 +918,27 @@ def route_from_entry(state: AgentState) -> str:
     if state.get("is_final_turn_response"): return END #
     return "main_agent_router_node"  #
 
+
 def route_from_main_agent_router(state: AgentState) -> str:
     decision = state.get("main_agent_routing_decision")
     print(f"Main Agent 라우팅 결정: {decision}")
     if state.get("is_final_turn_response"): return END
 
-    if decision == "set_product_type_didimdol" or \
-       decision == "set_product_type_jeonse" or \
-       decision == "set_product_type_deposit_account":
+    if decision in ["set_product_type_didimdol", "set_product_type_jeonse", "set_product_type_deposit_account"]:
         return "set_product_type_node"
-    if decision == "select_product_type" or decision == "answer_directly_chit_chat":
+    if decision in ["select_product_type", "answer_directly_chit_chat"]:
         return "prepare_direct_response_node"
     if decision == "invoke_scenario_agent":
-        # 상품 유형이 설정되어 있는지 확인
         if not state.get("current_product_type"):
             print("경고: invoke_scenario_agent 요청되었으나 current_product_type 미설정. select_product_type으로 재라우팅.")
-            state["main_agent_direct_response"] = "먼저 어떤 상품에 대해 상담하고 싶으신지 알려주시겠어요? (디딤돌 대출, 전세자금 대출 등)"
-            return "prepare_direct_response_node" # 사용자에게 다시 선택 요청
+            state["main_agent_direct_response"] = "먼저 어떤 상품에 대해 상담하고 싶으신지 알려주시겠어요? (디딤돌 대출, 전세자금 대출, 입출금통장 개설)"
+            return "prepare_direct_response_node"
         return "call_scenario_agent_node"
+    # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+    # 수정: invoke_qa_agent 결정을 factual_answer_node로 라우팅
     if decision == "invoke_qa_agent":
-        return "call_qa_agent_node"
+        return "factual_answer_node"
+    # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
     if decision == "end_conversation":
         return "prepare_end_conversation_node"
     
@@ -879,32 +960,72 @@ def route_from_qa_agent_call(state: AgentState) -> str:
 # --- 그래프 빌드 ---
 workflow = StateGraph(AgentState) #
 nodes_to_add = [
-    ("entry_point_node", entry_point_node), #
-    ("main_agent_router_node", main_agent_router_node), #
-    ("set_product_type_node", set_product_type_node), #
-    ("call_scenario_agent_node", call_scenario_agent_node), #
-    ("call_qa_agent_node", call_qa_agent_node),  #
-    ("main_agent_scenario_processing_node", main_agent_scenario_processing_node), #
-    ("prepare_direct_response_node", prepare_direct_response_node), #
-    ("prepare_fallback_response_node", prepare_fallback_response_node), #
-    ("prepare_end_conversation_node", prepare_end_conversation_node), #
-    ("handle_error_node", handle_error_node) #
+    ("entry_point_node", entry_point_node),
+    ("main_agent_router_node", main_agent_router_node),
+    ("set_product_type_node", set_product_type_node),
+    ("call_scenario_agent_node", call_scenario_agent_node),
+    ("factual_answer_node", factual_answer_node),  # 신규
+    ("synthesize_answer_node", synthesize_answer_node), # 신규
+    ("main_agent_scenario_processing_node", main_agent_scenario_processing_node),
+    ("prepare_direct_response_node", prepare_direct_response_node),
+    ("prepare_fallback_response_node", prepare_fallback_response_node),
+    ("prepare_end_conversation_node", prepare_end_conversation_node),
+    ("handle_error_node", handle_error_node)
 ]
 for name, node_func in nodes_to_add: workflow.add_node(name, node_func) #
 
 workflow.set_entry_point("entry_point_node") #
 
-workflow.add_conditional_edges("entry_point_node", route_from_entry) #
-workflow.add_conditional_edges("main_agent_router_node", route_from_main_agent_router) #
-workflow.add_conditional_edges("call_scenario_agent_node", route_from_scenario_agent_call) #
-workflow.add_conditional_edges("call_qa_agent_node", route_from_qa_agent_call) #
+# workflow.add_conditional_edges("entry_point_node", route_from_entry) #
+# workflow.add_conditional_edges("main_agent_router_node", route_from_main_agent_router) #
+workflow.add_conditional_edges(
+    "entry_point_node",
+    route_from_entry, 
+    {
+        "main_agent_router_node": "main_agent_router_node",
+        END: END
+    }
+)
 
-workflow.add_edge("set_product_type_node", END) #
-workflow.add_edge("main_agent_scenario_processing_node", END) #
-workflow.add_edge("prepare_direct_response_node", END) #
-workflow.add_edge("prepare_fallback_response_node", END) #
-workflow.add_edge("prepare_end_conversation_node", END) #
-workflow.add_edge("handle_error_node", END) #
+workflow.add_conditional_edges(
+    "main_agent_router_node",
+    route_from_main_agent_router,
+    {
+        "set_product_type_node": "set_product_type_node",
+        "prepare_direct_response_node": "prepare_direct_response_node",
+        "call_scenario_agent_node": "call_scenario_agent_node",
+        "factual_answer_node": "factual_answer_node",
+        "prepare_end_conversation_node": "prepare_end_conversation_node",
+        "prepare_fallback_response_node": "prepare_fallback_response_node",
+        END: END
+    }
+)
+
+workflow.add_conditional_edges("call_scenario_agent_node", route_from_scenario_agent_call, {
+    "main_agent_scenario_processing_node": "main_agent_scenario_processing_node",
+    "handle_error_node": "handle_error_node"
+})
+
+# 수정: 신규 엣지 연결 및 기존 QA 관련 엣지 제거
+workflow.add_edge("factual_answer_node", "synthesize_answer_node")
+workflow.add_edge("synthesize_answer_node", END)
+
+workflow.add_edge("set_product_type_node", END)
+workflow.add_edge("main_agent_scenario_processing_node", END)
+workflow.add_edge("prepare_direct_response_node", END)
+workflow.add_edge("prepare_fallback_response_node", END)
+workflow.add_edge("prepare_end_conversation_node", END)
+workflow.add_edge("handle_error_node", END)
+
+# workflow.add_conditional_edges("call_scenario_agent_node", route_from_scenario_agent_call) #
+# workflow.add_conditional_edges("call_qa_agent_node", route_from_qa_agent_call) #
+
+# workflow.add_edge("set_product_type_node", END) #
+# workflow.add_edge("main_agent_scenario_processing_node", END) #
+# workflow.add_edge("prepare_direct_response_node", END) #
+# workflow.add_edge("prepare_fallback_response_node", END) #
+# workflow.add_edge("prepare_end_conversation_node", END) #
+# workflow.add_edge("handle_error_node", END) #
 
 app_graph = workflow.compile() #
 print("--- LangGraph 컴파일 완료 (다중 업무 지원) ---") #
@@ -969,72 +1090,32 @@ async def run_agent_streaming(
     full_response_text_streamed = "" #
 
     try:
-        graph_output_state: AgentState = await app_graph.ainvoke(initial_input_for_graph) #
-        final_graph_output_state = graph_output_state #
+        final_graph_output_state = await app_graph.ainvoke(initial_input_for_graph)
 
-        print(f"LangGraph 실행 완료. 라우팅: '{graph_output_state.get('main_agent_routing_decision')}', 다음 상품유형: '{graph_output_state.get('current_product_type')}', 다음 단계 ID: '{graph_output_state.get('current_scenario_stage_id')}'") #
-
-        if graph_output_state.get("main_agent_routing_decision") == "invoke_qa_agent": #
-            user_question_for_qa = graph_output_state.get("stt_result", "") #
+        print(f"LangGraph 실행 완료. 라우팅: '{final_graph_output_state.get('main_agent_routing_decision')}', 다음 단계 ID: '{final_graph_output_state.get('current_scenario_stage_id')}'")
+        
+        # 그래프 실행 후, 생성된 최종 응답 텍스트를 스트리밍
+        if final_graph_output_state.get("final_response_text_for_tts"):
+            text_to_stream = final_graph_output_state["final_response_text_for_tts"]
+            yield {"type": "stream_start", "stream_type": "general_response"}
             
-            qa_context_product_type = graph_output_state.get("current_product_type") #
-            qa_scenario_name = graph_output_state.get("active_scenario_name", "일반 금융 상담") #
-            
-            kb_content_for_qa: Optional[str] = None #
-            if qa_context_product_type and qa_context_product_type in KNOWLEDGE_BASE_FILES: #
-                kb_content_for_qa = await load_knowledge_base_content_async(qa_context_product_type) #
-
-            if user_question_for_qa: #
-                print(f"QA 스트리밍 시작 (세션: {session_id}, 컨텍스트: '{qa_scenario_name}', 질문: '{user_question_for_qa[:50]}...')") #
-                yield {"type": "stream_start", "stream_type": "qa_answer"} #
-                
-                async for chunk in invoke_qa_agent_streaming_logic(user_question_for_qa, qa_scenario_name, kb_content_for_qa): #
-                    yield chunk  #
-                    full_response_text_streamed += chunk #
-                
-                updated_messages_after_qa = list(graph_output_state.get("messages", [])) #
-                if not updated_messages_after_qa or not (isinstance(updated_messages_after_qa[-1], AIMessage) and updated_messages_after_qa[-1].content == full_response_text_streamed): #
-                    updated_messages_after_qa.append(AIMessage(content=full_response_text_streamed)) #
-                
-                next_stage_after_qa = "qa_listen" #
-                if qa_context_product_type: #
-                    active_scenario = ALL_SCENARIOS_DATA.get(qa_context_product_type) #
-                    if active_scenario: #
-                        specific_qa_listen_stage = f"qa_listen_{qa_context_product_type}" #
-                        if specific_qa_listen_stage in active_scenario.get("stages", {}): #
-                            next_stage_after_qa = specific_qa_listen_stage #
-                        else: 
-                             current_stage_id = graph_output_state.get("current_scenario_stage_id") #
-                             if current_stage_id and str(current_stage_id) in active_scenario.get("stages", {}): #
-                                 next_stage_after_qa = active_scenario["stages"][str(current_stage_id)].get("default_next_stage_id", "qa_listen") #
-
-                final_graph_output_state = {
-                    **graph_output_state, 
-                    "final_response_text_for_tts": full_response_text_streamed, #
-                    "messages": updated_messages_after_qa,  #
-                    "is_final_turn_response": True, #
-                    "current_scenario_stage_id": next_stage_after_qa #
-                }
-            else: 
-                pass
-
-        elif graph_output_state.get("final_response_text_for_tts"): #
-            text_to_stream = graph_output_state["final_response_text_for_tts"] #
-            yield {"type": "stream_start", "stream_type": "general_response"} #
-            chunk_size = 20  #
-            for i in range(0, len(text_to_stream), chunk_size): #
-                chunk = text_to_stream[i:i+chunk_size] #
-                yield chunk #
-                await asyncio.sleep(0.02)  #
-                full_response_text_streamed += chunk #
+            chunk_size = 20
+            for i in range(0, len(text_to_stream), chunk_size):
+                chunk = text_to_stream[i:i+chunk_size]
+                yield chunk
+                await asyncio.sleep(0.02)
+                full_response_text_streamed += chunk
         else:
-            error_message_fallback = graph_output_state.get("error_message", "응답을 생성하지 못했습니다.") #
-            yield {"type": "stream_start", "stream_type": "critical_error"} #
-            for char_chunk in error_message_fallback: yield char_chunk; await asyncio.sleep(0.01) #
-            full_response_text_streamed = error_message_fallback #
-            final_graph_output_state = {**graph_output_state, "final_response_text_for_tts": full_response_text_streamed, "error_message": error_message_fallback, "is_final_turn_response": True} #
-
-        yield {"type": "stream_end", "full_text": full_response_text_streamed} #
+            # 최종 응답이 없는 경우 (오류 또는 예외 상황)
+            error_message_fallback = final_graph_output_state.get("error_message", "응답을 생성하지 못했습니다.")
+            yield {"type": "stream_start", "stream_type": "critical_error"}
+            for char_chunk in error_message_fallback: yield char_chunk; await asyncio.sleep(0.01)
+            full_response_text_streamed = error_message_fallback
+            final_graph_output_state["final_response_text_for_tts"] = full_response_text_streamed
+            final_graph_output_state["error_message"] = error_message_fallback
+            final_graph_output_state["is_final_turn_response"] = True
+        
+        yield {"type": "stream_end", "full_text": full_response_text_streamed}
 
     except Exception as e:
         print(f"CRITICAL error in run_agent_streaming for session {session_id}: {e}") #
