@@ -8,6 +8,8 @@ from typing import Dict, Optional, Any, List, Union, cast, AsyncGenerator
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 
+from ..core.config import OPENAI_API_KEY, LLM_MODEL_NAME
+
 # 이 프로젝트의 다른 모듈들을 가져옵니다.
 from .utils import (
     AgentState, PRODUCT_TYPES, ScenarioAgentOutput, get_active_scenario_data, 
