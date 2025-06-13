@@ -208,46 +208,42 @@ async def process_input_through_agent(session_id: str, user_text: str, tts_servi
         return
 
     full_ai_response_text = ""
-    raw_llm_stream_ended = False # Flag to indicate LLM stream ended
-
+    
     try:
+        # The new run_agent_streaming yields dictionaries and strings directly
         async for agent_output_chunk in run_agent_streaming(
             user_input_text=user_text,
             session_id=session_id,
             current_state_dict=current_session_state
         ):
-            if isinstance(agent_output_chunk, str): 
+            if isinstance(agent_output_chunk, str):
+                # This is a chunk of the final LLM response
                 await manager.send_json_to_client(session_id, {"type": "llm_response_chunk", "chunk": agent_output_chunk})
                 full_ai_response_text += agent_output_chunk
+            
             elif isinstance(agent_output_chunk, dict):
-                if agent_output_chunk.get("type") == "stream_start":
+                chunk_type = agent_output_chunk.get("type")
+                if chunk_type == "stream_start":
                     await manager.send_json_to_client(session_id, agent_output_chunk)
-                elif agent_output_chunk.get("type") == "stream_end":
-                    raw_llm_stream_ended = True # Mark LLM stream as ended
+                
+                elif chunk_type == "stream_end":
                     await manager.send_json_to_client(session_id, {"type": "llm_response_end", "full_text": full_ai_response_text})
-                    # TTS for streamed LLM content will be handled after this loop, using the full_ai_response_text
-                elif agent_output_chunk.get("type") == "final_state":
+                
+                elif chunk_type == "final_state":
+                    # The final state is now sent at the very end
                     final_agent_state_data = agent_output_chunk.get("data")
                     if final_agent_state_data:
+                        # Update the server-side session state
                         SESSION_STATES[session_id] = cast(AgentState, final_agent_state_data)
-                        # If LLM didn't stream but final_state provides text, use it
-                        if not full_ai_response_text and final_agent_state_data.get("final_response_text_for_tts"):
-                            full_ai_response_text = final_agent_state_data["final_response_text_for_tts"]
-                            # Send this full text as if it was streamed, for UI consistency
-                            await manager.send_json_to_client(session_id, {"type": "llm_response_chunk", "chunk": full_ai_response_text})
-                            await manager.send_json_to_client(session_id, {"type": "llm_response_end", "full_text": full_ai_response_text})
-                        
-                        # Update current_session_state for TTS logic below
-                        current_session_state = SESSION_STATES[session_id]
+                        current_session_state = SESSION_STATES[session_id] # Refresh for TTS logic
                         print(f"Session state for {session_id} updated via final_state.")
-                elif agent_output_chunk.get("type") == "error": 
+                
+                elif chunk_type == "error": 
                     await manager.send_json_to_client(session_id, agent_output_chunk)
-                    await manager.send_json_to_client(session_id, {"type": "llm_response_end", "full_text": ""}) 
-                    if session_id in SESSION_STATES: # Update error in state
+                    if session_id in SESSION_STATES:
                         SESSION_STATES[session_id]["error_message"] = agent_output_chunk.get("message")
-                        current_session_state = SESSION_STATES[session_id] # refresh
-                        full_ai_response_text = "" # No TTS on error
-                    break # Stop processing further chunks on error
+                    full_ai_response_text = "" # No TTS on error
+                    break # Stop processing on error
 
         # TTS processing after LLM response is complete (either from stream_end or final_state)
         if input_mode == "voice" and tts_service and GOOGLE_SERVICES_AVAILABLE and full_ai_response_text and not (current_session_state and current_session_state.get("error_message")):
