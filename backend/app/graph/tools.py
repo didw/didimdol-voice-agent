@@ -5,7 +5,7 @@ from typing import Optional, Sequence, cast, AsyncGenerator, Dict, Any
 # config.py 파일이 프로젝트 루트에 있고, OPENAI_API_KEY와 LLM_MODEL_NAME을 정의한다고 가정합니다.
 # from ..core.config import OPENAI_API_KEY, LLM_MODEL_NAME
 # 아래는 예시입니다. 실제 환경에 맞게 수정하세요.
-from .config import OPENAI_API_KEY, LLM_MODEL_NAME
+from ..core.config import OPENAI_API_KEY, LLM_MODEL_NAME
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessageChunk
 from langchain_core.prompts import ChatPromptTemplate
