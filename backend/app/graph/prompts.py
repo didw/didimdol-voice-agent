@@ -1,15 +1,15 @@
 # backend/app/graph/prompts.py
+
 import json
 import yaml
 from pathlib import Path
-from typing import Dict, Optional, Sequence, Literal, Any, List, cast, AsyncGenerator
+from typing import Dict, Optional, Sequence, Literal, Any, List, cast
 
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, AIMessageChunk
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from ..core.config import OPENAI_API_KEY, LLM_MODEL_NAME
-from .state import AgentState, PRODUCT_TYPES
+from .state import PRODUCT_TYPES # AgentState는 여기서 직접 사용하지 않으므로 제거
 
 # --- 경로 및 설정 ---
 APP_DIR = Path(__file__).resolve().parent.parent
@@ -29,12 +29,11 @@ generative_llm = ChatOpenAI(
 ) if OPENAI_API_KEY else None
 
 # --- 데이터 로딩 및 관리 ---
-ALL_PROMPTS: Dict[str, Dict[str, str]] = {}
-ALL_SCENARIOS_DATA: Dict[PRODUCT_TYPES, Dict] = {}
-ALL_KNOWLEDGE_BASES: Dict[PRODUCT_TYPES, Optional[str]] = {}
+# ### START: 이 부분이 수정되었습니다 ###
+# 별도의 초기화 함수 대신, 모듈 로딩 시점에 데이터를 즉시 로드합니다.
 
-def load_all_prompts_sync() -> None:
-    global ALL_PROMPTS
+def load_all_prompts_sync() -> Dict[str, Dict[str, str]]:
+    """모든 에이전트의 프롬프트를 YAML 파일에서 로드합니다."""
     loaded_prompts = {}
     PROMPT_FILES = {
         'main_agent': CONFIG_DIR / "main_agent_prompts.yaml",
@@ -48,14 +47,14 @@ def load_all_prompts_sync() -> None:
             if not prompts_for_agent:
                 raise ValueError(f"{agent_name} 프롬프트 파일이 비어있거나 로드에 실패했습니다: {file_path}")
             loaded_prompts[agent_name] = prompts_for_agent
-        ALL_PROMPTS = loaded_prompts
         print("--- 모든 에이전트 프롬프트 로드 완료 ---")
+        return loaded_prompts
     except Exception as e:
         print(f"프롬프트 파일 로드 중 치명적 오류 발생: {e}")
         raise
 
-def load_all_scenarios_sync() -> None:
-    global ALL_SCENARIOS_DATA
+def load_all_scenarios_sync() -> Dict[PRODUCT_TYPES, Dict]:
+    """모든 상품의 시나리오 데이터를 JSON 파일에서 로드합니다."""
     SCENARIO_FILES: Dict[PRODUCT_TYPES, Path] = {
         "didimdol": DATA_DIR / "didimdol_loan_scenario.json",
         "jeonse": DATA_DIR / "jeonse_loan_scenario.json",
@@ -68,20 +67,27 @@ def load_all_scenarios_sync() -> None:
                 scenario = json.load(f)
             if not scenario: raise ValueError(f"{loan_type} 시나리오 파일이 비어있습니다: {file_path}")
             loaded_scenarios[loan_type] = scenario
-        ALL_SCENARIOS_DATA = cast(Dict[PRODUCT_TYPES, Dict], loaded_scenarios)
         print("--- 모든 상품 시나리오 데이터 로드 완료 ---")
+        return cast(Dict[PRODUCT_TYPES, Dict], loaded_scenarios)
     except Exception as e:
         print(f"시나리오 파일 로드 중 치명적 오류 발생: {e}")
         raise
 
+# 모듈의 최상위 레벨에서 데이터 로딩 함수를 바로 호출합니다.
+ALL_PROMPTS: Dict[str, Dict[str, str]] = load_all_prompts_sync()
+ALL_SCENARIOS_DATA: Dict[PRODUCT_TYPES, Dict] = load_all_scenarios_sync()
+ALL_KNOWLEDGE_BASES: Dict[PRODUCT_TYPES, Optional[str]] = {} # 지식 베이스는 필요 시점에 로드
+
+# ### END: 수정된 부분 끝 ###
+
+
 async def load_knowledge_base_content_async(loan_type: PRODUCT_TYPES) -> Optional[str]:
+    """필요 시점에 특정 상품의 지식 베이스(마크다운)를 로드합니다."""
     global ALL_KNOWLEDGE_BASES
     KNOWLEDGE_BASE_FILES: Dict[PRODUCT_TYPES, Path] = {
         "didimdol": DATA_DIR / "didimdol.md",
         "jeonse": DATA_DIR / "jeonse.md",
         "deposit_account": DATA_DIR / "deposit_account.md",
-        # "debit_card": DATA_DIR / "debit_card.md", # These can be loaded on demand if needed
-        # "internet_banking": DATA_DIR / "internet_banking.md",
     }
     
     if loan_type not in KNOWLEDGE_BASE_FILES:
@@ -103,9 +109,6 @@ async def load_knowledge_base_content_async(loan_type: PRODUCT_TYPES) -> Optiona
             
     return ALL_KNOWLEDGE_BASES[loan_type]
 
-def initialize_all_data():
-    load_all_prompts_sync()
-    load_all_scenarios_sync()
 
 # --- Utility Functions ---
 def format_messages_for_prompt(messages: Sequence[BaseMessage], max_history: int = 5) -> str:

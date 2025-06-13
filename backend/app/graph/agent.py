@@ -7,7 +7,7 @@ from typing import Dict, Any, Union, AsyncGenerator, cast
 from langchain_core.messages import AIMessage
 from langgraph.graph import StateGraph, END
 
-from .state import AgentState, PRODUCT_TYPES
+from .state import AgentState
 from .nodes import (
     entry_point_node,
     main_agent_router_node,
@@ -22,17 +22,24 @@ from .nodes import (
     handle_error_node,
 )
 from .prompts import (
-    initialize_all_data,
+    # ### START: 이 부분이 수정되었습니다 ###
+    # initialize_all_data는 이제 사용하지 않으므로 임포트에서 제거합니다.
     OPENAI_API_KEY,
     json_llm,
     generative_llm
+    # ### END: 수정된 부분 끝 ###
 )
 
 # --- Initial Data Loading ---
-initialize_all_data()
+# ### START: 이 부분이 수정되었습니다 ###
+# initialize_all_data() 호출을 제거합니다.
+# 데이터는 prompts.py 모듈이 임포트될 때 자동으로 로드됩니다.
+# ### END: 수정된 부분 끝 ###
+
 
 # --- Conditional Edge Logic ---
 def route_from_entry(state: AgentState) -> str:
+    # entry_point_node에서 오류가 발생했는지 확인
     if state.get("is_final_turn_response"):
         return END
     return "main_agent_router_node"
@@ -145,27 +152,19 @@ async def run_agent_streaming(
     final_state_to_yield = None
 
     try:
-        # ### START: 이 부분이 수정되었습니다 ###
-        # 호환성이 높은 astream()으로 변경하고, 스트림 처리 로직을 수정했습니다.
         async for event in app_graph.astream(initial_input_for_graph):
-            # astream()은 {'node_name': state_dict} 형식의 이벤트를 반환합니다.
             node_name = list(event.keys())[0]
             current_state_from_node = event[node_name]
 
-            # 최종 응답을 포함하는 상태를 찾습니다.
-            # 이 상태는 END로 연결되는 노드들에서 'is_final_turn_response'가 True로 설정됩니다.
             if current_state_from_node.get('is_final_turn_response'):
                 final_state_to_yield = current_state_from_node
-                # 루프를 중단하지 않고 그래프가 정상적으로 끝까지 실행되도록 둡니다.
 
-        # 그래프 실행이 모두 끝난 후, 찾은 최종 상태를 처리합니다.
         if final_state_to_yield:
             text_to_stream = final_state_to_yield.get("final_response_text_for_tts")
             if text_to_stream:
                 yield {"type": "stream_start", "stream_type": "general_response"}
                 full_response_text_streamed = text_to_stream
                 
-                # Streaming이 아닌 LLM 응답을 위해 chunk 단위로 나누어 전송 (스트리밍처럼 보이게 함)
                 chunk_size = 20
                 for i in range(0, len(text_to_stream), chunk_size):
                     chunk = text_to_stream[i:i+chunk_size]
@@ -173,10 +172,8 @@ async def run_agent_streaming(
                     await asyncio.sleep(0.02)
                 yield {"type": "stream_end", "full_text": full_response_text_streamed}
                 
-                # 텍스트 스트리밍 후 최종 상태를 클라이언트에 전송합니다.
                 yield {"type": "final_state", "session_id": session_id, "data": final_state_to_yield}
         else:
-            # 그래프가 실행되었지만 최종 응답이 생성되지 않은 경우 (로직 오류)
             print(f"CRITICAL: Graph finished without a final response for session {session_id}")
             error_response = "죄송합니다, 응답을 생성하는 데 실패했습니다. 그래프 로직을 확인해주세요."
             yield {"type": "stream_start", "stream_type": "critical_error"}
@@ -185,7 +182,6 @@ async def run_agent_streaming(
             final_graph_output_state = cast(AgentState, initial_input_for_graph.copy())
             final_graph_output_state["error_message"] = error_response
             yield {"type": "final_state", "session_id": session_id, "data": final_graph_output_state}
-        # ### END: 수정된 부분 끝 ###
 
     except Exception as e:
         print(f"CRITICAL error in run_agent_streaming for session {session_id}: {e}")
