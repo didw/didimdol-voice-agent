@@ -208,57 +208,48 @@ async def process_input_through_agent(session_id: str, user_text: str, tts_servi
         return
 
     full_ai_response_text = ""
-    
-    # ***** START OF CHANGE *****
-    # The new agent manages its own message history internally.
-    # We just need to pass the existing state dictionary.
-    
-    # We also need to add the new user message to the history before calling the agent.
-    if 'messages' not in current_session_state:
-        current_session_state['messages'] = []
-    
-    # The new agent expects the current user input to be in the messages list.
-    # The run_agent_streaming function will handle this, so we just pass the state.
-    # No, let's keep the logic in run_agent_streaming clean. We prepare the input here.
-    
-    # The `run_agent_streaming` now takes the full state dict.
-    # It will add the new user text to the message list itself.
-    
+    raw_llm_stream_ended = False # Flag to indicate LLM stream ended
+
     try:
         async for agent_output_chunk in run_agent_streaming(
             user_input_text=user_text,
             session_id=session_id,
-            current_state_dict=current_session_state # Pass the whole state
+            current_state_dict=current_session_state
         ):
-            if isinstance(agent_output_chunk, str):
+            if isinstance(agent_output_chunk, str): 
                 await manager.send_json_to_client(session_id, {"type": "llm_response_chunk", "chunk": agent_output_chunk})
                 full_ai_response_text += agent_output_chunk
-            
             elif isinstance(agent_output_chunk, dict):
-                chunk_type = agent_output_chunk.get("type")
-                if chunk_type == "stream_start":
+                if agent_output_chunk.get("type") == "stream_start":
                     await manager.send_json_to_client(session_id, agent_output_chunk)
-                
-                elif chunk_type == "stream_end":
+                elif agent_output_chunk.get("type") == "stream_end":
+                    raw_llm_stream_ended = True # Mark LLM stream as ended
                     await manager.send_json_to_client(session_id, {"type": "llm_response_end", "full_text": full_ai_response_text})
-                
-                elif chunk_type == "final_state":
+                    # TTS for streamed LLM content will be handled after this loop, using the full_ai_response_text
+                elif agent_output_chunk.get("type") == "final_state":
                     final_agent_state_data = agent_output_chunk.get("data")
                     if final_agent_state_data:
-                        # Update the server-side session state.
-                        # The new state from the graph contains the full message history.
                         SESSION_STATES[session_id] = cast(AgentState, final_agent_state_data)
-                        current_session_state = SESSION_STATES[session_id] # Refresh for TTS logic
+                        # If LLM didn't stream but final_state provides text, use it
+                        if not full_ai_response_text and final_agent_state_data.get("final_response_text_for_tts"):
+                            full_ai_response_text = final_agent_state_data["final_response_text_for_tts"]
+                            # Send this full text as if it was streamed, for UI consistency
+                            await manager.send_json_to_client(session_id, {"type": "llm_response_chunk", "chunk": full_ai_response_text})
+                            await manager.send_json_to_client(session_id, {"type": "llm_response_end", "full_text": full_ai_response_text})
+                        
+                        # Update current_session_state for TTS logic below
+                        current_session_state = SESSION_STATES[session_id]
                         print(f"Session state for {session_id} updated via final_state.")
-                
-                elif chunk_type == "error": 
+                elif agent_output_chunk.get("type") == "error": 
                     await manager.send_json_to_client(session_id, agent_output_chunk)
-                    if session_id in SESSION_STATES:
+                    await manager.send_json_to_client(session_id, {"type": "llm_response_end", "full_text": ""}) 
+                    if session_id in SESSION_STATES: # Update error in state
                         SESSION_STATES[session_id]["error_message"] = agent_output_chunk.get("message")
-                    full_ai_response_text = ""
-                    break
+                        current_session_state = SESSION_STATES[session_id] # refresh
+                        full_ai_response_text = "" # No TTS on error
+                    break # Stop processing further chunks on error
 
-        # TTS processing logic remains the same
+        # TTS processing after LLM response is complete (either from stream_end or final_state)
         if input_mode == "voice" and tts_service and GOOGLE_SERVICES_AVAILABLE and full_ai_response_text and not (current_session_state and current_session_state.get("error_message")):
             print(f"[{session_id}] Splitting LLM response for sentence-by-sentence TTS. Full text: '{full_ai_response_text[:70]}...'")
             sentences = split_into_sentences(full_ai_response_text)
@@ -269,7 +260,11 @@ async def process_input_through_agent(session_id: str, user_text: str, tts_servi
                 sentence_strip = sentence.strip()
                 if sentence_strip:
                     print(f"[{session_id}] Starting TTS for sentence {i+1}/{len(sentences)}: '{sentence_strip[:50]}...'")
-                    await tts_service.start_tts_stream(sentence_strip)
+                    # The call to start_tts_stream will now await the completion of TTS for this sentence
+                    await tts_service.start_tts_stream(sentence_strip) 
+                    # A small delay might be useful if there are websocket send overlaps,
+                    # but start_tts_stream being awaitable should handle sequencing.
+                    # await asyncio.sleep(0.05) 
                 else:
                     print(f"[{session_id}] Skipping empty sentence for TTS.")
         elif input_mode != "voice":
