@@ -1,6 +1,7 @@
 # backend/app/graph/models.py
+
 from pydantic import BaseModel, Field
-from typing import Dict, Optional, Literal, Any
+from typing import Dict, Optional, Literal, Any, List
 from langchain_core.output_parsers import PydanticOutputParser
 
 class NextStageDecisionModel(BaseModel):
@@ -18,23 +19,26 @@ class ScenarioOutputModel(BaseModel):
 
 scenario_output_parser = PydanticOutputParser(pydantic_object=ScenarioOutputModel)
 
+# Simplified model for initial user intent
 class InitialTaskDecisionModel(BaseModel):
     """Defines the possible initial actions the main agent can decide on."""
-    action: Literal[
+    # 'action'을 'actions' 리스트로 변경합니다.
+    actions: List[Literal[
         "proceed_with_product_type_didimdol",
         "proceed_with_product_type_jeonse",
         "proceed_with_product_type_deposit_account",
         "invoke_qa_agent_general",
         "answer_directly_chit_chat",
         "clarify_product_type"
-    ] = Field(description="The determined action to take.")
-    direct_response: Optional[str] = Field(default=None, description="A direct text response from the AI, if needed.")
+    ]] = Field(description="The determined list of actions to take based on initial user input.")
+    direct_response: Optional[str] = Field(default=None, description="A direct text response for clarification or chit-chat.")
 
 initial_task_decision_parser = PydanticOutputParser(pydantic_object=InitialTaskDecisionModel)
 
+
 class MainRouterDecisionModel(BaseModel):
     """Defines the routing decisions for the main agent during a conversation."""
-    action: Literal[
+    actions: List[Literal[
         "select_product_type",
         "set_product_type_didimdol",
         "set_product_type_jeonse",
@@ -44,8 +48,7 @@ class MainRouterDecisionModel(BaseModel):
         "answer_directly_chit_chat",
         "end_conversation",
         "unclear_input"
-    ] = Field(description="The determined action to route the conversation.")
-    extracted_value: Optional[str] = Field(default=None, description="A simple value extracted from the response (currently low-use).")
-    direct_response: Optional[str] = Field(default=None, description="A direct text response to the user.")
+    ]] = Field(description="The determined list of actions to execute in sequence for this turn.")
+    direct_response: Optional[str] = Field(default=None, description="A direct text response for simple actions like chit-chat, clarification, or unclear input.")
 
 main_router_decision_parser = PydanticOutputParser(pydantic_object=MainRouterDecisionModel)
