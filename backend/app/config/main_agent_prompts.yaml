@@ -39,9 +39,12 @@ router_prompt: |
      - 참고: '시스템' 메시지는 이전 턴에서 AI가 내린 내부 판단(라우팅 결정 등)을 나타냅니다. 이 정보를 현재 맥락을 파악하는 데 활용하세요.
   {formatted_messages_history}
   4. 현재 시나리오 정보 (진행 중일 경우):
-     - 단계 ID: "{current_scenario_stage_id}"
-     - AI의 질문/안내: "{current_stage_prompt}"
-     - 기대하는 사용자 정보 키: "{expected_info_key}"
+    - Current Stage ID: {current_scenario_stage_id}
+    - Agent's Last Question (Prompt): "{current_stage_prompt}"
+    - Expected Information to Collect (Key): "{expected_info_key}"
+    - Valid Expected Values for the Key: {current_stage_valid_choices} 
+    - User's Latest Input: "{user_input}"
+    - Collected Information So Far: {collected_product_info}
   5. 수집된 사용자 정보: {collected_product_info}
   6. 선택 가능한 금융 상품: {available_product_types_display}
 
@@ -58,6 +61,9 @@ router_prompt: |
   - "invoke_qa_agent": 상품 관련 구체적인 질문에 답변해야 할 때. (시나리오 진행 중에도 가능)
   - "answer_directly_chit_chat": 금융과 무관한 일상 대화, 잡담일 경우.
   - "end_conversation": 사용자가 명확히 상담 종료를 원할 때.
+  - "clarify_and_requery": 
+    Use this tool if the user provides an answer, but it's ambiguous, incomplete, or does not contain the specific value for the 'Expected Information Key for this Stage'. 
+    For example, if the stage expects 'cc_issuance_method' (e.g., '배송' or '즉시발급') but the user says "아무거나요" (anything is fine) or "좋은 걸로 해주세요" (give me a good one), you MUST use this tool to ask for a more specific choice. This tool instructs the agent to re-ask the question, potentially with more guidance.
   - "unclear_input": **사용자 의도가 정말 불분명하여, 되묻기가 필요할 때. 'direct_response'에 "죄송하지만 한 번 더 말씀해주시겠어요?" 와 같은 질문을 포함합니다.**
 
 
