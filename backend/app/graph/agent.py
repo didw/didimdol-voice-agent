@@ -157,6 +157,9 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
 async def factual_answer_node(state: AgentState) -> dict:
     print("--- Node: Factual Answer (QA Tool) ---")
     user_question = state.get("stt_result", "")
+    messages = state.get("messages", [])
+    chat_history = format_messages_for_prompt(messages[:-1]) if len(messages) > 1 else "No previous conversation."
+
     product_type = state.get("current_product_type")
     scenario_name = state.get("active_scenario_name", "General Financial Advice")
     factual_response = "Could not find relevant information."
@@ -181,7 +184,10 @@ async def factual_answer_node(state: AgentState) -> dict:
         
         rag_prompt = ChatPromptTemplate.from_template(rag_prompt_template_str)
         response = await (rag_prompt | generative_llm).ainvoke({
-            "scenario_name": scenario_name, "context_for_llm": context_for_llm, "user_question": user_question
+            "scenario_name": scenario_name, 
+            "context_for_llm": context_for_llm, 
+            "user_question": user_question,
+            "chat_history": chat_history
         })
         if response and response.content:
             factual_response = response.content.strip()
@@ -220,16 +226,60 @@ async def process_scenario_logic_node(state: AgentState) -> AgentState:
     print("--- Node: Process Scenario Logic ---")
     active_scenario_data = get_active_scenario_data(state)
     current_stage_id = state["current_scenario_stage_id"]
+    current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
     collected_info = state.get("collected_product_info", {}).copy()
     scenario_output = state.get("scenario_agent_output")
+    user_input = state.get("stt_result", "")
 
     if scenario_output and scenario_output.get("is_scenario_related"):
         entities = scenario_output.get("entities", {})
-        collected_info.update({k: v for k, v in entities.items() if v is not None})
-        print(f"Updated Info from Scenario Tool: {collected_info}")
+        intent = scenario_output.get("intent", "")
+        
+        if entities and user_input:
+            print(f"--- Verifying extracted entities: {entities} ---")
+            verification_prompt_template = """
+You are an exceptionally discerning assistant tasked with interpreting a user's intent. Your goal is to determine if the user has made a definitive choice or is simply asking a question about an option.
+
+Here is the conversational context:
+- The agent asked the user: "{agent_question}"
+- The user replied: "{user_response}"
+- From the user's reply, the following information was extracted: {entities}
+
+Your task is to analyze the user's reply carefully. Has the user **committed** to the choice represented by the extracted information?
+
+Consider these rules:
+1.  **Direct questions are not commitments.** If the user asks "What is [option]?" or "Are there fees for [option]?", they have NOT committed.
+2.  **Hypotheticals can be commitments.** If the user asks "If I choose [option], what happens next?", they ARE committing to that option for the sake of continuing the conversation.
+3.  **Ambiguity means no commitment.** If it's unclear, err on the side of caution and decide it's not a commitment.
+
+You MUST respond in JSON format with a single key "is_confirmed" (boolean). Example: {{"is_confirmed": true}}
+"""
+            verification_prompt = verification_prompt_template.format(
+                agent_question=current_stage_info.get("prompt", ""),
+                user_response=user_input,
+                entities=str(entities)
+            )
+            
+            try:
+                response = await json_llm.ainvoke([HumanMessage(content=verification_prompt)])
+                raw_content = response.content.strip().replace("```json", "").replace("```", "").strip()
+                decision = json.loads(raw_content)
+                is_confirmed = decision.get("is_confirmed", False)
+                
+                if is_confirmed:
+                    print(f"--- Entity verification PASSED. Updating collected info. ---")
+                    collected_info.update({k: v for k, v in entities.items() if v is not None})
+                else:
+                    print(f"--- Entity verification FAILED. Not updating collected info. ---")
+            except Exception as e:
+                print(f"Error during entity verification: {e}. Assuming not confirmed.")
+
+        elif entities:
+             collected_info.update({k: v for k, v in entities.items() if v is not None})
+
+        print(f"Updated Info: {collected_info}")
     
     # 먼저 LLM을 통해 다음 스테이지를 결정
-    current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
     prompt_template = ALL_PROMPTS.get('main_agent', {}).get('determine_next_scenario_stage', '')
     llm_prompt = prompt_template.format(
         active_scenario_name=active_scenario_data.get("scenario_name"),

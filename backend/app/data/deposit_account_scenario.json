@@ -15,11 +15,24 @@
       "expected_info_key": "additional_services_choice",
       "transitions": [
         {
+          "next_stage_id": "clarify_services",
+          "condition_description": "사용자가 '네'와 같이 긍정적으로 답했으나, additional_services_choice가 추출되지 않았을 때",
+          "example_phrases": ["네"]
+        },
+        {
           "next_stage_id": "ask_lifelong_account",
-          "condition_description": "사용자가 부가 서비스 선택 의사를 밝힌 경우 (모든 경우 일단 평생계좌 여부로 이동 후 분기 처리)",
-          "example_phrases": ["네", "둘 다요", "체크카드만요", "인터넷뱅킹도 같이", "아니요 괜찮아요", "나중에 할게요"]
+          "condition_description": "사용자가 부가 서비스 선택 의사를 명확히 밝힌 경우 (모든 경우 일단 평생계좌 여부로 이동 후 분기 처리)",
+          "example_phrases": ["둘 다요", "체크카드만요", "인터넷뱅킹도 같이", "아니요 괜찮아요", "나중에 할게요"]
         }
       ],
+      "default_next_stage_id": "ask_lifelong_account"
+    },
+    "clarify_services": {
+      "id": "clarify_services",
+      "prompt": "네, 알겠습니다. 체크카드와 인터넷뱅킹 중 어떤 것을 신청하시겠어요? 둘 다 신청하실 수도 있습니다. (예: 둘 다 신청, 체크카드만, 인터넷뱅킹만, 아니요)",
+      "is_question": true,
+      "input_type": "text",
+      "expected_info_key": "additional_services_choice",
       "default_next_stage_id": "ask_lifelong_account"
     },
     "ask_lifelong_account": {

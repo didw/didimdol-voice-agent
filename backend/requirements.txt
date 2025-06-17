@@ -5,6 +5,7 @@ openai
 google-cloud-speech
 google-cloud-texttospeech
 langchain
+langchain-core
 langgraph
 langchain-openai
 PyYAML
