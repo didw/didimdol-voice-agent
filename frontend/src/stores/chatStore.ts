@@ -55,7 +55,7 @@ interface ChatState {
 
 
 const WEBSOCKET_URL_BASE =
-  import.meta.env.VITE_WEBSOCKET_URL || 'wss://3.36.13.147/api/v1/chat/ws/'
+  import.meta.env.VITE_WEBSOCKET_URL || 'wss://54.180.129.233/api/v1/chat/ws/'
 
 export const useChatStore = defineStore('chat', {
   state: (): ChatState => ({
