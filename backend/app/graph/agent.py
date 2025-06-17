@@ -15,7 +15,8 @@ from ..core.config import OPENAI_API_KEY, LLM_MODEL_NAME
 from .models import (
     next_stage_decision_parser,
     initial_task_decision_parser,
-    main_router_decision_parser
+    main_router_decision_parser,
+    ActionModel
 )
 from .utils import (
     ALL_PROMPTS,
@@ -46,7 +47,7 @@ async def entry_point_node(state: AgentState) -> AgentState:
         "scenario_agent_output": None, "final_response_text_for_tts": None,
         "is_final_turn_response": False, "error_message": None,
         "active_scenario_data": None, "active_knowledge_base_content": None,
-        "loan_selection_is_fresh": False, "factual_response": None,
+        "loan_selection_is_fresh": False, "factual_response": None, "action_plan": [],
     }
     
     current_product = state.get("current_product_type")
@@ -115,33 +116,38 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
         raw_content = response.content.strip().replace("```json", "").replace("```", "").strip()
         decision = parser.parse(raw_content)
 
-        new_state = {"action_plan": decision.actions}
+        # 새로운 ActionModel 구조를 사용하도록 상태 업데이트
+        action_plan_models = decision.actions
+        action_plan_tools = [action.tool for action in action_plan_models]
+
+        new_state = {}
         if hasattr(decision, 'direct_response') and decision.direct_response:
             new_state["main_agent_direct_response"] = decision.direct_response
 
-        system_log = f"Main Agent Plan: actions={decision.actions}"
+        system_log = f"Main Agent Plan: actions={[f'{a.tool}({a.tool_input})' for a in action_plan_models]}"
         updated_messages = list(state.get("messages", [])) + [SystemMessage(content=system_log)]
         new_state["messages"] = updated_messages
 
+        # 초기 상태 분기 처리: action_plan_models 자체를 수정하여 일관성 유지
         if not current_product_type:
-            action_map = {
-                "proceed_with_product_type_didimdol": "didimdol",
-                "proceed_with_product_type_jeonse": "jeonse",
-                "proceed_with_product_type_deposit_account": "deposit_account",
-            }
-            first_action = decision.actions[0] if decision.actions else None
-            
-            if first_action in action_map:
-                new_state["action_plan"] = [f"set_product_type_{action_map[first_action]}"]
-                new_state["loan_selection_is_fresh"] = True
-            elif first_action == "invoke_qa_agent_general":
-                new_state["action_plan"] = ["invoke_qa_agent"]
-                new_state["active_scenario_name"] = "General Financial Advice"
-            elif first_action == "clarify_product_type":
-                 new_state["action_plan"] = ["select_product_type"]
+            first_action = action_plan_models[0] if action_plan_models else None
+            if first_action:
+                if first_action.tool == "set_product_type":
+                    new_state["loan_selection_is_fresh"] = True
+                elif first_action.tool == "invoke_qa_agent_general":
+                    # action_plan_models의 tool 이름을 직접 변경
+                    first_action.tool = "invoke_qa_agent"
+                    new_state["active_scenario_name"] = "General Financial Advice"
+                elif first_action.tool == "clarify_product_type":
+                    # action_plan_models의 tool 이름을 직접 변경
+                    first_action.tool = "select_product_type"
+
+        # 최종적으로 결정된 모델에서 action_plan과 action_plan_struct를 생성
+        new_state["action_plan"] = [model.tool for model in action_plan_models]
+        new_state["action_plan_struct"] = [model.dict() for model in action_plan_models]
 
         print(f"Main Agent final plan: {new_state.get('action_plan')}")
-        return {**state, **new_state}
+        return new_state
 
     except Exception as e:
         print(f"Main Agent Router Error: {e}"); traceback.print_exc()
@@ -300,10 +306,17 @@ async def synthesize_response_node(state: AgentState) -> dict:
              contextual_response = current_stage_info.get("prompt", "")
              if "%{" in contextual_response:
                 import re
-                contextual_response = re.sub(r'%\{([^}]+)\}%', lambda m: str(state.get("collected_product_info", {}).get(m.group(1), f"")), contextual_response)
+                if "end_scenario_message" in contextual_response:
+                    contextual_response = re.sub(r'%\{end_scenario_message\}%', 
+                        active_scenario_data.get("end_scenario_message", "상담이 완료되었습니다. 이용해주셔서 감사합니다."), 
+                        contextual_response)
+                else:
+                    contextual_response = re.sub(r'%\{([^}]+)\}%', 
+                        lambda m: str(state.get("collected_product_info", {}).get(m.group(1), f"")), 
+                        contextual_response)
     
     if not factual_answer or "Could not find" in factual_answer:
-        final_answer = contextual_response or state.get("main_agent_direct_response", "Sorry, I am not sure how to help with that.")
+        final_answer = contextual_response or state.get("main_agent_direct_response", "죄송합니다, 도움을 드리지 못했습니다.")
     elif not contextual_response:
         final_answer = factual_answer
     else:
@@ -318,6 +331,10 @@ async def synthesize_response_node(state: AgentState) -> dict:
         except Exception as e:
             print(f"Synthesizer Error: {e}")
             final_answer = f"{factual_answer}\n\n{contextual_response}"
+
+    # final_answer가 None이 되지 않도록 보장
+    if not final_answer:
+        final_answer = "죄송합니다, 응답을 생성하는데 문제가 발생했습니다."
 
     print(f"Final Synthesized Answer: {final_answer}")
     updated_messages = list(state['messages']) + [AIMessage(content=final_answer)]
@@ -339,21 +356,22 @@ async def end_conversation_node(state: AgentState) -> AgentState:
 async def set_product_type_node(state: AgentState) -> AgentState:
     print(f"--- Node: Set Product Type ---")
     
-    action_plan = state.get("action_plan", [])
-    if not action_plan:
+    action_plan_struct = state.get("action_plan_struct", [])
+    if not action_plan_struct:
         err_msg = "Action plan is empty in set_product_type_node"
         print(f"ERROR: {err_msg}")
         return {**state, "error_message": err_msg, "is_final_turn_response": True}
     
-    current_action = action_plan[0]
+    # 현재 액션에 맞는 구조 찾기
+    current_action_model = ActionModel.parse_obj(action_plan_struct[0])
     
-    type_map = {
-        "set_product_type_didimdol": "didimdol", 
-        "set_product_type_jeonse": "jeonse", 
-        "set_product_type_deposit_account": "deposit_account"
-    }
-    new_product_type = type_map.get(current_action)
+    new_product_type = current_action_model.tool_input.get("product_id")
     
+    if not new_product_type:
+        err_msg = f"product_id not found in action: {current_action_model.dict()}"
+        print(f"ERROR: {err_msg}")
+        return {**state, "error_message": err_msg, "is_final_turn_response": True}
+
     active_scenario = ALL_SCENARIOS_DATA.get(new_product_type)
     
     if not active_scenario:
@@ -418,10 +436,8 @@ def execute_plan_router(state: AgentState) -> str:
         "invoke_qa_agent": "factual_answer_node",
         "clarify_and_requery": "prepare_direct_response_node",
         "answer_directly_chit_chat": "prepare_direct_response_node",
-        "select_product_type": "prepare_direct_response_node",
-        "set_product_type_didimdol": "set_product_type_node",
-        "set_product_type_jeonse": "set_product_type_node",
-        "set_product_type_deposit_account": "set_product_type_node",
+        "select_product_type": "prepare_direct_response_node", # clarify_product_type에서 변환됨
+        "set_product_type": "set_product_type_node",
         "end_conversation": "end_conversation_node",
     }
     return action_to_node_map.get(next_action, "prepare_direct_response_node")
@@ -489,6 +505,8 @@ async def run_agent_streaming(
         "current_scenario_stage_id": current_state_dict.get("current_scenario_stage_id") if current_state_dict else None,
         "collected_product_info": current_state_dict.get("collected_product_info", {}) if current_state_dict else {},
         "available_product_types": ["didimdol", "jeonse", "deposit_account"],
+        "action_plan": [],
+        "action_plan_struct": [],
     })
 
     print(f"\n--- [{session_id}] Agent Turn Start ---")

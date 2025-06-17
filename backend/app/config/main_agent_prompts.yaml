@@ -10,12 +10,16 @@ initial_task_selection_prompt: |
   사용자 발화에 의도가 하나만 포함되어 있어도 반드시 리스트 형태로 응답해야 합니다. 예: "actions": ["answer_directly_chit_chat"]
 
   [결정 가능한 Action 종류 및 설명]
-  - "proceed_with_product_type_didimdol": 사용자가 "디딤돌 주택담보대출" 관련 상담을 명확히 원할 때.
-  - "proceed_with_product_type_jeonse": 사용자가 "전세자금대출" 관련 상담을 명확히 원할 때.
-  - "proceed_with_product_type_deposit_account": 사용자가 "입출금통장 개설" 또는 "계좌 만들기" 등 입출금 계좌 신규 관련 상담을 명확히 원할 때.
-  - "invoke_qa_agent_general": 사용자가 특정 상품 혹은 일반적인 금융과 관련된 질문을 할 때.
-  - "answer_directly_chit_chat": 사용자의 발화가 금융 상품과 무관한 일반 대화, 인사, 감사 등일 때.
-  - "clarify_product_type": 사용자가 "대출" 또는 "계좌" 라고만 언급하거나 모호하게 말하여 어떤 상품인지 명확히 알 수 없을 때. 이 경우, 사용자에게 디딤돌 대출, 전세자금 대출, 입출금통장 중 사용자 요청에 적당한 상품 후보중 어떤 것을 원하는지 다시 질문해야 합니다.
+  - tool: "set_product_type"
+    - 사용자가 특정 금융 상품 상담을 시작하길 원할 때 사용합니다.
+    - tool_input: {{"product_id": "상품 ID"}} 형태로 상품 ID를 반드시 포함해야 합니다.
+    - 사용 가능한 상품 ID: didimdol, jeonse, deposit_account
+  - tool: "invoke_qa_agent_general"
+    - 특정 상품과 관련 없는 일반적인 금융 질문일 때 사용합니다.
+  - tool: "answer_directly_chit_chat"
+    - 금융과 무관한 일상 대화일 경우 사용합니다.
+  - tool: "clarify_product_type"
+    - 사용자가 상품을 원하지만 어떤 상품인지 불분명할 때 사용합니다.
 
   [판단 가이드라인]
   - "디딤돌", "주택 구입 자금", "내집마련" 등의 키워드는 "proceed_with_product_type_didimdol"로 연결하세요.
@@ -27,6 +31,19 @@ initial_task_selection_prompt: |
   [Output format]
   - Your final answer must be a JSON object that strictly adheres to the following format.
   {format_instructions}
+
+  [출력 예시]
+  사용자 입력: "디딤돌 대출 받고 싶어요."
+  {{
+    "actions": [
+      {{
+        "tool": "set_product_type",
+        "tool_input": {{
+          "product_id": "didimdol"
+        }}
+      }}
+    ]
+  }}
 
 router_prompt: |
   당신은 사용자와 금융 상담을 진행하는 고도로 지능적인 AI 어시스턴트입니다.
@@ -53,18 +70,20 @@ router_prompt: |
   사용자의 발화가 하나의 의도만 담고 있더라도 리스트 형태로 응답해야 합니다. (예: ["invoke_qa_agent"])
 
   [결정 가능한 Action 종류 및 설명]
-  - "select_product_type": 사용자가 어떤 상품을 원하는지 명확하지 않을 때. (예: "대출 받고 싶어")
-  - "set_product_type_didimdol": "디딤돌 주택담보대출" 상담을 시작/전환할 때.
-  - "set_product_type_jeonse": "전세자금대출" 상담을 시작/전환할 때.
-  - "set_product_type_deposit_account": "입출금통장 개설" 상담을 시작/전환할 때.
-  - "invoke_scenario_agent": **진행 중인 시나리오 질문에 대해 사용자가 답변했을 때. 답변이 "네/아니오"처럼 단순하더라도 이 액션을 사용합니다.** (시나리오 진행 중에만 사용)
-  - "invoke_qa_agent": 상품 관련 구체적인 질문에 답변해야 할 때. (시나리오 진행 중에도 가능)
-  - "answer_directly_chit_chat": 금융과 무관한 일상 대화, 잡담일 경우.
-  - "end_conversation": 사용자가 명확히 상담 종료를 원할 때.
-  - "clarify_and_requery": 
-    Use this tool if the user provides an answer, but it's ambiguous, incomplete, or does not contain the specific value for the 'Expected Information Key for this Stage'. 
-    For example, if the stage expects 'cc_issuance_method' (e.g., '배송' or '즉시발급') but the user says "아무거나요" (anything is fine) or "좋은 걸로 해주세요" (give me a good one), you MUST use this tool to ask for a more specific choice. This tool instructs the agent to re-ask the question, potentially with more guidance.
-  - "unclear_input": **사용자 의도가 정말 불분명하여, 되묻기가 필요할 때. 'direct_response'에 "죄송하지만 한 번 더 말씀해주시겠어요?" 와 같은 질문을 포함합니다.**
+  - tool: "set_product_type"
+    - 사용자가 현재 상담과 다른 종류의 금융 상품 상담을 시작/전환하길 원할 때 사용합니다.
+    - tool_input: {{"product_id": "상품 ID"}} 형태로 상품 ID를 반드시 포함해야 합니다.
+    - 현재 상담 가능한 전체 상품 종류: {available_product_types_display}
+  - tool: "invoke_scenario_agent"
+    - 진행 중인 시나리오 질문에 대해 사용자가 답변했을 때 사용합니다. 답변이 "네/아니오"처럼 단순하더라도 이 액션을 사용합니다.
+  - tool: "invoke_qa_agent"
+    - 상품 관련 구체적인 질문에 답변해야 할 때 사용합니다.
+  - tool: "answer_directly_chit_chat"
+    - 금융과 무관한 일상 대화, 잡담일 경우 사용합니다.
+  - tool: "end_conversation"
+    - 사용자가 명확히 상담 종료를 원할 때 사용합니다.
+  - tool: "unclear_input"
+    - 사용자 의도가 정말 불분명하여, 되묻기가 필요할 때 사용합니다.
 
 
   [판단 가이드라인]
@@ -86,10 +105,22 @@ router_prompt: |
     - 명시적으로 다른 상품(예: 디딤돌 상담 중 "전세대출도 알려줘")을 언급하면 해당 "set_product_type_..." 액션으로 전환합니다.
   - 'direct_response' 필드는 'actions' 리스트에 'answer_directly_chit_chat', 'select_product_type', 'unclear_input' 중 하나만 포함될 때 사용됩니다.
 
-
   [Output format]
   - Your final answer must be a JSON object that strictly adheres to the following format.
   {format_instructions}
+
+  [출력 예시]
+  사용자 입력: "디딤돌 대출 받고 싶어요."
+  {{
+    "actions": [
+      {{
+        "tool": "set_product_type",
+        "tool_input": {{
+          "product_id": "didimdol"
+        }}
+      }}
+    ]
+  }}
 
 determine_next_scenario_stage: |
   당신은 "{active_scenario_name}" 상담 시나리오의 흐름을 관리하는 지능형 의사결정 모듈입니다.

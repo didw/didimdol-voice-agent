@@ -51,3 +51,6 @@ class AgentState(TypedDict):
     # --- Conversation History & Final Response ---
     messages: Sequence[BaseMessage]
     final_response_text_for_tts: Optional[str]
+
+    # --- Turn-specific state (cleared at the start of each turn) ---
+    action_plan_struct: List[Dict[str, Any]] # Holds the full action details
