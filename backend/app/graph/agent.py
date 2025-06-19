@@ -33,7 +33,8 @@ from .chains import (
     synthesizer_chain,
     invoke_scenario_agent_logic
 )
-from ..services.rag_service import rag_service # RAG 관련 에러 디버깅을 위해 일시적으로 주석 처리
+from ..services.rag_service import rag_service
+from ..services.web_search_service import web_search_service
 
 # --- LangGraph Node Functions ---
 
@@ -112,6 +113,10 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
                 "current_stage_valid_choices": str(valid_choices), 
                 "available_product_types_display": available_types
              })
+        else:
+            # 초기 프롬프트에 필요한 available_product_types_list를 추가합니다.
+            available_types_list = state.get("available_product_types", [])
+            prompt_kwargs["available_product_types_list"] = available_types_list
         
         prompt_filled = prompt_template.format(**prompt_kwargs)
         response = await json_llm.ainvoke([HumanMessage(content=prompt_filled)])
@@ -213,6 +218,49 @@ async def factual_answer_node(state: AgentState) -> dict:
         updated_struct.pop(0)
 
     return {"factual_response": factual_response, "action_plan": updated_plan, "action_plan_struct": updated_struct}
+
+async def web_search_node(state: AgentState) -> dict:
+    """
+    Performs a web search for out-of-domain questions using Tavily
+    and synthesizes a user-friendly answer.
+    """
+    print("--- Node: Web Search ---")
+    action_struct = state.get("action_plan_struct", [{}])[0]
+    query = action_struct.get("tool_input", {}).get("query", "")
+    
+    if not query:
+        return {"factual_response": "무엇에 대해 검색할지 알려주세요."}
+
+    # 1. Perform web search
+    search_results = await web_search_service.asearch(query)
+    
+    # 2. Synthesize a natural language answer from the results
+    try:
+        synthesis_prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are a helpful AI assistant. Your task is to synthesize the provided web search results into a concise and natural-sounding answer to the user's question. Respond in Korean."),
+            ("human", "User Question: {query}\n\nWeb Search Results:\n---\n{search_results}\n---\n\nSynthesized Answer:")
+        ])
+        
+        synthesis_chain = synthesis_prompt | generative_llm
+        response = await synthesis_chain.ainvoke({"query": query, "search_results": search_results})
+        final_answer = response.content.strip()
+        print(f"Synthesized web search answer: {final_answer[:100]}...")
+
+    except Exception as e:
+        print(f"Error synthesizing web search results: {e}")
+        final_answer = "웹 검색 결과를 요약하는 중 오류가 발생했습니다. 원본 검색 결과는 다음과 같습니다.\n\n" + search_results
+
+    # 다음 액션을 위해 plan과 struct에서 현재 액션 제거
+    updated_plan = state.get("action_plan", []).copy()
+    if updated_plan:
+        updated_plan.pop(0)
+    
+    updated_struct = state.get("action_plan_struct", []).copy()
+    if updated_struct:
+        updated_struct.pop(0)
+        
+    # 웹 검색 결과를 사실 기반 답변으로 간주하여 factual_response에 저장
+    return {"factual_response": final_answer, "action_plan": updated_plan, "action_plan_struct": updated_struct}
 
 async def call_scenario_agent_node(state: AgentState) -> AgentState:
     print("--- Node: Call Scenario Agent (Scenario Tool) ---")
@@ -463,7 +511,26 @@ async def set_product_type_node(state: AgentState) -> AgentState:
     
 async def prepare_direct_response_node(state: AgentState) -> AgentState:
     print("--- Node: Prepare Direct Response ---")
-    response_text = state.get("main_agent_direct_response", "Sorry, I didn't understand. Could you rephrase?")
+    response_text = state.get("main_agent_direct_response")
+    
+    # 메인 에이전트가 직접적인 응답을 생성하지 않은 경우 (e.g., chit-chat)
+    if not response_text:
+        print("--- Direct response not found, generating chit-chat response... ---")
+        user_input = state.get("stt_result", "안녕하세요.") # 입력이 없는 경우 대비
+        try:
+            chitchat_prompt_template = ALL_PROMPTS.get('qa_agent', {}).get('simple_chitchat_prompt')
+            if not chitchat_prompt_template:
+                raise ValueError("Simple chitchat prompt not found.")
+            
+            prompt = ChatPromptTemplate.from_template(chitchat_prompt_template)
+            chain = prompt | generative_llm
+            response = await chain.ainvoke({"user_input": user_input})
+            response_text = response.content.strip()
+
+        except Exception as e:
+            print(f"Error generating chit-chat response: {e}")
+            response_text = "네, 안녕하세요. 무엇을 도와드릴까요?" # 최종 fallback
+
     updated_messages = list(state.get("messages", [])) + [AIMessage(content=response_text)]
     return {**state, "final_response_text_for_tts": response_text, "messages": updated_messages, "is_final_turn_response": True}
 
@@ -504,6 +571,7 @@ def execute_plan_router(state: AgentState) -> str:
         "answer_directly_chit_chat": "prepare_direct_response_node",
         "select_product_type": "prepare_direct_response_node", # clarify_product_type에서 변환됨
         "set_product_type": "set_product_type_node",
+        "invoke_web_search": "web_search_node",
         "end_conversation": "end_conversation_node",
     }
     return action_to_node_map.get(next_action, "prepare_direct_response_node")
@@ -516,6 +584,7 @@ workflow.add_node("main_agent_router_node", main_agent_router_node)
 workflow.add_node("call_scenario_agent_node", call_scenario_agent_node)
 workflow.add_node("process_scenario_logic_node", process_scenario_logic_node)
 workflow.add_node("factual_answer_node", factual_answer_node)
+workflow.add_node("web_search_node", web_search_node)
 workflow.add_node("synthesize_response_node", synthesize_response_node)
 workflow.add_node("set_product_type_node", set_product_type_node)
 workflow.add_node("prepare_direct_response_node", prepare_direct_response_node)
@@ -530,6 +599,7 @@ workflow.add_conditional_edges(
     {
         "call_scenario_agent_node": "call_scenario_agent_node",
         "factual_answer_node": "factual_answer_node",
+        "web_search_node": "web_search_node",
         "synthesize_response_node": "synthesize_response_node",
         "prepare_direct_response_node": "prepare_direct_response_node",
         "set_product_type_node": "set_product_type_node",
@@ -540,6 +610,7 @@ workflow.add_conditional_edges(
 workflow.add_edge("call_scenario_agent_node", "process_scenario_logic_node")
 workflow.add_conditional_edges("process_scenario_logic_node", execute_plan_router)
 workflow.add_conditional_edges("factual_answer_node", execute_plan_router)
+workflow.add_conditional_edges("web_search_node", execute_plan_router)
 
 workflow.add_edge("synthesize_response_node", END)
 workflow.add_edge("set_product_type_node", END)

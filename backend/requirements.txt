@@ -13,3 +13,4 @@ lancedb
 pyarrow
 tiktoken
 rank_bm25
+tavily-python
