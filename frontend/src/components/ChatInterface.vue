@@ -83,11 +83,6 @@ onMounted(async () => {
 
 onUnmounted(() => {
   chatStore.disconnectWebSocket()
-  // Clean up client-side VAD resources if they were initialized
-  if (vadInterval) clearInterval(vadInterval)
-  if (audioContextForVAD && audioContextForVAD.state !== 'closed') {
-    audioContextForVAD.close()
-  }
 })
 
 const handleSendTextMessage = async () => {
@@ -173,104 +168,7 @@ watch(userInputText, (newValue) => {
 })
 
 // --- Client-side Barge-in VAD Logic (From new script) ---
-// let localMediaStreamForVAD: MediaStream | null = null; // Not needed, use chatStore.audioStream
-let audioContextForVAD: AudioContext | null = null
-let analyserNode: AnalyserNode | null = null
-let dataArrayForVAD: Uint8Array | null = null
-let vadInterval: number | null = null
-
-const monitorMicActivityForBargeIn = () => {
-  if (!isVoiceModeActive.value || !isPlayingTTS.value || !chatStore.audioStream) {
-    if (vadInterval) clearInterval(vadInterval)
-    vadInterval = null
-    return
-  }
-
-  if (!audioContextForVAD || audioContextForVAD.state === 'closed') {
-    audioContextForVAD = new AudioContext()
-    analyserNode = audioContextForVAD.createAnalyser()
-    analyserNode.fftSize = 2048
-    dataArrayForVAD = new Uint8Array(analyserNode.frequencyBinCount)
-
-    try {
-      // Ensure audioStream is valid and has tracks
-      if (chatStore.audioStream && chatStore.audioStream.getAudioTracks().length > 0) {
-        const source = audioContextForVAD.createMediaStreamSource(chatStore.audioStream)
-        source.connect(analyserNode)
-      } else {
-        console.warn('VAD: chatStore.audioStream is null or has no audio tracks.')
-        if (vadInterval) clearInterval(vadInterval)
-        vadInterval = null
-        return
-      }
-    } catch (e) {
-      console.error('Error connecting mic to VAD analyser:', e)
-      if (vadInterval) clearInterval(vadInterval)
-      vadInterval = null
-      // Attempt to close context if source creation failed
-      if (audioContextForVAD && audioContextForVAD.state !== 'closed') {
-        audioContextForVAD.close()
-        audioContextForVAD = null
-      }
-      return
-    }
-  }
-
-  if (vadInterval) clearInterval(vadInterval) // Clear previous interval
-
-  vadInterval = window.setInterval(() => {
-    // Check audioContextForVAD state inside interval
-    if (
-      !analyserNode ||
-      !dataArrayForVAD ||
-      !isPlayingTTS.value ||
-      !isVoiceModeActive.value ||
-      !audioContextForVAD ||
-      audioContextForVAD.state === 'closed'
-    ) {
-      if (vadInterval) clearInterval(vadInterval)
-      vadInterval = null
-      return
-    }
-    analyserNode.getByteFrequencyData(dataArrayForVAD)
-    let sum = 0
-    for (let i = 0; i < dataArrayForVAD.length; i++) {
-      sum += dataArrayForVAD[i]
-    }
-    const average = dataArrayForVAD.length > 0 ? sum / dataArrayForVAD.length : 0
-
-    const VAD_THRESHOLD = 10 // Example threshold, adjust as needed
-    if (average > VAD_THRESHOLD) {
-      console.log('Client-side VAD: User speaking detected during TTS. Stopping TTS.')
-      chatStore.stopClientSideTTSPlayback(true) // Stop client TTS and notify server
-      if (vadInterval) clearInterval(vadInterval) // Stop VAD monitoring once triggered
-      vadInterval = null
-    }
-  }, 100) // Check every 100ms
-}
-
-watch(isPlayingTTS, (newValue) => {
-  if (newValue && isVoiceModeActive.value) {
-    monitorMicActivityForBargeIn()
-  } else {
-    if (vadInterval) clearInterval(vadInterval)
-    vadInterval = null
-  }
-})
-
-watch(isVoiceModeActive, (newValue) => {
-  if (!newValue) {
-    if (vadInterval) clearInterval(vadInterval)
-    vadInterval = null
-    // Ensure VAD audio context is closed when voice mode is off
-    if (audioContextForVAD && audioContextForVAD.state !== 'closed') {
-      audioContextForVAD.close().then(() => (audioContextForVAD = null))
-    }
-  } else if (newValue && isPlayingTTS.value) {
-    monitorMicActivityForBargeIn()
-  }
-})
-
+// This entire section is now removed as the logic is fully centralized in chatStore.ts
 </script>
 
 <template>
