@@ -16,7 +16,8 @@ from .models import (
     next_stage_decision_parser,
     initial_task_decision_parser,
     main_router_decision_parser,
-    ActionModel
+    ActionModel,
+    expanded_queries_parser
 )
 from .utils import (
     ALL_PROMPTS,
@@ -32,6 +33,7 @@ from .chains import (
     synthesizer_chain,
     invoke_scenario_agent_logic
 )
+from ..services.rag_service import rag_service # RAG 관련 에러 디버깅을 위해 일시적으로 주석 처리
 
 # --- LangGraph Node Functions ---
 
@@ -155,53 +157,62 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
         return {**state, "error_message": err_msg, "main_agent_routing_decision": "unclear_input", "is_final_turn_response": True}
 
 async def factual_answer_node(state: AgentState) -> dict:
-    print("--- Node: Factual Answer (QA Tool) ---")
-    user_question = state.get("stt_result", "")
+    print("--- Node: Factual Answer (QA Tool with Query Expansion) ---")
+    original_question = state.get("stt_result", "")
     messages = state.get("messages", [])
     chat_history = format_messages_for_prompt(messages[:-1]) if len(messages) > 1 else "No previous conversation."
-
-    product_type = state.get("current_product_type")
     scenario_name = state.get("active_scenario_name", "General Financial Advice")
-    factual_response = "Could not find relevant information."
 
-    if not generative_llm:
-        return {"factual_response": "Answer generation service is unavailable."}
+    if not rag_service.is_ready():
+        print("Warning: RAG service is not ready. Using fallback response.")
+        return {"factual_response": "죄송합니다, 현재 정보 검색 기능에 문제가 발생하여 답변을 드릴 수 없습니다. 잠시 후 다시 시도해 주세요."}
 
+    all_queries = [original_question]
     try:
-        kb_contents = []
-        if product_type:
-            kb_contents.append(await load_knowledge_base_content_async(product_type))
-            if product_type == 'deposit_account':
-                kb_contents.append(await load_knowledge_base_content_async('debit_card'))
-                kb_contents.append(await load_knowledge_base_content_async('internet_banking'))
+        # 1. 질문 확장
+        print("--- Generating expanded queries... ---")
+        expansion_prompt_template = ALL_PROMPTS.get('qa_agent', {}).get('rag_query_expansion_prompt')
+        if not expansion_prompt_template:
+            raise ValueError("RAG query expansion prompt not found.")
         
-        context_for_llm = "\n\n---\n\n".join(filter(None, kb_contents))
-        if not context_for_llm:
-            context_for_llm = "No specific product document provided. Answer based on general financial knowledge."
-
-        rag_prompt_template_str = ALL_PROMPTS.get('qa_agent', {}).get('rag_answer_generation')
-        if not rag_prompt_template_str: raise ValueError("RAG prompt not found.")
+        expansion_prompt = ChatPromptTemplate.from_template(expansion_prompt_template)
         
-        rag_prompt = ChatPromptTemplate.from_template(rag_prompt_template_str)
-        response = await (rag_prompt | generative_llm).ainvoke({
-            "scenario_name": scenario_name, 
-            "context_for_llm": context_for_llm, 
-            "user_question": user_question,
-            "chat_history": chat_history
+        expansion_chain = expansion_prompt | json_llm | expanded_queries_parser
+        expanded_result = await expansion_chain.ainvoke({
+            "scenario_name": scenario_name,
+            "chat_history": chat_history,
+            "user_question": original_question
         })
-        if response and response.content:
-            factual_response = response.content.strip()
-        print(f"QA Tool Response: {factual_response}")
+        
+        if expanded_result and expanded_result.queries:
+            all_queries.extend(expanded_result.queries)
+            print(f"Expanded queries generated: {expanded_result.queries}")
+        else:
+            print("Query expansion did not produce results. Using original question only.")
 
     except Exception as e:
-        print(f"Factual Answer Node Error: {e}")
-        factual_response = "An error occurred while finding information."
+        # 질문 확장에 실패하더라도, 원본 질문으로 계속 진행
+        print(f"Could not expand query due to an error: {e}. Proceeding with original question.")
 
+    try:
+        # 2. RAG 파이프라인 호출 (원본 + 확장 질문)
+        print(f"Invoking RAG pipeline with {len(all_queries)} queries.")
+        factual_response = await rag_service.answer_question(all_queries, original_question)
+        print(f"RAG response: {factual_response[:100]}...")
+    except Exception as e:
+        print(f"Factual Answer Node Error (RAG): {e}")
+        factual_response = "정보를 검색하는 중 오류가 발생했습니다."
+
+    # 다음 액션을 위해 plan과 struct에서 현재 액션 제거
     updated_plan = state.get("action_plan", []).copy()
     if updated_plan:
         updated_plan.pop(0)
+    
+    updated_struct = state.get("action_plan_struct", []).copy()
+    if updated_struct:
+        updated_struct.pop(0)
 
-    return {"factual_response": factual_response, "action_plan": updated_plan}
+    return {"factual_response": factual_response, "action_plan": updated_plan, "action_plan_struct": updated_struct}
 
 async def call_scenario_agent_node(state: AgentState) -> AgentState:
     print("--- Node: Call Scenario Agent (Scenario Tool) ---")
@@ -335,11 +346,16 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
     if updated_plan:
         updated_plan.pop(0)
     
+    updated_struct = state.get("action_plan_struct", []).copy()
+    if updated_struct:
+        updated_struct.pop(0)
+
     return {
         **state, 
         "collected_product_info": collected_info, 
         "current_scenario_stage_id": determined_next_stage_id,
-        "action_plan": updated_plan
+        "action_plan": updated_plan,
+        "action_plan_struct": updated_struct
     }
 
 async def synthesize_response_node(state: AgentState) -> dict:

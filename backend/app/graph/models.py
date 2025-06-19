@@ -23,7 +23,7 @@ scenario_output_parser = PydanticOutputParser(pydantic_object=ScenarioOutputMode
 
 class ActionModel(BaseModel):
     """A model for a single action (tool call) to be executed by the agent."""
-    tool: str = Field(description="The name of the action/tool to be executed.")
+    tool: str = Field(description="The tool to be called, e.g., 'invoke_scenario_agent', 'invoke_qa_agent'.")
     tool_input: Dict[str, Any] = Field(default_factory=dict, description="The parameters for the action/tool.")
 
 # Simplified model for initial user intent
@@ -40,3 +40,8 @@ class MainRouterDecisionModel(BaseModel):
     direct_response: Optional[str] = Field(default=None, description="A direct text response for simple actions like chit-chat, clarification, or unclear input.")
 
 main_router_decision_parser = PydanticOutputParser(pydantic_object=MainRouterDecisionModel)
+
+class ExpandedQueries(BaseModel):
+    queries: List[str] = Field(description="A list of expanded and rephrased questions.")
+
+expanded_queries_parser = PydanticOutputParser(pydantic_object=ExpandedQueries)

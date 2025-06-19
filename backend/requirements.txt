@@ -1,13 +1,15 @@
 fastapi
-uvicorn[standard]
+uvicorn
 python-dotenv
-openai
-google-cloud-speech
-google-cloud-texttospeech
 langchain
-langchain-core
-langgraph
 langchain-openai
+websockets
 PyYAML
-websockets # WebSocket 직접 사용하는 경우 또는 FastAPI 의존성으로 포함될 수 있음
-# pydantic (FastAPI의 핵심 의존성으로 보통 함께 설치됨)
+google-cloud-aiplatform
+google-cloud-texttospeech
+google-cloud-speech
+unstructured[md]
+lancedb
+pyarrow
+tiktoken
+rank_bm25

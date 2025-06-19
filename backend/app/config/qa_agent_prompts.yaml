@@ -18,4 +18,34 @@ rag_answer_generation: |
   [사용자 질문]
   {user_question}
 
-  [답변]
+  [답변] 
+
+rag_query_expansion_prompt: |
+  You are an AI expert specializing in search query optimization for Retrieval-Augmented Generation (RAG) systems.
+  Your task is to generate a set of diverse and relevant search queries based on the user's latest question and the preceding conversation history.
+  The goal is to broaden the search scope to retrieve the most comprehensive and accurate information from a vector database.
+
+  **Instructions:**
+  1.  Analyze the user's latest question in the context of the chat history and the current topic.
+  2.  Generate 3 to 4 alternative queries. These should include:
+      - A more specific, detailed version of the question.
+      - A more general, high-level question.
+      - A rephrased version of the question from a different perspective.
+  3.  **Crucially, the queries must be self-contained**, meaning they should make sense without needing the chat history. For example, if the user asks "What about the interest rate?", a good expanded query would be "What is the interest rate for the Didimdol loan?", not just "interest rate".
+  4.  The generated queries should be in Korean.
+
+  **Context:**
+  - Current Topic: {scenario_name}
+  - Chat History:
+  {chat_history}
+  - User's Latest Question: "{user_question}"
+
+  Please provide your response in a JSON object with a single key "queries", which contains a list of the generated query strings.
+  Example:
+  {{
+    "queries": [
+      "디딤돌 대출의 소득별 금리 구간은 어떻게 되나요?",
+      "디딤돌 대출 신청 시 받을 수 있는 우대금리 종류에는 무엇이 있나요?",
+      "주택담보대출 금리 결정 요인"
+    ]
+  }} 

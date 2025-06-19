@@ -1,6 +1,6 @@
 # backend/app/api/v1/chat.py
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException, status, Header
 import json
 import re # For sentence splitting
 from typing import Dict, Optional, cast, List # Added List
@@ -11,6 +11,14 @@ from ...core.config import LLM_MODEL_NAME
 
 router = APIRouter()
 SESSION_STATES: Dict[str, AgentState] = {} 
+
+
+# 허용할 출처 목록 (개발 환경)
+# 프로덕션에서는 실제 서비스 도메인으로 변경해야 합니다.
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
 
 
 class ConnectionManager:
@@ -74,6 +82,9 @@ def split_into_sentences(text: str) -> List[str]:
 @router.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     await manager.connect(websocket, session_id)
+
+    if session_id not in manager.active_connections:
+        return
 
     stt_service: Optional[StreamSTTService] = None
     tts_service: Optional[StreamTTSService] = None
