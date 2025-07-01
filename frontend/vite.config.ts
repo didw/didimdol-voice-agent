@@ -8,8 +8,8 @@ import vueDevTools from "vite-plugin-vue-devtools";
 export default defineConfig({
   plugins: [vue(), vueDevTools()],
   server: {
-    host: '0.0.0.0',
-    allowedHosts: ['3.36.13.147', 'aibranch.zapto.org']
+    host: "0.0.0.0",
+    allowedHosts: ["aibranch.zapto.org", "43.203.170.239"],
   },
   resolve: {
     alias: {
