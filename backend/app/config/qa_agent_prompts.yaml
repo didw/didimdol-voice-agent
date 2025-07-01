@@ -18,4 +18,54 @@ rag_answer_generation: |
   [사용자 질문]
   {user_question}
 
-  [답변]
+  [답변] 
+
+rag_query_expansion_prompt: |
+  You are an AI expert specializing in search query optimization for Retrieval-Augmented Generation (RAG) systems.
+  Your task is to generate a set of diverse and relevant search queries based on the user's latest question and the preceding conversation history.
+  The goal is to broaden the search scope to retrieve the most comprehensive and accurate information from a vector database.
+
+  **Instructions:**
+  1.  Analyze the user's latest question in the context of the chat history and the current topic.
+  2.  Generate 3 to 4 alternative queries. These should include:
+      - A more specific, detailed version of the question.
+      - A more general, high-level question.
+      - A rephrased version of the question from a different perspective.
+  3.  **Crucially, the queries must be self-contained**, meaning they should make sense without needing the chat history. For example, if the user asks "What about the interest rate?", a good expanded query would be "What is the interest rate for the Didimdol loan?", not just "interest rate".
+  4.  The generated queries should be in Korean.
+
+  **Context:**
+  - Current Topic: {scenario_name}
+  - Chat History:
+  {chat_history}
+  - User's Latest Question: "{user_question}"
+
+  Please provide your response in a JSON object with a single key "queries", which contains a list of the generated query strings.
+  Example:
+  {{
+    "queries": [
+      "디딤돌 대출의 소득별 금리 구간은 어떻게 되나요?",
+      "디딤돌 대출 신청 시 받을 수 있는 우대금리 종류에는 무엇이 있나요?",
+      "주택담보대출 금리 결정 요인"
+    ]
+  }}
+
+simple_chitchat_prompt: |
+  You are a friendly and empathetic AI bank assistant.
+  Your task is to generate a short, natural, and appropriate response to a user's simple greeting or chit-chat.
+
+  **Context:**
+  - The user just said: "{user_input}"
+
+  **Your Response Rules:**
+  - Keep it brief (usually one sentence).
+  - Be polite and helpful.
+  - Do not ask complex questions. A simple "How can I help you?" or similar is fine.
+  - Respond in Korean.
+
+  **Examples:**
+  - User Input: "안녕하세요" -> Your Response: "네, 안녕하세요! 무엇을 도와드릴까요?"
+  - User Input: "고마워요" -> YourResponse: "천만에요. 더 궁금한 점이 있으신가요?"
+  - User Input: "오늘 날씨 좋네요" -> Your Response: "네, 정말 그렇네요! 어떤 금융 서비스에 대해 안내해드릴까요?"
+
+  Your response: 

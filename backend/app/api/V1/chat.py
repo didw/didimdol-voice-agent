@@ -1,9 +1,10 @@
 # backend/app/api/v1/chat.py
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException, status, Header
 import json
 import re # For sentence splitting
 from typing import Dict, Optional, cast, List # Added List
+from langchain_core.messages import AIMessage
 
 from ...graph.agent import run_agent_streaming, AgentState, PRODUCT_TYPES # PRODUCT_TYPES 임포트
 from ...services.google_services import StreamSTTService, StreamTTSService, GOOGLE_SERVICES_AVAILABLE
@@ -11,6 +12,14 @@ from ...core.config import LLM_MODEL_NAME
 
 router = APIRouter()
 SESSION_STATES: Dict[str, AgentState] = {} 
+
+
+# 허용할 출처 목록 (개발 환경)
+# 프로덕션에서는 실제 서비스 도메인으로 변경해야 합니다.
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
 
 
 class ConnectionManager:
@@ -75,6 +84,9 @@ def split_into_sentences(text: str) -> List[str]:
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     await manager.connect(websocket, session_id)
 
+    if session_id not in manager.active_connections:
+        return
+
     stt_service: Optional[StreamSTTService] = None
     tts_service: Optional[StreamTTSService] = None
 
@@ -97,7 +109,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             "active_scenario_name": "미정",
             "final_response_text_for_tts": None,
             "error_message": None,
-            "is_final_turn_response": False
+            "is_final_turn_response": False,
+            "tts_cancelled": False, # TTS 중단 플래그 추가
         }
         print(f"New session initialized for {session_id}")
         initial_greeting_message = "안녕하세요! 신한은행 AI 금융 상담 서비스입니다. 어떤 도움이 필요하신가요? (예: 디딤돌 대출, 전세자금 대출, 입출금통장 개설)" # 수정
@@ -119,8 +132,31 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             await manager.send_json_to_client(session_id, {"type": "stt_interim_result", "transcript": transcript})
         
         async def handle_stt_final_result_with_tts_wrapper(transcript: str):
-            await manager.send_json_to_client(session_id, {"type": "stt_final_result", "transcript": transcript})
-            await process_input_through_agent(session_id, transcript, tts_service, input_mode="voice")
+            trimmed_transcript = transcript.strip()
+            # STT 최종 결과를 클라이언트로 전송 (인터림 텍스트 지우기용)
+            await manager.send_json_to_client(session_id, {"type": "stt_final_result", "transcript": trimmed_transcript})
+
+            if trimmed_transcript:
+                # 유효한 텍스트가 있으면 에이전트 처리
+                await process_input_through_agent(session_id, trimmed_transcript, tts_service, input_mode="voice")
+            else:
+                # STT 결과가 비어있으면, 사용자에게 재요청
+                print(f"[{session_id}] Empty STT result. Asking user to repeat.")
+                reprompt_message = "죄송합니다, 잘 이해하지 못했어요. 다시 한번 말씀해주시겠어요?"
+                
+                # 재요청 메시지를 UI에 표시
+                await manager.send_json_to_client(session_id, {"type": "llm_response_chunk", "chunk": reprompt_message})
+                await manager.send_json_to_client(session_id, {"type": "llm_response_end", "full_text": reprompt_message})
+                
+                # 세션 상태의 메시지 기록에도 추가
+                if session_id in SESSION_STATES:
+                    current_messages = SESSION_STATES[session_id].get("messages", [])
+                    current_messages.append(AIMessage(content=reprompt_message))
+                    SESSION_STATES[session_id]["messages"] = current_messages
+
+                # 음성 모드일 경우, 재요청 메시지를 TTS로 재생
+                if tts_service and GOOGLE_SERVICES_AVAILABLE and SESSION_STATES.get(session_id, {}).get('isVoiceModeActive', True):
+                    await tts_service.start_tts_stream(reprompt_message)
 
         async def _on_stt_error(error_msg: str):
             await manager.send_json_to_client(session_id, {"type": "error", "message": f"STT Error: {error_msg}"})
@@ -172,6 +208,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             elif message_type == "stop_tts": 
                 if tts_service and GOOGLE_SERVICES_AVAILABLE:
                     print(f"[{session_id}] Client requested server to stop TTS stream generation.")
+                    if session_id in SESSION_STATES:
+                        SESSION_STATES[session_id]['tts_cancelled'] = True
                     await tts_service.stop_tts_stream() 
                 else: print(f"[{session_id}] TTS stop_tts, TTS service N/A.")
     except WebSocketDisconnect: print(f"WebSocket disconnected by client: {session_id}")
@@ -206,6 +244,10 @@ async def process_input_through_agent(session_id: str, user_text: str, tts_servi
         print(f"Error: Session state for {session_id} not found during agent processing.")
         await manager.send_json_to_client(session_id, {"type": "error", "message": "세션 정보를 찾을 수 없습니다. 다시 시도해주세요."})
         return
+
+    # TTS 취소 플래그 초기화
+    if session_id in SESSION_STATES:
+        SESSION_STATES[session_id]['tts_cancelled'] = False
 
     full_ai_response_text = ""
     raw_llm_stream_ended = False # Flag to indicate LLM stream ended
@@ -257,6 +299,11 @@ async def process_input_through_agent(session_id: str, user_text: str, tts_servi
                 print(f"[{session_id}] No sentences found in LLM response for TTS.")
             
             for i, sentence in enumerate(sentences):
+                # 루프 시작 전, 매번 TTS 취소 플래그를 확인
+                if current_session_state.get('tts_cancelled'):
+                    print(f"[{session_id}] TTS loop interrupted by client request.")
+                    break
+
                 sentence_strip = sentence.strip()
                 if sentence_strip:
                     print(f"[{session_id}] Starting TTS for sentence {i+1}/{len(sentences)}: '{sentence_strip[:50]}...'")

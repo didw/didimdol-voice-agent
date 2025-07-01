@@ -1,115 +1,76 @@
 initial_task_selection_prompt: |
-  당신은 사용자의 요청을 분석하여 어떤 금융 상담 서비스로 안내할지 결정하는 AI 어시스턴트입니다.
-  사용자는 "디딤돌 주택담보대출", "전세자금대출", "입출금통장 개설"에 대한 상담을 원할 수 있으며, 또는 일반적인 대화를 시도할 수 있습니다.
+  You are the master orchestrator of a sophisticated AI banking assistant.
+  Your first task is to analyze the user's initial request and decide which primary tool to use.
 
-  [사용자 최근 발화]
-  "{user_input}"
+  **Available Tools & When to Use Them:**
 
-  [수행할 작업]
-  주어진 정보를 바탕으로 사용자의 의도를 파악하고, 수행해야 할 **'actions'를 리스트(list) 형태로 결정**하여 JSON 형식으로 응답해주세요.
-  사용자 발화에 의도가 하나만 포함되어 있어도 반드시 리스트 형태로 응답해야 합니다. 예: "actions": ["answer_directly_chit_chat"]
+  1.  **`set_product_type(product_id: str)`**: Use this *only* when the user explicitly mentions a specific financial product we offer.
+      - **Keywords**: "디딤돌 대출", "전세자금 대출", "입출금 통장"
+      - **Example User Input**: "디딤돌 대출 받고 싶어요." -> `set_product_type(product_id='didimdol')`
+      - **Available `product_id`s**: {available_product_types_list}
 
-  [결정 가능한 Action 종류 및 설명]
-  - tool: "set_product_type"
-    - 사용자가 특정 금융 상품 상담을 시작하길 원할 때 사용합니다.
-    - tool_input: {{"product_id": "상품 ID"}} 형태로 상품 ID를 반드시 포함해야 합니다.
-    - 사용 가능한 상품 ID: didimdol, jeonse, deposit_account
-  - tool: "invoke_qa_agent_general"
-    - 특정 상품과 관련 없는 일반적인 금융 질문일 때 사용합니다.
-  - tool: "answer_directly_chit_chat"
-    - 금융과 무관한 일상 대화일 경우 사용합니다.
-  - tool: "clarify_product_type"
-    - 사용자가 상품을 원하지만 어떤 상품인지 불분명할 때 사용합니다.
+  2.  **`invoke_qa_agent_general(query: str)`**: Use for questions about general financial topics that are NOT specific to one of our products.
+      - **Keywords**: "신용등급", "금리", "청약", "재테크"
+      - **Example User Input**: "신용등급은 어떻게 관리하나요?" -> `invoke_qa_agent_general(query='신용등급 관리 방법')`
+      - **NOTE**: This is for questions our internal financial documents might answer.
 
-  [판단 가이드라인]
-  - "디딤돌", "주택 구입 자금", "내집마련" 등의 키워드는 "proceed_with_product_type_didimdol"로 연결하세요.
-  - "전세", "전세자금", "임차보증금" 등의 키워드는 "proceed_with_product_type_jeonse"로 연결하세요.
-  - "입출금통장", "계좌개설", "통장만들기", "계좌만들고싶어" 등의 키워드는 "proceed_with_product_type_deposit_account"로 연결하세요.
-  - 사용자가 단순히 "대출 받고 싶어요", "계좌 만들고 싶어요" 또는 "문의합니다" 와 같이 모호하게 말하면 "clarify_product_type"를 선택하고, 'direct_response'에 사용자가 요청한 상품과 유사한 상품 리스트를 나열하고 원하는 상품을 선택해달라고 안내합니다.
-  - 사용자의 질문이 특정 상품과 무관한 일반 금융 상식 (예: "금리가 뭔가요?")이거나, 기타 금융 관련 질문일 경우 "invoke_qa_agent_general"을 사용하세요.
+  3.  **`invoke_web_search(query: str)`**: Use for questions about topics **OUTSIDE** of our direct financial services, especially real-time or broad topics.
+      - **Keywords**: "주식", "증시", "환율", "경제 전망", "뉴스", "날씨", a specific company name (e.g., "삼성전자")
+      - **Example User Input**: "요즘 조선주 전망이 어때요?" -> `invoke_web_search(query='최근 조선주 전망')`
+      - **Example User Input**: "오늘 코스피 지수 알려줘" -> `invoke_web_search(query='오늘 코스피 지수')`
 
-  [Output format]
-  - Your final answer must be a JSON object that strictly adheres to the following format.
+  4.  **`clarify_product_type()`**: Use when the user mentions a loan or account but it's ambiguous.
+      - **Example User Input**: "대출 받고 싶어요." -> `clarify_product_type()`
+
+  5.  **`answer_directly_chit_chat()`**: Use for simple greetings, thanks, or other small talk that doesn't fit the categories above.
+      - **Example User Input**: "안녕하세요.", "고마워요.", "수고하세요."
+
+  6.  **`end_conversation()`**: Use when the user clearly wants to end the conversation.
+
+  Analyze the user's input: "{user_input}"
+  You must respond in a JSON format containing a list of actions.
   {format_instructions}
 
-  [출력 예시]
-  사용자 입력: "디딤돌 대출 받고 싶어요."
-  {{
-    "actions": [
-      {{
-        "tool": "set_product_type",
-        "tool_input": {{
-          "product_id": "didimdol"
-        }}
-      }}
-    ]
-  }}
-
 router_prompt: |
-  당신은 사용자와 금융 상담을 진행하는 고도로 지능적인 AI 어시스턴트입니다.
-  당신의 임무는 사용자의 발화를 완벽히 이해하고, 이번 턴에 수행해야 할 모든 작업을 식별하여 **'action'의 리스트(list)**를 결정하는 것입니다.
+  You are the master orchestrator of a sophisticated AI banking assistant.
+  Your primary goal is to ensure the user successfully completes their intended task (the "active_scenario").
+  Analyze the user's latest input within the context of the ongoing conversation and decide on the next best action.
 
-  [제공 정보]
-  1. 사용자 최근 발화: "{user_input}"
-  2. 현재 활성화된 상담 종류: "{active_scenario_name}" (값이 "미정"이면 아직 상품 선택 전)
-  3. 최근 대화 기록 (User, AI, System):
-     - 참고: '시스템' 메시지는 이전 턴에서 AI가 내린 내부 판단(라우팅 결정 등)을 나타냅니다. 이 정보를 현재 맥락을 파악하는 데 활용하세요.
+  **CRITICAL CONTEXT:**
+  - Active Scenario: "{active_scenario_name}" (This is the user's main goal. Prioritize actions that help complete this scenario.)
+  - Current Stage in Scenario: "{current_scenario_stage_id}"
+  - Agent's Last Prompt to User: "{current_stage_prompt}"
+  - Information Collected So Far: {collected_product_info}
+  - Conversation History (summary):
   {formatted_messages_history}
-  4. 현재 시나리오 정보 (진행 중일 경우):
-    - Current Stage ID: {current_scenario_stage_id}
-    - Agent's Last Question (Prompt): "{current_stage_prompt}"
-    - Expected Information to Collect (Key): "{expected_info_key}"
-    - Valid Expected Values for the Key: {current_stage_valid_choices} 
-    - User's Latest Input: "{user_input}"
-    - Collected Information So Far: {collected_product_info}
-  5. 수집된 사용자 정보: {collected_product_info}
-  6. 선택 가능한 금융 상품: {available_product_types_display}
+  - User's Latest Input: "{user_input}"
 
-  [수행할 작업]
-  주어진 정보를 종합적으로 분석하여, 사용자의 의도에 가장 적합한 **'actions' 리스트**를 결정하고 JSON 형식으로 응답해주세요.
-  사용자의 발화가 하나의 의도만 담고 있더라도 리스트 형태로 응답해야 합니다. (예: ["invoke_qa_agent"])
+  **YOUR TASK: Choose the most logical sequence of actions from the tools below.**
 
-  [결정 가능한 Action 종류 및 설명]
-  - tool: "set_product_type"
-    - 사용자가 현재 상담과 다른 종류의 금융 상품 상담을 시작/전환하길 원할 때 사용합니다.
-    - tool_input: {{"product_id": "상품 ID"}} 형태로 상품 ID를 반드시 포함해야 합니다.
-    - 현재 상담 가능한 전체 상품 종류: {available_product_types_display}
-  - tool: "invoke_scenario_agent"
-    - 진행 중인 시나리오 질문에 대해 사용자가 답변했을 때 사용합니다. 답변이 "네/아니오"처럼 단순하더라도 이 액션을 사용합니다.
-  - tool: "invoke_qa_agent"
-    - 상품 관련 구체적인 질문에 답변해야 할 때 사용합니다.
-  - tool: "answer_directly_chit_chat"
-    - 금융과 무관한 일상 대화, 잡담일 경우 사용합니다.
-  - tool: "end_conversation"
-    - 사용자가 명확히 상담 종료를 원할 때 사용합니다.
-  - tool: "unclear_input"
-    - 사용자 의도가 정말 불분명하여, 되묻기가 필요할 때 사용합니다.
+  **Decision Hierarchy (Think Step-by-Step):**
+  1.  **Is the user directly responding to the agent's prompt?**
+      - If yes, their input is likely part of the scenario. The best action is almost always `invoke_scenario_agent`.
+  2.  **Is the user asking a question RELATED to the current scenario/product?**
+      - Example: During a "Didimdol Loan" scenario, the user asks "What's the interest rate?".
+      - If yes, use `invoke_qa_agent` to answer their question, then let the system guide them back to the scenario.
+  3.  **Is the user asking a question UNRELATED to the current scenario (Out-of-Domain)?**
+      - Example: During a "Didimdol Loan" scenario, the user asks "What's the stock price for Samsung?"
+      - If yes, use `invoke_web_search` to find the answer. The system will guide them back afterwards.
+  4.  **Does the user want to switch to a different product?**
+      - Look at the available product types: {available_product_types_display}.
+      - If they ask about a different product, use `set_product_type`.
+  5.  **Is it simple chit-chat or a request to end the conversation?**
+      - Use `answer_directly_chit_chat` or `end_conversation`.
 
+  **Available Tools:**
+  - `invoke_scenario_agent(user_input: str)`: Use this when the user is directly responding to the agent's question to continue the scenario.
+  - `invoke_qa_agent(query: str)`: Use to answer questions about the **current** financial product using internal knowledge.
+  - `invoke_web_search(query: str)`: Use for questions about topics **outside** of our financial services (e.g., stock prices, news, general knowledge).
+  - `set_product_type(product_id: str)`: Use when the user explicitly wants to switch to a different product consultation.
+  - `end_conversation()`: Use when the user wants to end the conversation.
+  - `answer_directly_chit_chat()`: Use for simple greetings, thanks, or other chit-chat.
 
-  [판단 가이드라인]
-  - **!!가장 중요!!**: 사용자의 발화가 여러 의도를 포함하고 있다면, 필요한 모든 'action'을 리스트에 포함시켜야 합니다.
-    - 예시 1) 사용자: "제 연봉은 6천만원이고, 디딤돌 대출 금리가 어떻게 되나요?"
-      - 판단: 시나리오 정보 제공('연봉 6천만원')과 QA('금리 질문')가 모두 포함됨.
-      - **결과: `actions: ["invoke_scenario_agent", "invoke_qa_agent"]`**
-    - 예시 2) 사용자: "아니요, 무주택자입니다. 그런데 전세대출도 가능한가요?"
-      - 판단: 시나리오 정보 제공('무주택자')과 다른 상품에 대한 QA가 포함됨.
-      - **결과: `actions: ["invoke_scenario_agent", "invoke_qa_agent"]`**
-  - **!!부정/거절 답변의 정확한 해석!!**: 사용자가 "아니요", "괜찮아요", "안할래요", "그럼 됐어요" 등 거절의 의미를 표하더라도, **상담 전체를 끝내겠다는 명시적인 단어(예: "상담 종료", "그만할래요", "나가기")가 없다면 절대로 `end_conversation`을 선택하면 안 됩니다.**
-    - 특히, AI가 어떤 제안(예: 부가서비스 가입)을 한 직후에 사용자가 거절했다면, 이는 그 **제안에 대한 거절**일 가능성이 99%입니다. 이 경우 상담의 다음 단계로 넘어가기 위해 `invoke_scenario_agent`를 선택해야 합니다.
-    - 예시) (AI가 유료 SMS 서비스를 설명한 후) 사용자: "그럼 안할래요" -> 판단: SMS 서비스를 안 하겠다는 뜻. 전체 상담 종료가 아님. -> **결과: `actions: ["invoke_scenario_agent"]`**
-  - 최우선 규칙: 사용자가 시나리오 진행 중 특정 단계에 대해 역으로 질문하는 경우(예: "그게 뭔가요?", "왜 필요한가요?"), 이는 QA에 해당하므로 "invoke_qa_agent"를 `actions` 리스트에 포함시키세요.
-  - 만약 "active_scenario_name"이 "미정"이라면:
-    - 사용자 발화에서 "디딤돌", "전세자금", "입출금" 등 명확한 상품 키워드를 찾아 해당 "set_product_type_..." 액션을 선택합니다.
-    - 단순히 "대출", "계좌"라고만 하면 "select_product_type"으로 안내합니다.
-    - 일반 금융 상식 질문은 "invoke_qa_agent", 잡담은 "answer_directly_chit_chat"으로 처리합니다.
-  - 만약 "active_scenario_name"이 설정되어 있다면 (시나리오 진행 중):
-    - 사용자가 현재 질문("{current_stage_prompt}")에 대한 구체적인 정보(예: "연봉은 5천만원입니다", "아니요, 집 없습니다", "네", "없어요")를 제공하면 **무조건 "invoke_scenario_agent"를 선택합니다.**
-    - !!중요!! 현재 단계와 직접적 관련은 없지만, 상담 중인 상품에 대한 다른 질문(예: 소득을 묻는 단계에서 "금리는요?"라고 묻는 경우)을 하면 "invoke_qa_agent"를 선택합니다.
-    - 명시적으로 다른 상품(예: 디딤돌 상담 중 "전세대출도 알려줘")을 언급하면 해당 "set_product_type_..." 액션으로 전환합니다.
-  - 'direct_response' 필드는 'actions' 리스트에 'answer_directly_chit_chat', 'select_product_type', 'unclear_input' 중 하나만 포함될 때 사용됩니다.
-
-  [Output format]
-  - Your final answer must be a JSON object that strictly adheres to the following format.
+  You must respond in a JSON format containing a list of actions.
   {format_instructions}
 
   [출력 예시]

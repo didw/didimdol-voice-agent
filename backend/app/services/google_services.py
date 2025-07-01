@@ -83,10 +83,10 @@ class StreamSTTService:
         self._is_speech_active = False # 현재 음성 구간인지 상태
         self._silence_frames_after_speech = 0 # 음성 후 묵음 프레임 카운터
         self.SPEECH_FRAMES_TRIGGER = 2  # 2프레임(60ms) 연속 음성이면 발화 시작으로 판단
-        self.SILENCE_FRAMES_TRIGGER = 10 # 10프레임(300ms) 연속 묵음이면 발화 종료로 판단
+        self.SILENCE_FRAMES_TRIGGER = 25 # 25프레임(750ms) 연속 묵음이면 EPD로 간주 (로깅용)
         self._speech_frames_buffer = [] # 음성 시작점 보정을 위한 버퍼
 
-        print(f"StreamSTTService ({self.session_id}) initialized. Encoding: {audio_encoding.name}, Sample Rate: {sample_rate_hertz}")
+        print(f"StreamSTTService ({self.session_id}) initialized. Encoding: {audio_encoding.name}, Sample Rate: {sample_rate_hertz}, VAD Silence Trigger: {self.SILENCE_FRAMES_TRIGGER * self.frame_duration_ms}ms")
 
     async def _request_generator(self):
         if not GOOGLE_SERVICES_AVAILABLE: 
@@ -203,10 +203,8 @@ class StreamSTTService:
             print(f"STT stream ({self.session_id}): Dropping audio chunk, stream task not healthy.")
             return
 
-        # print(f"--- Chunk Received (size: {len(chunk)} bytes) ---")
         self._internal_buffer += chunk
         
-        # 버퍼에 처리할 프레임이 충분히 쌓였는지 확인
         while len(self._internal_buffer) >= self.frame_bytes:
             frame_to_process = self._internal_buffer[:self.frame_bytes]
             self._internal_buffer = self._internal_buffer[self.frame_bytes:]
@@ -215,11 +213,22 @@ class StreamSTTService:
                 # VAD로 음성인지 아닌지 판단
                 is_speech = self.vad.is_speech(frame_to_process, self.config.sample_rate_hertz)
                 
-                # 음성인 경우에만 Google STT로 전송
-                if is_speech:
-                    self._audio_queue.put_nowait(frame_to_process)
-                # else:
-                #    print("VAD: Noise chunk detected and dropped.")
+                # VAD 상태 추적 로직 (로깅 및 디버깅용)
+                if self._is_speech_active:
+                    if not is_speech:
+                        self._silence_frames_after_speech += 1
+                        if self._silence_frames_after_speech >= self.SILENCE_FRAMES_TRIGGER:
+                            print(f"VAD ({self.session_id}): Potential end of speech detected after {self._silence_frames_after_speech * self.frame_duration_ms}ms of silence.")
+                            self._is_speech_active = False
+                            self._silence_frames_after_speech = 0
+                    else: # is_speech
+                        self._silence_frames_after_speech = 0
+                elif is_speech: # not _is_speech_active and is_speech
+                    self._is_speech_active = True
+                    print(f"VAD ({self.session_id}): Start of speech detected.")
+                
+                # 모든 오디오 프레임을 Google로 전송
+                self._audio_queue.put_nowait(frame_to_process)
 
             except asyncio.QueueFull:
                 print(f"STT audio queue full for session {self.session_id}. Dropping frame.")
