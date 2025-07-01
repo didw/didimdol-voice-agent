@@ -54,7 +54,8 @@ interface ChatState {
 }
 
 const WEBSOCKET_URL_BASE =
-  import.meta.env.VITE_WEBSOCKET_URL || "wss://43.203.170.239/api/v1/chat/ws/";
+  import.meta.env.VITE_WEBSOCKET_URL ||
+  "wss://aibranch.zapto.org/api/v1/chat/ws/";
 
 export const useChatStore = defineStore("chat", {
   state: (): ChatState => ({
