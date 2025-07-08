@@ -1,0 +1,183 @@
+{
+    "scenario_name": "신한은행 전세자금대출 상담 (개선된 버전)",
+    "initial_stage_id": "greeting_jeonse",
+    "system_prompt": "당신은 신한은행의 친절하고 전문적인 전세자금대출 상담원입니다. 고객의 편의를 위해 필요한 정보를 한 번에 안내하고, 자연스럽고 효율적인 상담을 제공합니다. 모든 금액 단위는 만원입니다.",
+    "fallback_message": "죄송합니다, 고객님의 말씀을 정확히 이해하지 못했습니다. 다시 한번 말씀해주시겠어요?",
+    "end_conversation_message": "네, 알겠습니다. 상담을 종료합니다. 이용해주셔서 감사합니다. 언제든지 다시 찾아주세요.",
+    "end_scenario_message": "고객님, 기본적인 전세자금대출 상담이 완료되었습니다. 추가적으로 궁금한 점이 없으시다면 상담을 종료하겠습니다. 더 자세한 사항은 신한은행 영업점 또는 고객센터로 문의해주시면 감사하겠습니다.",
+    "qa_keywords": ["궁금", "질문", "뭐야", "뭔데", "알려줘", "설명해줘"],
+    "required_info_fields": [
+      {
+        "key": "marital_status_jeonse",
+        "display_name": "혼인 상태",
+        "required": true,
+        "type": "choice",
+        "choices": ["미혼", "기혼", "예비부부"],
+        "description": "혼인 상태 (미혼/기혼/예비부부)"
+      },
+      {
+        "key": "target_lease_deposit",
+        "display_name": "전세 보증금",
+        "required": true,
+        "type": "number",
+        "unit": "만원",
+        "description": "찾고 계신 전세 물건의 보증금"
+      },
+      {
+        "key": "housing_situation_jeonse",
+        "display_name": "주택 보유 현황",
+        "required": true,
+        "type": "choice",
+        "choices": ["무주택", "1주택 보유"],
+        "description": "현재 주택 보유 상황"
+      },
+      {
+        "key": "annual_income_jeonse",
+        "display_name": "연소득",
+        "required": true,
+        "type": "number",
+        "unit": "만원",
+        "description": "세전 연소득 (부부 합산)"
+      }
+    ],
+    "stages": {
+      "greeting_jeonse": {
+        "id": "greeting_jeonse",
+        "prompt": "안녕하세요, 고객님! 신한은행 전세자금대출 상담 서비스입니다. 지금 바로 상담을 시작하시겠습니까?",
+        "is_question": true,
+        "input_type": "yes_no",
+        "transitions": [
+          {
+            "next_stage_id": "info_collection_guidance_jeonse",
+            "condition_description": "사용자가 상담 시작에 긍정적으로 답변한 경우.",
+            "example_phrases": [
+              "네", "예", "좋아요", "시작해주세요", "응", "시작할래요"
+            ]
+          },
+          {
+            "next_stage_id": "farewell_early_jeonse",
+            "condition_description": "사용자가 상담 시작에 부정적으로 답변하거나 거절한 경우.",
+            "example_phrases": [
+              "아니요", "아니오", "나중에요", "취소할게요", "괜찮습니다"
+            ]
+          }
+        ],
+        "default_next_stage_id": "greeting_reprompt_jeonse"
+      },
+      "greeting_reprompt_jeonse": {
+        "id": "greeting_reprompt_jeonse",
+        "prompt": "상담 시작을 원하시면 '네' 또는 '시작'이라고 말씀해주세요.",
+        "is_question": true,
+        "input_type": "yes_no",
+        "transitions": [
+          {
+            "next_stage_id": "info_collection_guidance_jeonse",
+            "condition_description": "사용자가 상담 시작에 긍정적으로 답변한 경우.",
+            "example_phrases": ["네", "예", "시작"]
+          },
+          {
+            "next_stage_id": "farewell_early_jeonse",
+            "condition_description": "사용자가 상담 시작에 부정적으로 답변하거나 거절한 경우.",
+            "example_phrases": ["아니요", "괜찮아요"]
+          }
+        ],
+        "default_next_stage_id": "farewell_early_jeonse"
+      },
+      "farewell_early_jeonse": {
+        "id": "farewell_early_jeonse",
+        "prompt": "네, 알겠습니다. 도움이 필요하시면 언제든지 다시 찾아주세요. 좋은 하루 보내세요!",
+        "is_question": false,
+        "default_next_stage_id": "END_SCENARIO_ABORT"
+      },
+      "info_collection_guidance_jeonse": {
+        "id": "info_collection_guidance_jeonse",
+        "prompt": "네, 전세자금대출 상담을 도와드리겠습니다! 정확한 상담을 위해서 몇 가지 정보가 필요해요.\n\n• 혼인 상태 (미혼/기혼/예비부부)\n• 전세 보증금 규모\n• 현재 주택 보유 현황 (무주택/1주택)\n• 연소득 (세전 기준)\n\n이런 정보들이 필요합니다. 알고 계신 정보부터 편하게 말씀해 주세요!",
+        "is_question": true,
+        "input_type": "text",
+        "collect_multiple_info": true,
+        "default_next_stage_id": "process_collected_info_jeonse"
+      },
+      "process_collected_info_jeonse": {
+        "id": "process_collected_info_jeonse",
+        "prompt": "",
+        "is_question": false,
+        "collect_multiple_info": true,
+        "transitions": [
+          {
+            "next_stage_id": "ask_missing_info_group1_jeonse",
+            "condition_description": "혼인 상태나 전세 보증금이 누락된 경우"
+          },
+          {
+            "next_stage_id": "ask_missing_info_group2_jeonse", 
+            "condition_description": "주택 보유 현황이나 연소득이 누락된 경우"
+          },
+          {
+            "next_stage_id": "preliminary_summary_jeonse",
+            "condition_description": "모든 필수 정보가 수집된 경우"
+          }
+        ],
+        "default_next_stage_id": "ask_missing_info_group1_jeonse"
+      },
+      "ask_missing_info_group1_jeonse": {
+        "id": "ask_missing_info_group1_jeonse",
+        "prompt": "좋습니다! 추가로 몇 가지 더 확인이 필요해요. 혼인 상태와 전세 보증금에 대해 말씀해주세요.",
+        "is_question": true,
+        "input_type": "text",
+        "collect_multiple_info": true,
+        "info_groups": ["marital_status_jeonse", "target_lease_deposit"],
+        "default_next_stage_id": "ask_missing_info_group2_jeonse"
+      },
+      "ask_missing_info_group2_jeonse": {
+        "id": "ask_missing_info_group2_jeonse", 
+        "prompt": "거의 다 되었습니다! 마지막으로 주택 보유 현황과 연소득에 대해 말씀해주세요.",
+        "is_question": true,
+        "input_type": "text",
+        "collect_multiple_info": true,
+        "info_groups": ["housing_situation_jeonse", "annual_income_jeonse"],
+        "default_next_stage_id": "preliminary_summary_jeonse"
+      },
+      "preliminary_summary_jeonse": {
+        "id": "preliminary_summary_jeonse",
+        "prompt": "네, 고객님. 현재까지 말씀해주신 정보를 정리해드리면:\n\n• 혼인 상태: %{marital_status_jeonse}%\n• 전세보증금: 약 %{target_lease_deposit}%만원\n• 주택보유상황: %{housing_situation_jeonse}%\n• 연소득: 약 %{annual_income_jeonse}%만원\n\n전세자금대출은 상품 종류, 소득, 보증금 규모, 신용도 등에 따라 한도와 조건이 달라질 수 있습니다. 이 정보는 대략적인 상담을 위한 것이며, 실제 대출 가능 여부 및 조건은 상세 심사가 필요합니다.",
+        "is_question": false,
+        "default_next_stage_id": "provide_jeonse_documents_info"
+      },
+      "provide_jeonse_documents_info": {
+        "id": "provide_jeonse_documents_info",
+        "prompt": "일반적으로 전세자금대출 신청 시에는 확정일자부 임대차계약서 원본, 계약금 영수증, 주민등록등본, 소득증빙서류 등이 필요합니다. 자세한 필요 서류 목록은 저희 은행 웹사이트나 영업점에서 다시 한번 확인해주시는 것이 좋습니다. 추가로 궁금한 점 있으신가요?",
+        "is_question": true,
+        "input_type": "choice",
+         "transitions": [
+          {
+            "next_stage_id": "additional_qa_prompt_jeonse",
+            "condition_description": "사용자가 추가 질문이 있거나 더 알고 싶은 내용이 있다고 표현한 경우.",
+            "example_phrases": ["네 궁금한 점 있어요", "질문해도 되나요?", "금리 알려주세요"]
+          },
+          {
+            "next_stage_id": "closing_thank_you_jeonse",
+            "condition_description": "사용자가 상담을 마치기를 원하거나 더 이상 궁금한 점이 없다고 표현한 경우.",
+            "example_phrases": ["아니요 괜찮아요", "마칠래요", "됐어요", "없습니다"]
+          }
+        ],
+        "default_next_stage_id": "closing_thank_you_jeonse"
+      },
+       "additional_qa_prompt_jeonse": {
+        "id": "additional_qa_prompt_jeonse",
+        "prompt": "네, 전세자금대출 관련해서 어떤 점이 궁금하신가요? 편하게 질문해주세요.",
+        "is_question": true,
+        "default_next_stage_id": "qa_listen_jeonse"
+      },
+      "qa_listen_jeonse": {
+        "id": "qa_listen_jeonse",
+        "prompt": "",
+        "is_question": true,
+        "default_next_stage_id": "provide_jeonse_documents_info"
+      },
+      "closing_thank_you_jeonse": {
+        "id": "closing_thank_you_jeonse",
+        "prompt": "%{end_scenario_message}%",
+        "is_question": false,
+        "default_next_stage_id": "END_SCENARIO_COMPLETE"
+      }
+    }
+  }

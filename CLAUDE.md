@@ -51,7 +51,7 @@ npm run dev
 
 ### Backend
 - **FastAPI**: REST API 및 WebSocket 서버
-- **LangGraph**: 대화 흐름 관리
+- **LangGraph**: 대화 흐름 관리 (개선된 다중 정보 수집)
 - **LangChain**: LLM 통합
 - **LanceDB**: 벡터 검색
 - **pytest**: 테스트

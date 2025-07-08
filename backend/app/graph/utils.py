@@ -14,16 +14,16 @@ CONFIG_DIR = APP_DIR / "config"
 
 # Scenario and KnowledgeBase file definitions
 SCENARIO_FILES: Dict[PRODUCT_TYPES, Path] = {
-    "didimdol": DATA_DIR / "didimdol_loan_scenario.json",
-    "jeonse": DATA_DIR / "jeonse_loan_scenario.json",
-    "deposit_account": DATA_DIR / "deposit_account_scenario.json",
+    "didimdol": DATA_DIR / "scenarios" / "didimdol_loan_scenario.json",
+    "jeonse": DATA_DIR / "scenarios" / "jeonse_loan_scenario.json",
+    "deposit_account": DATA_DIR / "scenarios" / "deposit_account_scenario.json",
 }
 KNOWLEDGE_BASE_FILES: Dict[str, Path] = {
-    "didimdol": DATA_DIR / "didimdol.md",
-    "jeonse": DATA_DIR / "jeonse.md",
-    "deposit_account": DATA_DIR / "deposit_account.md",
-    "debit_card": DATA_DIR / "debit_card.md",
-    "internet_banking": DATA_DIR / "internet_banking.md",
+    "didimdol": DATA_DIR / "docs" / "didimdol.md",
+    "jeonse": DATA_DIR / "docs" / "jeonse.md",
+    "deposit_account": DATA_DIR / "docs" / "deposit_account.md",
+    "debit_card": DATA_DIR / "docs" / "debit_card.md",
+    "internet_banking": DATA_DIR / "docs" / "internet_banking.md",
 }
 PROMPT_FILES = {
     'main_agent': CONFIG_DIR / "main_agent_prompts.yaml",

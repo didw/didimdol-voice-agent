@@ -35,6 +35,12 @@ uvicorn app.main:app --reload --port 8000
 - **Google Cloud**: STT/TTS
 - **Tavily**: 웹 검색
 
+## 시나리오 구조
+
+- `app/data/scenarios/`: 대화 시나리오 JSON 파일
+- `app/data/docs/`: 지식베이스 MD 파일
+- 개선된 다중 정보 수집 방식 지원
+
 ## 테스트
 
 ```bash

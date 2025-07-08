@@ -1,0 +1,1 @@
+Please refactor the directories and files in the modules related to the modified files. After that, please update the relevant documentation and then commit and push the changes. Keep the `CLAUDE.md` file simple.
