@@ -5,8 +5,11 @@ initial_task_selection_prompt: |
   **Available Tools & When to Use Them:**
 
   1.  **`set_product_type(product_id: str)`**: Use this *only* when the user explicitly mentions a specific financial product we offer.
-      - **Keywords**: "디딤돌 대출", "전세자금 대출", "입출금 통장"
-      - **Example User Input**: "디딤돌 대출 받고 싶어요." -> `set_product_type(product_id='didimdol')`
+      - **Keywords**: "디딤돌 대출", "전세자금 대출", "입출금 통장", "계좌 개설", "계좌 만들기", "통장 만들기", "새 계좌"
+      - **Example User Input**: 
+        - "디딤돌 대출 받고 싶어요." -> `set_product_type(product_id='didimdol')`
+        - "계좌 개설하고 싶어요." -> `set_product_type(product_id='deposit_account')`
+        - "전세자금대출 신청해요." -> `set_product_type(product_id='jeonse')`
       - **Available `product_id`s**: {available_product_types_list}
 
   2.  **`invoke_qa_agent_general(query: str)`**: Use for questions about general financial topics that are NOT specific to one of our products.

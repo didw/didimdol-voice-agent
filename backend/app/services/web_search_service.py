@@ -33,6 +33,29 @@ class WebSearchService:
         
         return formatted_string.strip()
 
+    def _format_search_results(self, results: List[Dict[str, Any]]) -> str:
+        """
+        검색 결과를 테스트에서 기대하는 형식으로 포맷합니다.
+        """
+        if not results:
+            return "검색 결과를 찾을 수 없습니다."
+        
+        formatted_string = ""
+        for result in results:
+            title = result.get('title', '')
+            url = result.get('url', '')
+            content = result.get('content', '')
+            
+            if title:
+                formatted_string += f"{title}\n"
+            if url:
+                formatted_string += f"URL: {url}\n"
+            if content:
+                formatted_string += f"{content}\n"
+            formatted_string += "\n"
+        
+        return formatted_string
+
     async def asearch(self, query: str, max_results: int = 3) -> str:
         """
         주어진 쿼리에 대해 웹 검색을 비동기적으로 수행하고,

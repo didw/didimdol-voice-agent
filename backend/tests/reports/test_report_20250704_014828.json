@@ -1,0 +1,415 @@
+{
+  "total_tests": 45,
+  "total_passed": 17,
+  "total_failed": 2,
+  "total_skipped": 0,
+  "total_errors": 26,
+  "total_duration": 20.94836974143982,
+  "overall_score": 0.37777777777777777,
+  "suite_results": [
+    {
+      "suite_name": "Realistic Korean Conversations",
+      "total_tests": 15,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 15,
+      "duration": 0.00016880035400390625,
+      "average_validation_score": null,
+      "test_results": [
+        {
+          "test_name": "TestRealisticDidimdolScenarios.test_didimdol_basic_info_inquiry",
+          "status": "ERROR",
+          "duration": 2.0742416381835938e-05,
+          "error_message": "TestRealisticDidimdolScenarios.test_didimdol_basic_info_inquiry() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestRealisticDidimdolScenarios.test_didimdol_document_requirements_inquiry",
+          "status": "ERROR",
+          "duration": 6.9141387939453125e-06,
+          "error_message": "TestRealisticDidimdolScenarios.test_didimdol_document_requirements_inquiry() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestRealisticDidimdolScenarios.test_didimdol_eligibility_detailed_inquiry",
+          "status": "ERROR",
+          "duration": 3.814697265625e-06,
+          "error_message": "TestRealisticDidimdolScenarios.test_didimdol_eligibility_detailed_inquiry() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestRealisticDidimdolScenarios.test_didimdol_interest_rate_inquiry",
+          "status": "ERROR",
+          "duration": 3.0994415283203125e-06,
+          "error_message": "TestRealisticDidimdolScenarios.test_didimdol_interest_rate_inquiry() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestRealisticDidimdolScenarios.test_didimdol_multi_turn_conversation",
+          "status": "ERROR",
+          "duration": 3.0994415283203125e-06,
+          "error_message": "TestRealisticDidimdolScenarios.test_didimdol_multi_turn_conversation() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestRealisticJeonseScenarios.test_jeonse_basic_info_inquiry",
+          "status": "ERROR",
+          "duration": 3.5762786865234375e-06,
+          "error_message": "TestRealisticJeonseScenarios.test_jeonse_basic_info_inquiry() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestRealisticJeonseScenarios.test_jeonse_urgent_inquiry",
+          "status": "ERROR",
+          "duration": 3.337860107421875e-06,
+          "error_message": "TestRealisticJeonseScenarios.test_jeonse_urgent_inquiry() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestRealisticAccountScenarios.test_account_opening_inquiry",
+          "status": "ERROR",
+          "duration": 3.0994415283203125e-06,
+          "error_message": "TestRealisticAccountScenarios.test_account_opening_inquiry() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestRealisticEdgeCases.test_complex_multi_product_inquiry",
+          "status": "ERROR",
+          "duration": 3.814697265625e-06,
+          "error_message": "TestRealisticEdgeCases.test_complex_multi_product_inquiry() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestRealisticEdgeCases.test_emotional_user_input",
+          "status": "ERROR",
+          "duration": 2.6226043701171875e-06,
+          "error_message": "TestRealisticEdgeCases.test_emotional_user_input() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestRealisticEdgeCases.test_number_recognition_amounts",
+          "status": "ERROR",
+          "duration": 2.86102294921875e-06,
+          "error_message": "TestRealisticEdgeCases.test_number_recognition_amounts() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestRealisticEdgeCases.test_off_topic_inquiry",
+          "status": "ERROR",
+          "duration": 2.6226043701171875e-06,
+          "error_message": "TestRealisticEdgeCases.test_off_topic_inquiry() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestRealisticEdgeCases.test_unclear_input_handling",
+          "status": "ERROR",
+          "duration": 3.0994415283203125e-06,
+          "error_message": "TestRealisticEdgeCases.test_unclear_input_handling() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestConversationContextManagement.test_context_awareness_in_conversation",
+          "status": "ERROR",
+          "duration": 3.337860107421875e-06,
+          "error_message": "TestConversationContextManagement.test_context_awareness_in_conversation() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestConversationContextManagement.test_product_switching_in_conversation",
+          "status": "ERROR",
+          "duration": 3.0994415283203125e-06,
+          "error_message": "TestConversationContextManagement.test_product_switching_in_conversation() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        }
+      ]
+    },
+    {
+      "suite_name": "Edge Cases and Error Handling",
+      "total_tests": 21,
+      "passed": 17,
+      "failed": 2,
+      "skipped": 0,
+      "errors": 2,
+      "duration": 20.948004722595215,
+      "average_validation_score": null,
+      "test_results": [
+        {
+          "test_name": "TestServiceFailureScenarios.test_llm_service_unavailable",
+          "status": "FAILED",
+          "duration": 0.0008556842803955078,
+          "error_message": "",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestServiceFailureScenarios.test_rag_service_down",
+          "status": "PASSED",
+          "duration": 0.0003426074981689453,
+          "error_message": null,
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestServiceFailureScenarios.test_rag_service_error_during_query",
+          "status": "FAILED",
+          "duration": 0.9041030406951904,
+          "error_message": "",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestServiceFailureScenarios.test_scenario_data_corruption",
+          "status": "PASSED",
+          "duration": 9.226799011230469e-05,
+          "error_message": null,
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestServiceFailureScenarios.test_web_search_service_timeout",
+          "status": "ERROR",
+          "duration": 0.00042510032653808594,
+          "error_message": "Request timeout",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestInputVariationScenarios.test_empty_or_whitespace_input",
+          "status": "PASSED",
+          "duration": 0.00023174285888671875,
+          "error_message": null,
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestInputVariationScenarios.test_mixed_language_input",
+          "status": "PASSED",
+          "duration": 3.3621535301208496,
+          "error_message": null,
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestInputVariationScenarios.test_numbers_and_currency_variations",
+          "status": "PASSED",
+          "duration": 3.4638729095458984,
+          "error_message": null,
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestInputVariationScenarios.test_special_characters_input",
+          "status": "PASSED",
+          "duration": 2.7909598350524902,
+          "error_message": null,
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestInputVariationScenarios.test_very_long_input",
+          "status": "PASSED",
+          "duration": 0.8533940315246582,
+          "error_message": null,
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestConcurrencyAndPerformanceScenarios.test_memory_pressure_large_conversation",
+          "status": "PASSED",
+          "duration": 0.43475818634033203,
+          "error_message": null,
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestConcurrencyAndPerformanceScenarios.test_rapid_successive_requests",
+          "status": "PASSED",
+          "duration": 4.564917087554932,
+          "error_message": null,
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestStateManagementEdgeCases.test_circular_routing_prevention",
+          "status": "PASSED",
+          "duration": 3.147125244140625e-05,
+          "error_message": null,
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestStateManagementEdgeCases.test_corrupted_state_recovery",
+          "status": "PASSED",
+          "duration": 7.891654968261719e-05,
+          "error_message": null,
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestStateManagementEdgeCases.test_invalid_action_plan_handling",
+          "status": "PASSED",
+          "duration": 1.52587890625e-05,
+          "error_message": null,
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestSecurityAndInputValidation.test_potential_injection_attempts",
+          "status": "PASSED",
+          "duration": 1.5281414985656738,
+          "error_message": null,
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestSecurityAndInputValidation.test_unicode_and_encoding_edge_cases",
+          "status": "PASSED",
+          "duration": 2.799791097640991,
+          "error_message": null,
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestResourceLimitScenarios.test_maximum_message_history_length",
+          "status": "PASSED",
+          "duration": 0.24106407165527344,
+          "error_message": null,
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestResourceLimitScenarios.test_network_timeout_recovery",
+          "status": "ERROR",
+          "duration": 0.0004227161407470703,
+          "error_message": "Network timeout",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestDataValidationScenarios.test_malformed_json_in_llm_response",
+          "status": "PASSED",
+          "duration": 0.0017096996307373047,
+          "error_message": null,
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestDataValidationScenarios.test_unexpected_llm_response_format",
+          "status": "PASSED",
+          "duration": 0.00041985511779785156,
+          "error_message": null,
+          "validation_score": null,
+          "details": null
+        }
+      ]
+    },
+    {
+      "suite_name": "Answer Validation",
+      "total_tests": 9,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 9,
+      "duration": 0.00010704994201660156,
+      "average_validation_score": null,
+      "test_results": [
+        {
+          "test_name": "TestAnswerValidationSystem.test_conversation_flow_validation",
+          "status": "ERROR",
+          "duration": 1.621246337890625e-05,
+          "error_message": "TestAnswerValidationSystem.test_conversation_flow_validation() missing 1 required positional argument: 'validator'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestAnswerValidationSystem.test_excellent_response_validation",
+          "status": "ERROR",
+          "duration": 5.4836273193359375e-06,
+          "error_message": "TestAnswerValidationSystem.test_excellent_response_validation() missing 1 required positional argument: 'validator'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestAnswerValidationSystem.test_forbidden_keywords_validation",
+          "status": "ERROR",
+          "duration": 4.0531158447265625e-06,
+          "error_message": "TestAnswerValidationSystem.test_forbidden_keywords_validation() missing 1 required positional argument: 'validator'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestAnswerValidationSystem.test_number_validation",
+          "status": "ERROR",
+          "duration": 4.0531158447265625e-06,
+          "error_message": "TestAnswerValidationSystem.test_number_validation() missing 1 required positional argument: 'validator'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestAnswerValidationSystem.test_poor_response_validation",
+          "status": "ERROR",
+          "duration": 3.0994415283203125e-06,
+          "error_message": "TestAnswerValidationSystem.test_poor_response_validation() missing 1 required positional argument: 'validator'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestAnswerValidationSystem.test_validator_initialization",
+          "status": "ERROR",
+          "duration": 3.337860107421875e-06,
+          "error_message": "TestAnswerValidationSystem.test_validator_initialization() missing 1 required positional argument: 'validator'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestIntegratedValidationScenarios.test_validate_multi_turn_conversation",
+          "status": "ERROR",
+          "duration": 4.291534423828125e-06,
+          "error_message": "TestIntegratedValidationScenarios.test_validate_multi_turn_conversation() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestIntegratedValidationScenarios.test_validate_real_agent_response_didimdol_basic",
+          "status": "ERROR",
+          "duration": 1.811981201171875e-05,
+          "error_message": "TestIntegratedValidationScenarios.test_validate_real_agent_response_didimdol_basic() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        },
+        {
+          "test_name": "TestIntegratedValidationScenarios.test_validate_real_agent_response_interest_rate",
+          "status": "ERROR",
+          "duration": 2.6226043701171875e-06,
+          "error_message": "TestIntegratedValidationScenarios.test_validate_real_agent_response_interest_rate() missing 2 required positional arguments: 'validator' and 'mock_services'",
+          "validation_score": null,
+          "details": null
+        }
+      ]
+    }
+  ],
+  "validation_summary": {
+    "message": "No validation scores available"
+  },
+  "recommendations": [
+    "🔧 Address 2 failing tests to improve system reliability",
+    "🚨 Fix 26 tests with errors - these indicate system issues",
+    "🔴 System needs significant improvements to ensure reliability"
+  ]
+}

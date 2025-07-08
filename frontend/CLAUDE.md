@@ -1,43 +1,50 @@
-_This file provides guidance for AI assistants working with the frontend code in this repository._
+# Frontend 개발 가이드
 
-## Frontend Module - 디딤돌 음성 상담 에이전트
+**심플하게 작성하세요. 핵심만 전달하세요.**
 
-This is the **frontend** module of the 디딤돌 Voice Consultation Agent, providing the user interface for voice-based financial consultations.
+## 역할
 
-### Role
-- **Vue.js** single-page application with TypeScript
-- **Real-time voice interaction** using Web Audio API
-- **WebSocket communication** with backend agent
-- **State management** with Pinia
-- **Responsive UI** for consultation interface
+디딤돌 음성 상담 에이전트의 **웹 UI** - 음성 기반 금융 상담 인터페이스
 
-### Key Commands
+## 개발 시작
+
+### 1. Git Pull (필수)
 ```bash
-# Install dependencies
+git pull origin main
+```
+
+### 2. 서버 실행
+```bash
 npm install
-
-# Run development server
 npm run dev
-
-# Run unit tests
-npm run test:unit
 ```
 
-### Architecture
-- `src/main.ts` - Application entry point
-- `src/App.vue` - Root component
-- `src/components/` - Reusable Vue components
-- `src/services/` - API communication layer
-- `src/stores/` - Pinia state management
-- `src/views/` - Page-level components
-- `public/audio-processor.js` - Web Audio API processor
+## 주요 라이브러리
 
-### Testing
-Unit tests available with **Vitest**:
+- **Vue 3**: UI 프레임워크
+- **TypeScript**: 타입 안정성
+- **Vite**: 빌드 도구
+- **Pinia**: 상태 관리
+- **Web Audio API**: 음성 처리
+- **Vitest**: 테스트
+
+## 테스트
+
 ```bash
+# 단위 테스트
 npm run test:unit
 ```
 
-### Related Files
-- [Root CLAUDE.md](../CLAUDE.md) - Main project overview
-- [Backend CLAUDE.md](../backend/CLAUDE.md) - Backend module documentation
+## 개발 완료 후
+
+```bash
+git add .
+git commit -m "작업 설명"
+git push origin main
+```
+
+## 관련 문서
+
+- [메인 개발 가이드](../CLAUDE.md)
+- [Backend 개발 가이드](../backend/CLAUDE.md)
+- [Nginx 설정 가이드](../nginx/CLAUDE.md)

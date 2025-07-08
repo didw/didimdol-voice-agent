@@ -1,0 +1,82 @@
+{
+  "total_scenarios": 4,
+  "successful_scenarios": 3,
+  "success_rate": 0.75,
+  "detailed_results": [
+    {
+      "scenario_name": "디딤돌대출_신청상담",
+      "success": false,
+      "turns_completed": 3,
+      "actions_taken": [
+        "set_product_type",
+        "invoke_scenario_agent",
+        "invoke_scenario_agent"
+      ],
+      "stages_visited": [],
+      "info_collected": {},
+      "scenario_triggered": true,
+      "issues": [],
+      "success_rate": 0.5
+    },
+    {
+      "scenario_name": "전세자금대출_급한신청",
+      "success": true,
+      "turns_completed": 2,
+      "actions_taken": [
+        "set_product_type",
+        "invoke_scenario_agent"
+      ],
+      "stages_visited": [],
+      "info_collected": {},
+      "scenario_triggered": true,
+      "issues": [],
+      "success_rate": 1.0
+    },
+    {
+      "scenario_name": "계좌개설_목적",
+      "success": true,
+      "turns_completed": 2,
+      "actions_taken": [
+        "set_product_type",
+        "invoke_scenario_agent"
+      ],
+      "stages_visited": [],
+      "info_collected": {},
+      "scenario_triggered": true,
+      "issues": [],
+      "success_rate": 1.0
+    },
+    {
+      "scenario_name": "단순_정보문의",
+      "success": true,
+      "turns_completed": 2,
+      "actions_taken": [
+        "invoke_qa_agent",
+        null
+      ],
+      "stages_visited": [],
+      "info_collected": {},
+      "scenario_triggered": false,
+      "issues": [
+        "턴 2: 예상 액션 'answer_directly_chit_chat' != 실제 'None'"
+      ],
+      "success_rate": 1.0
+    }
+  ],
+  "analysis": {
+    "common_issues": [
+      [
+        "턴 2: 예상 액션 'answer_directly_chit_chat' != 실제 'None'",
+        1
+      ]
+    ],
+    "scenario_trigger_rate": 0.75,
+    "info_collection_rate": 0.0,
+    "stage_progression_rate": 0.0,
+    "recommendations": [
+      "시나리오 트리거링 안정성 개선 필요",
+      "정보 수집 프로세스 강화 필요",
+      "시나리오 스테이지 진행 개선 필요"
+    ]
+  }
+}

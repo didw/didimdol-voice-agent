@@ -33,8 +33,171 @@ from .chains import (
     synthesizer_chain,
     invoke_scenario_agent_logic
 )
+import re
 from ..services.rag_service import rag_service
 from ..services.web_search_service import web_search_service
+
+# --- Helper Functions for Information Collection ---
+
+def extract_multiple_info_from_text(text: str, required_fields: List[Dict]) -> Dict[str, Any]:
+    """텍스트에서 여러 정보를 한번에 추출"""
+    extracted_info = {}
+    
+    # 각 필드별로 키워드 기반 추출
+    field_patterns = {
+        "loan_purpose_confirmed": {
+            "keywords": ["주택 구입", "구매", "구입", "집 사", "내집마련", "주택구입", "주택 구매"],
+            "negative_keywords": ["아니", "다른", "전세", "임대"],
+            "type": "boolean"
+        },
+        "marital_status": {
+            "keywords": {"미혼": ["미혼", "싱글", "혼자"], "기혼": ["기혼", "결혼", "부부"], "예비부부": ["예비부부", "약혼", "결혼예정"]},
+            "type": "choice"
+        },
+        "has_home": {
+            "keywords": ["무주택", "집 없", "주택 없"],
+            "negative_keywords": ["집 있", "주택 있", "소유", "1주택"],
+            "type": "boolean",
+            "default_negative": True
+        },
+        "annual_income": {
+            "patterns": [r"(\d+)천만?원?", r"(\d+)만원", r"(\d+)억", r"소득\s*(\d+)", r"연봉\s*(\d+)"],
+            "type": "number",
+            "unit": "만원"
+        },
+        "target_home_price": {
+            "patterns": [r"(\d+)억", r"(\d+)천만?원?", r"집값\s*(\d+)", r"주택\s*(\d+)", r"가격\s*(\d+)"],
+            "type": "number", 
+            "unit": "만원"
+        }
+    }
+    
+    text_lower = text.lower()
+    
+    for field_key, field_config in field_patterns.items():
+        if field_config["type"] == "boolean":
+            if any(keyword in text_lower for keyword in field_config["keywords"]):
+                extracted_info[field_key] = True
+            elif "negative_keywords" in field_config and any(keyword in text_lower for keyword in field_config["negative_keywords"]):
+                extracted_info[field_key] = False
+            elif field_config.get("default_negative"):
+                if any(keyword in text_lower for keyword in field_config.get("negative_keywords", [])):
+                    extracted_info[field_key] = False
+                    
+        elif field_config["type"] == "choice" and "keywords" in field_config:
+            for choice_value, choice_keywords in field_config["keywords"].items():
+                if any(keyword in text_lower for keyword in choice_keywords):
+                    extracted_info[field_key] = choice_value
+                    break
+                    
+        elif field_config["type"] == "number" and "patterns" in field_config:
+            for pattern in field_config["patterns"]:
+                matches = re.findall(pattern, text)
+                if matches:
+                    try:
+                        number = int(matches[0])
+                        # 단위 변환 (억 -> 만원)
+                        if "억" in text:
+                            number *= 10000
+                        elif "천만" in text:
+                            number *= 1000
+                        extracted_info[field_key] = number
+                        break
+                    except ValueError:
+                        continue
+    
+    return extracted_info
+
+def check_required_info_completion(collected_info: Dict, required_fields: List[Dict]) -> tuple[bool, List[str]]:
+    """필수 정보 수집 완료 여부 확인"""
+    missing_fields = []
+    
+    for field in required_fields:
+        if field["required"] and field["key"] not in collected_info:
+            missing_fields.append(field["display_name"])
+    
+    is_complete = len(missing_fields) == 0
+    return is_complete, missing_fields
+
+def generate_missing_info_prompt(missing_fields: List[str], collected_info: Dict) -> str:
+    """부족한 정보에 대한 자연스러운 요청 메시지 생성"""
+    if len(missing_fields) == 1:
+        return f"{missing_fields[0]}에 대해서 알려주시겠어요?"
+    elif len(missing_fields) == 2:
+        return f"{missing_fields[0]}과(와) {missing_fields[1]}에 대해서 알려주시겠어요?"
+    else:
+        field_list = ", ".join(missing_fields[:-1])
+        return f"{field_list}, 그리고 {missing_fields[-1]}에 대해서 알려주시겠어요?"
+
+def get_next_missing_info_group_stage(collected_info: Dict, required_fields: List[Dict]) -> str:
+    """수집된 정보를 바탕으로 다음에 물어볼 그룹 스테이지 결정"""
+    # 그룹별 정보 확인
+    group1_fields = ["loan_purpose_confirmed", "marital_status"]
+    group2_fields = ["has_home", "annual_income"] 
+    group3_fields = ["target_home_price"]
+    
+    print(f"현재 수집된 정보: {collected_info}")
+    
+    # 각 그룹에서 누락된 정보가 있는지 확인
+    group1_missing = any(field not in collected_info for field in group1_fields)
+    group2_missing = any(field not in collected_info for field in group2_fields)
+    group3_missing = any(field not in collected_info for field in group3_fields)
+    
+    print(f"그룹별 누락 상태 - Group1: {group1_missing}, Group2: {group2_missing}, Group3: {group3_missing}")
+    
+    if group1_missing:
+        return "ask_missing_info_group1"
+    elif group2_missing:
+        return "ask_missing_info_group2"
+    elif group3_missing:
+        return "ask_missing_info_group3"
+    else:
+        return "eligibility_assessment"
+
+def generate_group_specific_prompt(stage_id: str, collected_info: Dict) -> str:
+    """그룹별로 이미 수집된 정보를 제외하고 맞춤형 질문 생성"""
+    print(f"질문 생성 - stage_id: {stage_id}, collected_info: {collected_info}")
+    
+    if stage_id == "ask_missing_info_group1":
+        missing = []
+        has_loan_purpose = collected_info.get("loan_purpose_confirmed", False)
+        has_marital_status = "marital_status" in collected_info
+        
+        if not has_loan_purpose:
+            missing.append("대출 목적(주택 구입용인지)")
+        if not has_marital_status:
+            missing.append("혼인 상태")
+        
+        print(f"Group1 누락 정보: {missing}")
+        
+        if len(missing) == 2:
+            return "몇 가지 더 확인해볼게요. 대출 목적과 혼인 상태는 어떻게 되시나요?"
+        elif "대출 목적(주택 구입용인지)" in missing:
+            return "대출 목적을 확인해볼게요. 주택 구입 목적이 맞으신가요?"
+        elif "혼인 상태" in missing:
+            return "혼인 상태는 어떻게 되시나요? (미혼/기혼/예비부부)"
+        else:
+            # Group1의 모든 정보가 수집된 경우 Group2로 넘어가야 함
+            return "추가 정보를 알려주시겠어요?"
+            
+    elif stage_id == "ask_missing_info_group2":
+        missing = []
+        if "has_home" not in collected_info:
+            missing.append("주택 소유 여부")
+        if "annual_income" not in collected_info:
+            missing.append("연소득")
+            
+        if len(missing) == 2:
+            return "현재 주택 소유 여부와 연소득은 어느 정도 되시나요?"
+        elif "주택 소유 여부" in missing:
+            return "현재 소유하고 계신 주택이 있으신가요?"
+        else:
+            return "연소득은 어느 정도 되시나요? (세전 기준)"
+            
+    elif stage_id == "ask_missing_info_group3":
+        return "구매 예정이신 주택 가격은 어느 정도로 생각하고 계신가요?"
+    
+    return "추가 정보를 알려주시겠어요?"
 
 # --- LangGraph Node Functions ---
 
@@ -74,8 +237,37 @@ async def entry_point_node(state: AgentState) -> AgentState:
             messages.append(HumanMessage(content=user_text))
         updated_state["messages"] = messages
         updated_state["stt_result"] = user_text
+    
+    # 시나리오 자동 진행 로직
+    scenario_continuation = _check_scenario_continuation(state, updated_state)
+    if scenario_continuation:
+        updated_state.update(scenario_continuation)
         
     return cast(AgentState, updated_state)
+
+def _check_scenario_continuation(prev_state: AgentState, current_state: AgentState) -> dict:
+    """시나리오 연속 진행이 필요한지 확인하고 자동 설정"""
+    
+    # 이전 상태에서 시나리오 연속성이 준비되어 있고, 현재 사용자 입력이 있는 경우
+    if (prev_state.get("scenario_ready_for_continuation") and 
+        prev_state.get("current_product_type") and 
+        current_state.get("user_input_text")):
+        
+        print("🔄 시나리오 자동 진행 모드 활성화")
+        print(f"   제품: {prev_state.get('current_product_type')}")
+        print(f"   시나리오: {prev_state.get('active_scenario_name')}")
+        
+        return {
+            "action_plan": ["invoke_scenario_agent"],
+            "scenario_ready_for_continuation": False,  # 자동 진행 후 리셋
+            "scenario_awaiting_user_response": False,
+            # 이전 상태에서 필요한 정보 복원
+            "current_product_type": prev_state.get("current_product_type"),
+            "current_scenario_stage_id": prev_state.get("current_scenario_stage_id"),
+            "collected_product_info": prev_state.get("collected_product_info", {})
+        }
+    
+    return {}
 
 async def main_agent_router_node(state: AgentState) -> AgentState:
     print("--- Node: Main Agent Router (Orchestrator) ---")
@@ -151,7 +343,7 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
 
         # 최종적으로 결정된 모델에서 action_plan과 action_plan_struct를 생성
         new_state["action_plan"] = [model.tool for model in action_plan_models]
-        new_state["action_plan_struct"] = [model.dict() for model in action_plan_models]
+        new_state["action_plan_struct"] = [model.model_dump() for model in action_plan_models]
 
         print(f"Main Agent final plan: {new_state.get('action_plan')}")
         return new_state
@@ -284,11 +476,140 @@ async def call_scenario_agent_node(state: AgentState) -> AgentState:
 async def process_scenario_logic_node(state: AgentState) -> AgentState:
     print("--- Node: Process Scenario Logic ---")
     active_scenario_data = get_active_scenario_data(state)
-    current_stage_id = state["current_scenario_stage_id"]
+    current_stage_id = state.get("current_scenario_stage_id")
+    
+    # 스테이지 ID가 없는 경우 초기 스테이지로 설정
+    if not current_stage_id:
+        current_stage_id = active_scenario_data.get("initial_stage_id", "greeting")
+        print(f"스테이지 ID가 없어서 초기 스테이지로 설정: {current_stage_id}")
+    
     current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
+    print(f"현재 스테이지: {current_stage_id}, 스테이지 정보: {current_stage_info.keys()}")
     collected_info = state.get("collected_product_info", {}).copy()
     scenario_output = state.get("scenario_agent_output")
     user_input = state.get("stt_result", "")
+    
+    # 개선된 다중 정보 수집 처리
+    print(f"스테이지 정보 확인 - collect_multiple_info: {current_stage_info.get('collect_multiple_info')}")
+    if current_stage_info.get("collect_multiple_info"):
+        print("--- 다중 정보 수집 모드 ---")
+        return await process_multiple_info_collection(state, active_scenario_data, current_stage_id, current_stage_info, collected_info, user_input)
+    
+    # 기존 단일 정보 수집 처리
+    return await process_single_info_collection(state, active_scenario_data, current_stage_id, current_stage_info, collected_info, scenario_output, user_input)
+
+async def process_multiple_info_collection(state: AgentState, active_scenario_data: Dict, current_stage_id: str, current_stage_info: Dict, collected_info: Dict, user_input: str) -> AgentState:
+    """다중 정보 수집 처리 (개선된 그룹별 방식)"""
+    required_fields = active_scenario_data.get("required_info_fields", [])
+    
+    # 현재 스테이지가 정보 수집 단계인지 확인
+    print(f"현재 스테이지 ID: {current_stage_id}")
+    if current_stage_id in ["info_collection_guidance", "process_collected_info", "ask_missing_info_group1", "ask_missing_info_group2", "ask_missing_info_group3", "eligibility_assessment"]:
+        
+        # 사용자 입력에서 정보 추출
+        if user_input:
+            extracted_info = extract_multiple_info_from_text(user_input, required_fields)
+            print(f"키워드 기반 추출된 정보: {extracted_info}")
+            
+            # 시나리오 에이전트 결과도 활용
+            scenario_output = state.get("scenario_agent_output", {})
+            if scenario_output and scenario_output.get("entities"):
+                scenario_entities = scenario_output["entities"]
+                print(f"시나리오 에이전트 추출 정보: {scenario_entities}")
+                
+                # 시나리오 에이전트 결과를 우리 필드로 매핑
+                if "loan_purpose" in scenario_entities and "주택 구입" in scenario_entities["loan_purpose"]:
+                    extracted_info["loan_purpose_confirmed"] = True
+                    print("시나리오 에이전트에서 대출 목적 확인됨")
+                
+                if "marital_status" in scenario_entities:
+                    extracted_info["marital_status"] = scenario_entities["marital_status"]
+                    print(f"시나리오 에이전트에서 혼인상태 확인: {scenario_entities['marital_status']}")
+            
+            # 수집된 정보 업데이트
+            collected_info.update(extracted_info)
+            print(f"최종 업데이트된 수집 정보: {collected_info}")
+        
+        # 정보 수집 완료 여부 확인
+        is_complete, missing_fields = check_required_info_completion(collected_info, required_fields)
+        
+        if current_stage_id == "info_collection_guidance":
+            # 초기 정보 안내 후 바로 다음 그룹 질문 결정
+            if is_complete:
+                next_stage_id = "eligibility_assessment"
+                response_text = "네, 모든 정보가 수집되었습니다. 이제 자격 요건을 확인해보겠습니다."
+            else:
+                # 수집된 정보에 따라 다음 그룹 질문 결정
+                next_stage_id = get_next_missing_info_group_stage(collected_info, required_fields)
+                if next_stage_id == "eligibility_assessment":
+                    response_text = "네, 모든 정보를 확인했습니다! 말씀해주신 조건으로 디딤돌 대출 신청이 가능해 보입니다. 이제 신청에 필요한 서류와 절차를 안내해드릴게요."
+                else:
+                    response_text = f"네, 말씀해주신 정보 확인했습니다! {generate_group_specific_prompt(next_stage_id, collected_info)}"
+                print(f"info_collection_guidance -> {next_stage_id}, 응답: {response_text}")
+                
+        elif current_stage_id == "process_collected_info":
+            # 수집된 정보를 바탕으로 다음 그룹 결정
+            if is_complete:
+                next_stage_id = "eligibility_assessment"
+                response_text = "네, 모든 정보를 확인했습니다! 말씀해주신 조건으로 디딤돌 대출 신청이 가능해 보입니다. 이제 신청에 필요한 서류와 절차를 안내해드릴게요."
+            else:
+                next_stage_id = get_next_missing_info_group_stage(collected_info, required_fields)
+                response_text = generate_group_specific_prompt(next_stage_id, collected_info)
+                print(f"다음 단계로 이동: {next_stage_id}, 질문: {response_text}")
+                
+        elif current_stage_id.startswith("ask_missing_info_group"):
+            # 그룹별 질문 처리 후 다음 단계 결정
+            if is_complete:
+                next_stage_id = "eligibility_assessment"
+                response_text = "네, 모든 정보를 확인했습니다! 말씀해주신 조건으로 디딤돌 대출 신청이 가능해 보입니다. 이제 신청에 필요한 서류와 절차를 안내해드릴게요."
+            else:
+                next_stage_id = get_next_missing_info_group_stage(collected_info, required_fields)
+                # 같은 그룹이면 그대로, 다른 그룹이면 새로운 질문
+                if next_stage_id == current_stage_id:
+                    # 같은 그룹 내에서 아직 더 수집할 정보가 있는 경우
+                    response_text = generate_group_specific_prompt(next_stage_id, collected_info)
+                else:
+                    # 다음 그룹으로 넘어가는 경우
+                    response_text = generate_group_specific_prompt(next_stage_id, collected_info)
+                    
+        elif current_stage_id == "eligibility_assessment":
+            # 자격 검토 완료 후 서류 안내로 자동 진행
+            next_stage_id = "application_documents_guidance"
+            response_text = active_scenario_data.get("stages", {}).get("application_documents_guidance", {}).get("prompt", "서류 안내를 진행하겠습니다.")
+            print(f"자격 검토 완료 -> 서류 안내 단계로 이동")
+            
+        else:
+            next_stage_id = current_stage_info.get("default_next_stage_id", "eligibility_assessment")
+            response_text = current_stage_info.get("prompt", "")
+        
+        # 응답 텍스트가 설정되지 않은 경우 기본값 사용
+        if "response_text" not in locals():
+            response_text = current_stage_info.get("prompt", "추가 정보를 알려주시겠어요?")
+        
+        # 다음 액션을 위해 plan과 struct에서 현재 액션 제거 (무한 루프 방지)
+        updated_plan = state.get("action_plan", []).copy()
+        if updated_plan:
+            updated_plan.pop(0)
+        
+        updated_struct = state.get("action_plan_struct", []).copy()
+        if updated_struct:
+            updated_struct.pop(0)
+            
+        return {
+            **state, 
+            "current_scenario_stage_id": next_stage_id,
+            "collected_product_info": collected_info,
+            "final_response_text_for_tts": response_text,
+            "is_final_turn_response": True,
+            "action_plan": updated_plan,
+            "action_plan_struct": updated_struct
+        }
+    
+    # 일반 스테이지는 기존 로직으로 처리
+    return await process_single_info_collection(state, active_scenario_data, current_stage_id, current_stage_info, collected_info, state.get("scenario_agent_output"), user_input)
+
+async def process_single_info_collection(state: AgentState, active_scenario_data: Dict, current_stage_id: str, current_stage_info: Dict, collected_info: Dict, scenario_output: Optional[ScenarioAgentOutput], user_input: str) -> AgentState:
+    """기존 단일 정보 수집 처리"""
 
     if scenario_output and scenario_output.get("is_scenario_related"):
         entities = scenario_output.get("entities", {})
@@ -408,6 +729,14 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
 
 async def synthesize_response_node(state: AgentState) -> dict:
     print("--- Node: Synthesize Response ---")
+    
+    # 이미 final_response_text_for_tts가 설정되어 있으면 그것을 우선 사용
+    existing_response = state.get("final_response_text_for_tts")
+    if existing_response:
+        print(f"이미 설정된 응답 사용: {existing_response}")
+        updated_messages = list(state['messages']) + [AIMessage(content=existing_response)]
+        return {"final_response_text_for_tts": existing_response, "messages": updated_messages, "is_final_turn_response": True}
+    
     user_question = state["messages"][-1].content
     factual_answer = state.get("factual_response", "")
     
@@ -477,7 +806,7 @@ async def set_product_type_node(state: AgentState) -> AgentState:
         return {**state, "error_message": err_msg, "is_final_turn_response": True}
     
     # 현재 액션에 맞는 구조 찾기
-    current_action_model = ActionModel.parse_obj(action_plan_struct[0])
+    current_action_model = ActionModel.model_validate(action_plan_struct[0])
     
     new_product_type = current_action_model.tool_input.get("product_id")
     
@@ -502,11 +831,17 @@ async def set_product_type_node(state: AgentState) -> AgentState:
 
     updated_messages = list(state.get("messages", [])) + [AIMessage(content=response_text)]
     
+    # 시나리오 연속성을 위한 상태 설정
+    print(f"🔄 시나리오 연속성 준비: {active_scenario.get('scenario_name')}")
+    
     return {
         **state, "current_product_type": new_product_type, "active_scenario_data": active_scenario,
         "active_scenario_name": active_scenario.get("scenario_name"), "current_scenario_stage_id": initial_stage_id,
         "collected_product_info": {}, "final_response_text_for_tts": response_text,
-        "messages": updated_messages, "is_final_turn_response": True
+        "messages": updated_messages, "is_final_turn_response": True,
+        # 시나리오 연속성 관리
+        "scenario_ready_for_continuation": True,
+        "scenario_awaiting_user_response": True
     }
     
 async def prepare_direct_response_node(state: AgentState) -> AgentState:
@@ -644,6 +979,9 @@ async def run_agent_streaming(
         "available_product_types": ["didimdol", "jeonse", "deposit_account"],
         "action_plan": [],
         "action_plan_struct": [],
+        # 시나리오 연속성 상태 복원
+        "scenario_ready_for_continuation": current_state_dict.get("scenario_ready_for_continuation", False) if current_state_dict else False,
+        "scenario_awaiting_user_response": current_state_dict.get("scenario_awaiting_user_response", False) if current_state_dict else False,
     })
 
     print(f"\n--- [{session_id}] Agent Turn Start ---")

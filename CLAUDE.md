@@ -1,95 +1,107 @@
-Of course. Here is the revised content in a simplified format.
+# 디딤돌 음성 상담 에이전트 개발 가이드
 
----
+**이 문서를 심플하게 유지하세요. 복잡한 설명보다는 핵심에 집중하세요.**
 
-_This file provides guidance for AI assistants working with code in this repository._
+## 프로젝트 개요
 
-## 1\. Project Overview
+**디딤돌 음성 상담 에이전트** - 한국 금융 대출 상담을 위한 실시간 음성 AI 시스템
 
-This project is the **"디딤돌 음성 상담 에이전트" (Didimdol Voice Consultation Agent)**, a voice-based AI demo for Korean financial loan consultations. It features real-time Speech-to-Text (STT) and Text-to-Speech (TTS).
+- **Backend**: Python, FastAPI, LangGraph
+- **Frontend**: Vue.js, Vite, TypeScript  
+- **주요 서비스**: OpenAI (LLM), Google Cloud (STT/TTS), LanceDB (RAG), Tavily (검색)
 
-- **Backend**: **Python**, **FastAPI**, and **LangGraph** for the core agent logic.
-- **Frontend**: **Vue.js**, **Vite**, and **TypeScript** for the user interface.
-- **Key Services**: **OpenAI** (LLM), **Google Cloud** (STT/TTS), **LanceDB** (RAG), and **Tavily** (Web Search).
+## 개발 시작하기
 
----
-
-## 2\. Key Commands
-
-### Backend
-
+### 1. 개발 전 필수사항
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# 항상 최신 코드를 받아오세요
+git pull origin main
+```
 
-# Run development server
+### 2. 환경 설정
+
+**Backend (.env 파일을 backend/ 디렉토리에 생성)**
+```env
+OPENAI_API_KEY=your_openai_api_key
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/google-credentials.json
+```
+
+### 3. 개발 서버 실행
+
+**Backend**
+```bash
+cd backend
+pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-### Frontend
-
+**Frontend**
 ```bash
-# Install dependencies
+cd frontend
 npm install
-
-# Run development server
 npm run dev
 ```
 
-### Full Stack
-
+**전체 실행**
 ```bash
-# Run both backend and frontend
 ./scripts/run_dev.sh
 ```
 
----
+## 주요 라이브러리
 
-## 3\. Architecture
+### Backend
+- **FastAPI**: REST API 및 WebSocket 서버
+- **LangGraph**: 대화 흐름 관리
+- **LangChain**: LLM 통합
+- **LanceDB**: 벡터 검색
+- **pytest**: 테스트
 
-The system uses a client-server architecture with real-time communication.
+### Frontend
+- **Vue 3**: UI 프레임워크
+- **Pinia**: 상태 관리
+- **Vite**: 빌드 도구
+- **Vitest**: 테스트
 
-- **Backend**: A stateful **LangGraph** agent built on **FastAPI**. It uses **WebSockets** to handle real-time audio and text streams. The agent routes user requests to internal knowledge (**RAG**), external knowledge (**Web Search**), or structured consultation **scenarios**.
+## 테스트 실행
 
-- **Frontend**: A **Vue.js** single-page application. It uses the **Web Audio API** to capture microphone input and **Pinia** to manage application state, including the WebSocket connection.
+### Backend 테스트
+```bash
+cd backend
+pip install -r requirements-test.txt
 
----
+# 단위 테스트
+python test_runner.py unit
 
-## 4\. Environment & Configuration
-
-### Environment Variables
-
-Create a `.env` file in the `backend/` directory with the following keys:
-
-```env
-OPENAI_API_KEY=your_openai_api_key
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/google-credentials.json
+# 전체 테스트 (커버리지 포함)
+python test_runner.py coverage
 ```
 
-### Configuration Files
+### Frontend 테스트
+```bash
+cd frontend
+npm run test:unit
+```
 
-Agent behavior and data are managed externally, not hardcoded.
+### 통합 테스트
+```bash
+# 프로젝트 루트에서
+python test_runner.py integration
+```
 
-- **Prompts**: Defined in `.yaml` files in `backend/app/config/`.
-- **Knowledge Base**: Stored as `.md` files in `backend/app/data/`.
-- **Scenarios**: Structured as `.json` files in `backend/app/data/`.
+## 개발 후 필수사항
 
----
+```bash
+# 변경사항 커밋
+git add .
+git commit -m "작업 내용 설명"
 
-## 5\. Testing
+# 원격 저장소에 푸시
+git push origin main
+```
 
-- **Backend**: No automated test framework is configured. Test manually by running the server.
-- **Frontend**: Unit tests are available and can be run with **Vitest**.
-  ```bash
-  npm run test:unit
-  ```
+## 추가 문서
 
----
-
-## 6\. Module Documentation
-
-For detailed module-specific guidance:
-
-- [Backend CLAUDE.md](backend/CLAUDE.md) - Backend API and agent implementation
-- [Frontend CLAUDE.md](frontend/CLAUDE.md) - Vue.js user interface
-- [Nginx CLAUDE.md](nginx/CLAUDE.md) - Production deployment configuration
+- [Backend 개발 가이드](backend/CLAUDE.md)
+- [Frontend 개발 가이드](frontend/CLAUDE.md)
+- [Nginx 설정 가이드](nginx/CLAUDE.md)
+- [테스트 가이드](README_TESTING.md)

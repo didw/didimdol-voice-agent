@@ -1,17 +1,28 @@
-_This file provides guidance for AI assistants working with the nginx configuration in this repository._
+# Nginx 설정 가이드
 
-## Nginx Module - 디딤돌 음성 상담 에이전트
+**심플하게 작성하세요. 핵심만 전달하세요.**
 
-This module contains **nginx** configuration for the 디딤돌 Voice Consultation Agent deployment.
+## 역할
 
-### Role
-- **Reverse proxy** configuration for production deployment
-- **SSL/HTTPS** setup and certificate management
-- **Static file serving** and request routing
-- **Load balancing** between backend services
+디딤돌 음성 상담 에이전트의 **프로덕션 배포** - 리버스 프록시 및 로드 밸런싱
 
-### Key Files
-- `didimdol.conf` - Main nginx server configuration
+## 주요 기능
 
-### Related Files
-- [Root CLAUDE.md](../CLAUDE.md) - Main project overview
+- **리버스 프록시**: Backend API 라우팅
+- **SSL/HTTPS**: 보안 연결
+- **정적 파일 서빙**: Frontend 배포
+- **로드 밸런싱**: 서버 부하 분산
+
+## 설정 파일
+
+- `didimdol.conf`: 메인 nginx 서버 설정
+
+## 개발 시 참고사항
+
+프로덕션 배포 시에만 사용됩니다. 개발 환경에서는 각 모듈의 개발 서버를 사용하세요.
+
+## 관련 문서
+
+- [메인 개발 가이드](../CLAUDE.md)
+- [Backend 개발 가이드](../backend/CLAUDE.md)
+- [Frontend 개발 가이드](../frontend/CLAUDE.md)

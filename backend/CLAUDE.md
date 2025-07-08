@@ -1,41 +1,63 @@
-_This file provides guidance for AI assistants working with the backend code in this repository._
+# Backend 개발 가이드
 
-## Backend Module - 디딤돌 음성 상담 에이전트
+**심플하게 작성하세요. 핵심만 전달하세요.**
 
-This is the **backend** module of the 디딤돌 Voice Consultation Agent, handling the core AI agent logic and API services.
+## 역할
 
-### Role
-- **FastAPI** server providing REST and WebSocket endpoints
-- **LangGraph** agent for conversation flow and decision routing
-- **RAG** (Retrieval Augmented Generation) for knowledge base queries
-- **STT/TTS** integration with Google Cloud services
-- **Web search** integration via Tavily
+디딤돌 음성 상담 에이전트의 **백엔드 서버** - AI 대화 처리 및 API 제공
 
-### Key Commands
+## 개발 시작
+
+### 1. Git Pull (필수)
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+git pull origin main
+```
 
-# Run development server
+### 2. 환경 설정
+`.env` 파일 생성:
+```env
+OPENAI_API_KEY=your_openai_api_key
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/google-credentials.json
+```
+
+### 3. 서버 실행
+```bash
+pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-### Architecture
-- `app/main.py` - FastAPI application entry point
-- `app/api/` - REST API endpoints
-- `app/graph/` - LangGraph agent implementation
-- `app/rag/` - RAG pipeline and vector search
-- `app/services/` - External service integrations
-- `app/config/` - Agent prompts and configurations
-- `app/data/` - Knowledge base and scenario data
+## 주요 라이브러리
 
-### Environment Setup
-Create `.env` file with:
-```env
-OPENAI_API_KEY=your_openai_api_key
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/your/google-credentials.json
+- **FastAPI**: API 서버 및 WebSocket
+- **LangGraph**: 대화 흐름 관리
+- **LangChain**: LLM 통합
+- **LanceDB**: 벡터 검색 (RAG)
+- **Google Cloud**: STT/TTS
+- **Tavily**: 웹 검색
+
+## 테스트
+
+```bash
+# 테스트 의존성 설치
+pip install -r requirements-test.txt
+
+# 단위 테스트
+python test_runner.py unit
+
+# 커버리지 포함 전체 테스트
+python test_runner.py coverage
 ```
 
-### Related Files
-- [Root CLAUDE.md](../CLAUDE.md) - Main project overview
-- [Frontend CLAUDE.md](../frontend/CLAUDE.md) - Frontend module documentation
+## 개발 완료 후
+
+```bash
+git add .
+git commit -m "작업 설명"
+git push origin main
+```
+
+## 관련 문서
+
+- [메인 개발 가이드](../CLAUDE.md)
+- [Frontend 개발 가이드](../frontend/CLAUDE.md)
+- [테스트 가이드](../README_TESTING.md)

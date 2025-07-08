@@ -108,3 +108,44 @@ graph TD;
 4.  **프롬프트 및 지식 베이스 (`app/config/`, `app/data/`)**
     -   `config/`: 에이전트의 성격, 판단 기준, 라우팅 로직 등 모든 LLM의 행동 지침이 담긴 프롬프트가 YAML 파일로 관리됩니다. 이를 통해 코드 변경 없이 에이전트의 행동을 유연하게 수정할 수 있습니다.
     -   `data/`: RAG가 사용하는 금융 상품 관련 내부 지식 베이스가 마크다운(`.md`) 파일 형태로 저장됩니다.
+
+## 🧪 테스팅
+
+### 테스트 실행
+
+```bash
+# 테스트 의존성 설치
+pip install -r requirements-test.txt
+
+# 단위 테스트 실행
+python test_runner.py unit
+
+# 통합 테스트 실행 (루트 디렉토리에서)
+cd ..
+python test_runner.py integration
+
+# 모든 테스트 실행
+python test_runner.py all
+
+# 커버리지 리포트 포함
+python test_runner.py coverage
+```
+
+### 테스트 구조
+
+- **`tests/`** - 백엔드 단위 테스트
+  - `test_agent_routing.py` - LangGraph 에이전트 라우팅 테스트
+  - `test_rag_pipeline.py` - RAG 파이프라인 테스트
+  - `test_services.py` - 서비스 레이어 테스트
+  - `test_qa_scenarios.py` - QA 시나리오 테스트
+
+- **`conftest.py`** - 테스트 픽스처 및 모킹 설정
+- **`pytest.ini`** - 테스트 설정 및 커버리지 구성
+
+### 테스트 커버리지
+
+- **목표**: 80% 이상의 코드 커버리지
+- **포함 범위**: 에이전트 로직, RAG 파이프라인, 서비스 통합
+- **제외**: 외부 API 호출, 환경 설정
+
+자세한 테스트 가이드는 [README_TESTING.md](../README_TESTING.md)를 참조하세요.

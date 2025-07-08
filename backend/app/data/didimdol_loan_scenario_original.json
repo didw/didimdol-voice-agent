@@ -1,0 +1,335 @@
+{
+  "scenario_name": "신한은행 디딤돌 주택담보대출 상담",
+  "initial_stage_id": "greeting",
+  "system_prompt": "당신은 신한은행의 친절하고 전문적인 디딤돌 주택담보대출 상담원입니다. 사용자의 질문에 명확하고 이해하기 쉽게 답변하며, 필요한 정보를 단계별로 안내해주세요. 모든 금액 단위는 만원입니다.",
+  "fallback_message": "죄송합니다, 고객님의 말씀을 정확히 이해하지 못했습니다. 다시 한번 말씀해주시겠어요?",
+  "end_conversation_message": "네, 알겠습니다. 상담을 종료합니다. 이용해주셔서 감사합니다. 언제든지 다시 찾아주세요.",
+  "end_scenario_message": "고객님, 기본적인 상담이 완료되었습니다. 추가적으로 궁금한 점이 없으시다면 상담을 종료하겠습니다. 더 자세한 사항은 신한은행 영업점 또는 고객센터로 문의해주시면 감사하겠습니다.",
+  "qa_keywords": ["궁금", "질문", "뭐야", "뭔데", "알려줘", "설명해줘"],
+  "stages": {
+    "greeting": {
+      "id": "greeting",
+      "prompt": "안녕하세요, 고객님! 신한은행 디딤돌 주택담보대출 상담 서비스입니다. 지금 바로 상담을 시작하시겠습니까?",
+      "is_question": true,
+      "input_type": "yes_no",
+      "transitions": [
+        {
+          "next_stage_id": "ask_loan_purpose",
+          "condition_description": "사용자가 상담 시작에 긍정적으로 답변한 경우.",
+          "example_phrases": [
+            "네",
+            "예",
+            "좋아요",
+            "시작해주세요",
+            "응",
+            "시작할래요"
+          ]
+        },
+        {
+          "next_stage_id": "farewell_early",
+          "condition_description": "사용자가 상담 시작에 부정적으로 답변하거나 거절한 경우.",
+          "example_phrases": [
+            "아니요",
+            "아니오",
+            "나중에요",
+            "취소할게요",
+            "괜찮습니다"
+          ]
+        }
+      ],
+      "default_next_stage_id": "greeting_reprompt"
+    },
+    "greeting_reprompt": {
+      "id": "greeting_reprompt",
+      "prompt": "상담 시작을 원하시면 '네' 또는 '시작'이라고 말씀해주세요.",
+      "is_question": true,
+      "input_type": "yes_no",
+      "transitions": [
+        {
+          "next_stage_id": "ask_loan_purpose",
+          "condition_description": "사용자가 상담 시작에 긍정적으로 답변한 경우.",
+          "example_phrases": ["네", "예", "시작"]
+        },
+        {
+          "next_stage_id": "farewell_early",
+          "condition_description": "사용자가 상담 시작에 부정적으로 답변하거나 거절한 경우.",
+          "example_phrases": ["아니요", "괜찮아요"]
+        }
+      ],
+      "default_next_stage_id": "farewell_early"
+    },
+    "farewell_early": {
+      "id": "farewell_early",
+      "prompt": "네, 알겠습니다. 도움이 필요하시면 언제든지 다시 찾아주세요. 좋은 하루 보내세요!",
+      "is_question": false,
+      "default_next_stage_id": "END_SCENARIO_ABORT"
+    },
+    "ask_loan_purpose": {
+      "id": "ask_loan_purpose",
+      "prompt": "디딤돌 대출은 주택 구입 자금 마련을 위한 대출입니다. 주택 구입 목적으로 문의주신 것이 맞으실까요?",
+      "is_question": true,
+      "input_type": "yes_no",
+      "expected_info_key": "loan_purpose_confirmed",
+      "transitions": [
+        {
+          "next_stage_id": "ask_marital_status",
+          "condition_description": "사용자가 주택 구입 목적임을 확인한 경우.",
+          "example_phrases": ["네", "맞아요", "주택 구입입니다", "구매하려고요"]
+        },
+        {
+          "next_stage_id": "explain_didimdol_purpose",
+          "condition_description": "사용자가 주택 구입 목적이 아니라고 답변하거나 다른 목적을 언급한 경우.",
+          "example_phrases": ["아니요", "다른 건데요", "전세자금인데요"]
+        }
+      ],
+      "default_next_stage_id": "ask_loan_purpose_reprompt"
+    },
+    "ask_loan_purpose_reprompt": {
+      "id": "ask_loan_purpose_reprompt",
+      "prompt": "주택 구입 목적으로 문의주신 것이 맞는지 '네' 또는 '아니오'로 답변 부탁드립니다.",
+      "is_question": true,
+      "input_type": "yes_no",
+      "transitions": [
+        {
+          "next_stage_id": "ask_marital_status",
+          "condition_description": "사용자가 주택 구입 목적임을 확인한 경우.",
+          "example_phrases": ["네", "맞아요"]
+        },
+        {
+          "next_stage_id": "explain_didimdol_purpose",
+          "condition_description": "사용자가 주택 구입 목적이 아니라고 답변한 경우.",
+          "example_phrases": ["아니요"]
+        }
+      ],
+      "default_next_stage_id": "farewell_early"
+    },
+    "explain_didimdol_purpose": {
+      "id": "explain_didimdol_purpose",
+      "prompt": "디딤돌 대출은 무주택 서민의 내 집 마련을 돕기 위한 주택 구입자금 전용 대출입니다. 혹시 주택 구입 자금 외 다른 용도의 대출을 찾으신다면, 신한은행의 다른 대출 상품을 안내해 드릴 수 있습니다. 주택 구입 목적으로 다시 상담하시겠어요?",
+      "is_question": true,
+      "input_type": "yes_no",
+      "transitions": [
+        {
+          "next_stage_id": "ask_marital_status",
+          "condition_description": "사용자가 주택 구입 목적으로 상담을 계속 진행하길 원하는 경우.",
+          "example_phrases": ["네", "다시 상담할게요", "구입 목적으로 할래요"]
+        },
+        {
+          "next_stage_id": "farewell_early",
+          "condition_description": "사용자가 주택 구입 목적 상담을 원하지 않는 경우.",
+          "example_phrases": ["아니요", "괜찮습니다", "다른 상품 알아볼게요"]
+        }
+      ],
+      "default_next_stage_id": "farewell_early"
+    },
+    "ask_marital_status": {
+      "id": "ask_marital_status",
+      "prompt": "고객님의 혼인 상태를 말씀해주시겠어요? (예: 미혼, 기혼, 예비부부)",
+      "is_question": true,
+      "input_type": "choice",
+      "choices": ["미혼", "기혼", "예비부부"],
+      "expected_info_key": "marital_status",
+      "transitions": [
+        {
+          "next_stage_id": "ask_home_ownership",
+          "condition_description": "사용자가 '미혼'이라고 답변한 경우.",
+          "example_phrases": ["미혼", "싱글입니다"]
+        },
+        {
+          "next_stage_id": "ask_home_ownership",
+          "condition_description": "사용자가 '기혼'이라고 답변한 경우.",
+          "example_phrases": ["기혼", "결혼했어요"]
+        },
+        {
+          "next_stage_id": "ask_home_ownership",
+          "condition_description": "사용자가 '예비부부' 또는 결혼 예정이라고 답변한 경우.",
+          "example_phrases": ["예비부부", "결혼 예정입니다", "곧 결혼해요"]
+        }
+      ],
+      "default_next_stage_id": "ask_marital_status_reprompt"
+    },
+    "ask_marital_status_reprompt": {
+      "id": "ask_marital_status_reprompt",
+      "prompt": "혼인 상태를 '미혼', '기혼', 또는 '예비부부' 중 하나로 말씀해주시겠어요?",
+      "is_question": true,
+      "input_type": "choice",
+      "choices": ["미혼", "기혼", "예비부부"],
+      "expected_info_key": "marital_status",
+      "transitions": [
+        {
+          "next_stage_id": "ask_home_ownership",
+          "condition_description": "사용자가 '미혼'이라고 답변한 경우."
+        },
+        {
+          "next_stage_id": "ask_home_ownership",
+          "condition_description": "사용자가 '기혼'이라고 답변한 경우."
+        },
+        {
+          "next_stage_id": "ask_home_ownership",
+          "condition_description": "사용자가 '예비부부' 또는 결혼 예정이라고 답변한 경우."
+        }
+      ],
+      "default_next_stage_id": "farewell_early"
+    },
+    "ask_home_ownership": {
+      "id": "ask_home_ownership",
+      "prompt": "현재 본인 또는 세대 구성원 명의로 소유하고 계신 주택이 있으신가요? 디딤돌 대출은 기본적으로 무주택 세대주를 대상으로 합니다.",
+      "is_question": true,
+      "input_type": "yes_no",
+      "expected_info_key": "has_home",
+      "transitions": [
+        {
+          "next_stage_id": "ask_annual_income",
+          "condition_description": "사용자가 현재 소유 주택이 없다고 답변한 경우 (무주택).",
+          "example_phrases": ["아니요", "없어요", "무주택입니다"]
+        },
+        {
+          "next_stage_id": "check_home_ownership_details",
+          "condition_description": "사용자가 현재 소유 주택이 있다고 답변한 경우 (유주택).",
+          "example_phrases": ["네", "있어요", "집 한 채 있습니다"]
+        }
+      ],
+      "default_next_stage_id": "ask_home_ownership_reprompt"
+    },
+    "ask_home_ownership_reprompt": {
+      "id": "ask_home_ownership_reprompt",
+      "prompt": "현재 소유하고 계신 주택이 있으시면 '네', 없으시면 '아니오'로 답변 부탁드립니다.",
+      "is_question": true,
+      "input_type": "yes_no",
+      "transitions": [
+        {
+          "next_stage_id": "ask_annual_income",
+          "condition_description": "사용자가 현재 소유 주택이 없다고 답변한 경우 (무주택)."
+        },
+        {
+          "next_stage_id": "check_home_ownership_details",
+          "condition_description": "사용자가 현재 소유 주택이 있다고 답변한 경우 (유주택)."
+        }
+      ],
+      "default_next_stage_id": "farewell_early"
+    },
+    "check_home_ownership_details": {
+      "id": "check_home_ownership_details",
+      "prompt": "1주택을 소유하고 계신 경우, 특정 조건(예: 3개월 이내 처분 조건, 주택 가격 및 면적 제한 등)을 만족하면 신청 가능할 수 있습니다. 이 부분은 자세한 상담이 필요합니다. 계속해서 다른 기본 조건에 대해 안내 드릴까요?",
+      "is_question": true,
+      "input_type": "yes_no",
+      "transitions": [
+        {
+          "next_stage_id": "ask_annual_income",
+          "condition_description": "사용자가 다른 기본 조건에 대한 안내를 계속 받기를 원하는 경우.",
+          "example_phrases": ["네", "계속해주세요", "알려주세요"]
+        },
+        {
+          "next_stage_id": "farewell_early",
+          "condition_description": "사용자가 추가 안내를 원하지 않는 경우.",
+          "example_phrases": ["아니요", "괜찮습니다", "그만할래요"]
+        }
+      ],
+      "default_next_stage_id": "ask_annual_income"
+    },
+    "ask_annual_income": {
+      "id": "ask_annual_income",
+      "prompt": "고객님의 세전 연소득(부부 합산인 경우 합산 소득)은 대략 얼마이신가요? (예: 5000만원 또는 5천)",
+      "is_question": true,
+      "input_type": "number_text",
+      "expected_info_key": "annual_income",
+      "default_next_stage_id": "ask_target_home_price"
+    },
+    "ask_target_home_price": {
+      "id": "ask_target_home_price",
+      "prompt": "구입 예정이신 주택의 매매 가격은 어느 정도 예상하시나요? (예: 3억원 또는 30000)",
+      "is_question": true,
+      "input_type": "number_text",
+      "expected_info_key": "target_home_price",
+      "default_next_stage_id": "preliminary_summary"
+    },
+    "preliminary_summary": {
+      "id": "preliminary_summary",
+      "prompt": "네, 고객님. 지금까지 말씀해주신 내용을 바탕으로 간단히 정리해드리면... 정확한 내용은 추가 서류 확인 및 심사가 필요합니다. 다음 단계로 대출 신청에 필요한 서류를 안내받으시겠습니까?", 
+      "is_question": true,
+      "input_type": "yes_no",
+      "expected_info_key": "proceed_to_documents_confirmation",
+      "transitions": [
+        {
+          "next_stage_id": "application_documents_guidance",
+          "condition_description": "사용자가 서류 안내 및 신청 진행에 동의한 경우.",
+          "example_phrases": ["네", "예", "안내해주세요", "좋아요", "진행할게요"]
+        },
+        {
+          "next_stage_id": "offer_further_assistance", 
+          "condition_description": "사용자가 서류 안내를 원하지 않거나 보류하는 경우.",
+          "example_phrases": ["아니요", "괜찮아요", "나중에요"]
+        }
+      ],
+      "default_next_stage_id": "offer_further_assistance" 
+    },
+
+    "application_documents_guidance": { 
+      "id": "application_documents_guidance",
+      "prompt": "네, 알겠습니다. 디딤돌 대출 신청을 위해서는 일반적으로 다음과 같은 서류들이 필요합니다: [상세한 디딤돌 대출 필요 서류 목록을 여기에 명시하세요. 예: 신분증, 주민등록등본, 소득증빙서류, 주택매매계약서 등]. 모든 서류가 준비되시면 신한은행 영업점을 방문하시거나 온라인으로 신청을 진행하실 수 있습니다. 제출된 서류를 바탕으로 심사가 진행되며, 심사에는 통상적으로 약 2-3일 정도 소요될 수 있습니다. 심사 결과는 별도로 안내드릴 예정입니다. 추가로 궁금하신 점이 있으신가요?",
+      "is_question": true, 
+      "input_type": "yes_no", 
+      "transitions": [
+         {
+            "next_stage_id": "additional_qa_prompt", 
+            "condition_description": "사용자가 추가 질문이 있다고 답변한 경우",
+            "example_phrases": ["네", "질문 있어요"]
+         },
+         {
+            "next_stage_id": "closing_application_complete", 
+            "condition_description": "사용자가 추가 질문이 없다고 답변한 경우",
+            "example_phrases": ["아니요", "없어요", "괜찮아요"]
+         }
+      ],
+      "default_next_stage_id": "closing_application_complete"
+    },
+
+    "closing_application_complete": { 
+      "id": "closing_application_complete",
+      "prompt": "네, 알겠습니다. 모든 안내가 완료되었습니다. 디딤돌 대출 신청에 도움이 되었기를 바랍니다. 이용해주셔서 감사합니다!",
+      "is_question": false,
+      "default_next_stage_id": "END_SCENARIO_COMPLETE"
+    },
+    "offer_further_assistance": {
+      "id": "offer_further_assistance",
+      "prompt": "더 궁금하신 점이나 특정 조건에 대해 자세히 알고 싶은 내용이 있으신가요? 아니면 상담을 이대로 마칠까요?",
+      "is_question": true,
+      "input_type": "choice",
+      "transitions": [
+        {
+          "next_stage_id": "additional_qa_prompt",
+          "condition_description": "사용자가 추가 질문이 있거나 더 알고 싶은 내용이 있다고 표현한 경우.",
+          "example_phrases": [
+            "궁금한 점 있어요",
+            "질문해도 되나요?",
+            "더 알고 싶어요"
+          ]
+        },
+        {
+          "next_stage_id": "closing_thank_you",
+          "condition_description": "사용자가 상담을 마치기를 원하거나 더 이상 궁금한 점이 없다고 표현한 경우.",
+          "example_phrases": ["마칠래요", "종료해주세요", "됐어요", "없습니다"]
+        }
+      ],
+      "default_next_stage_id": "closing_thank_you"
+    },
+    "additional_qa_prompt": {
+      "id": "additional_qa_prompt",
+      "prompt": "네, 어떤 점이 궁금하신가요? 편하게 질문해주세요.",
+      "is_question": true,
+      "default_next_stage_id": "qa_listen"
+    },
+    "qa_listen": {
+      "id": "qa_listen",
+      "prompt": "",
+      "is_question": true,
+      "default_next_stage_id": "offer_further_assistance"
+    },
+    "closing_thank_you": {
+      "id": "closing_thank_you",
+      "prompt": "%{end_scenario_message}%", 
+      "is_question": false,
+      "default_next_stage_id": "END_SCENARIO_COMPLETE"
+    }
+  }
+}

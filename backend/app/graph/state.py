@@ -54,3 +54,7 @@ class AgentState(TypedDict):
 
     # --- Turn-specific state (cleared at the start of each turn) ---
     action_plan_struct: List[Dict[str, Any]] # Holds the full action details
+    
+    # --- Scenario Continuation Management ---
+    scenario_ready_for_continuation: Optional[bool] # True if scenario should continue next turn
+    scenario_awaiting_user_response: Optional[bool] # True if waiting for user input to continue scenario
