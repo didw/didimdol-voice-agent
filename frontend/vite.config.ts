@@ -9,7 +9,7 @@ export default defineConfig({
   plugins: [vue(), vueDevTools()],
   server: {
     host: "0.0.0.0",
-    allowedHosts: ["aibranch.zapto.org", "43.203.170.239"],
+    allowedHosts: ["aibranch.zapto.org", "43.202.47.188"],
   },
   resolve: {
     alias: {

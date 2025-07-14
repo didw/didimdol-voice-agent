@@ -8,7 +8,7 @@ Nginx는 외부의 HTTPS(포트 443) 요청을 받아 SSL 처리를 한 후, 내
 ```nginx
 server {
     listen 80;
-    server_name YOUR_SERVER_IP;
+    server_name 43.202.47.188 aibranch.zapto.org;
 
     # HTTP 요청을 HTTPS로 리디렉션
     location / {
@@ -18,13 +18,13 @@ server {
 
 server {
     listen 443 ssl;
-    server_name YOUR_SERVER_IP; # 'YOUR_SERVER_IP'를 실제 서버 IP로 변경
+    server_name 43.202.47.188 aibranch.zapto.org;
 
     # SSL 인증서 경로 설정
     # 프로젝트 root 디렉토리 아래 key 폴더에 인증서가 위치한 경로를 정확히 입력해야 합니다.
     # 예: /home/ubuntu/didimdol-voice-agent/key/cert.pem
-    ssl_certificate /path/to/your/project/key/cert.pem;
-    ssl_certificate_key /path/to/your/project/key/key.pem;
+    ssl_certificate /home/ubuntu/didimdol-voice-agent/key/cert.pem;
+    ssl_certificate_key /home/ubuntu/didimdol-voice-agent/key/key.pem;
 
     # SSL 프로토콜 및 암호화 스위트 설정 (보안 강화)
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -67,8 +67,8 @@ server {
 ```
 
 **설정 적용 방법:**
-1.  위 내용으로 설정 파일을 작성합니다. (`YOUR_SERVER_IP`와 인증서 경로를 꼭 수정하세요.)
+1.  위 내용으로 설정 파일을 작성합니다.
 2.  Nginx 설정에 오류가 없는지 테스트합니다: `sudo nginx -t`
 3.  오류가 없으면 Nginx를 재시작하여 설정을 적용합니다: `sudo systemctl restart nginx`
 
-이러한 설정을 통해 외부에서 `https://YOUR_SERVER_IP`로 접속하면 Nginx가 안전한 연결을 수립하고, 내부적으로는 개발 중인 Vue 및 FastAPI 서버와 통신하게 됩니다.
+이러한 설정을 통해 외부에서 `https://43.202.47.188` 또는 `https://aibranch.zapto.org`로 접속하면 Nginx가 안전한 연결을 수립하고, 내부적으로는 개발 중인 Vue 및 FastAPI 서버와 통신하게 됩니다.
