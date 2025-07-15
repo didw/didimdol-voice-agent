@@ -3,7 +3,7 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException, status, Header
 import json
 import re # For sentence splitting
-from typing import Dict, Optional, cast, List # Added List
+from typing import Dict, Optional, cast, List, Any # Added List, Any
 from langchain_core.messages import AIMessage
 
 from ...graph.agent import run_agent_streaming, AgentState, PRODUCT_TYPES # PRODUCT_TYPES 임포트
@@ -11,7 +11,16 @@ from ...services.google_services import StreamSTTService, StreamTTSService, GOOG
 from ...core.config import LLM_MODEL_NAME
 
 router = APIRouter()
-SESSION_STATES: Dict[str, AgentState] = {} 
+SESSION_STATES: Dict[str, AgentState] = {}
+
+# 정보 수집 관련 스테이지 상수
+INFO_COLLECTION_STAGES = {
+    "info_collection_guidance", 
+    "process_collected_info",
+    "ask_missing_info_group1", 
+    "ask_missing_info_group2", 
+    "ask_missing_info_group3"
+} 
 
 
 # 허용할 출처 목록 (개발 환경)
@@ -80,6 +89,98 @@ def split_into_sentences(text: str) -> List[str]:
     return [s for s in processed_sentences if s]
 
 
+def should_send_slot_filling_update(
+    info_changed: bool, 
+    scenario_changed: bool,
+    product_type_changed: bool, 
+    scenario_active: bool,
+    is_info_collection_stage: bool
+) -> bool:
+    """Slot filling 업데이트 전송이 필요한지 판단"""
+    return (
+        info_changed or 
+        scenario_changed or 
+        product_type_changed or
+        (scenario_active and is_info_collection_stage)
+    )
+
+
+async def send_slot_filling_update(websocket: WebSocket, state: AgentState):
+    """Slot filling 상태 업데이트를 WebSocket으로 전송"""
+    try:
+        scenario_data = state.get("active_scenario_data")
+        if not scenario_data:
+            print("[send_slot_filling_update] No active scenario data, skipping update")
+            return
+        
+        required_fields = scenario_data.get("required_info_fields", [])
+        collected_info = state.get("collected_product_info", {})
+        
+        # Frontend 인터페이스에 맞게 필드 변환
+        frontend_fields = []
+        for field in required_fields:
+            frontend_field = {
+                "key": field["key"],
+                "displayName": field.get("display_name", field.get("name", "")),
+                "type": field.get("type", "text"),
+                "required": field.get("required", True),
+            }
+            
+            # 선택형 필드의 choices 추가
+            if field.get("type") == "choice" and "choices" in field:
+                frontend_field["choices"] = field["choices"]
+            
+            # 숫자형 필드의 unit 추가
+            if field.get("type") == "number" and "unit" in field:
+                frontend_field["unit"] = field["unit"]
+                
+            # 설명 추가
+            if "description" in field:
+                frontend_field["description"] = field["description"]
+                
+            # 의존성 정보 추가
+            if "depends_on" in field:
+                frontend_field["dependsOn"] = field["depends_on"]
+                
+            frontend_fields.append(frontend_field)
+        
+        # completion_status 계산
+        completion_status = {
+            field["key"]: field["key"] in collected_info 
+            for field in required_fields
+        }
+        
+        # 수집률 계산 (required=true인 필드만 고려)
+        required_fields_only = [f for f in required_fields if f.get("required", True)]
+        total_required = len(required_fields_only)
+        completed_required = sum(
+            1 for f in required_fields_only 
+            if f["key"] in collected_info
+        )
+        completion_rate = (completed_required / total_required * 100) if total_required > 0 else 0
+        
+        update_message = {
+            "type": "slot_filling_update",
+            "productType": state.get("current_product_type"),
+            "requiredFields": frontend_fields,  # 변환된 필드 사용
+            "collectedInfo": collected_info,
+            "completionStatus": completion_status,
+            "completionRate": completion_rate
+        }
+    
+        # field_groups가 있으면 추가 (카멜케이스로 변환)
+        if "field_groups" in scenario_data:
+            update_message["fieldGroups"] = scenario_data["field_groups"]
+        
+        await websocket.send_json(update_message)
+        print(f"[send_slot_filling_update] Sent update - Product: {state.get('current_product_type')}, Rate: {completion_rate:.1f}%, Fields: {len(required_fields)}")
+        
+    except WebSocketException as e:
+        print(f"[send_slot_filling_update] WebSocket error: {e}")
+    except Exception as e:
+        print(f"[send_slot_filling_update] Unexpected error: {e}")
+
+
 @router.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     await manager.connect(websocket, session_id)
@@ -118,6 +219,13 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             "type": "session_initialized",
             "message": initial_greeting_message
         })
+        
+        # 초기 slot filling 상태 전송 (빈 상태)
+        try:
+            await send_slot_filling_update(websocket, SESSION_STATES[session_id])
+            print(f"[{session_id}] Initial slot filling state sent")
+        except Exception as e:
+            print(f"[{session_id}] Failed to send initial slot filling state: {e}")
 
     if GOOGLE_SERVICES_AVAILABLE:
         async def _on_tts_audio_chunk(audio_chunk_b64: str):
@@ -192,6 +300,60 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 if user_text:
                     await process_input_through_agent(session_id, user_text, tts_service, input_mode="text")
                 else: await manager.send_json_to_client(session_id, {"type": "error", "message": "No text provided."})
+                
+            elif message_type == "test_slot_filling":
+                # 테스트용 더미 데이터로 slot filling 업데이트 전송
+                test_state = SESSION_STATES.get(session_id, {}).copy()
+                test_state["current_product_type"] = "didimdol"
+                test_state["active_scenario_data"] = {
+                    "required_info_fields": [
+                        {
+                            "key": "loan_purpose_confirmed",
+                            "display_name": "대출 목적",
+                            "type": "boolean",
+                            "required": True,
+                            "description": "주택 구입 목적인지 확인"
+                        },
+                        {
+                            "key": "marital_status",
+                            "display_name": "결혼 상태", 
+                            "type": "choice",
+                            "choices": ["미혼", "기혼", "예비부부"],
+                            "required": True,
+                            "description": "고객의 결혼 상태"
+                        },
+                        {
+                            "key": "annual_income",
+                            "display_name": "연소득",
+                            "type": "number",
+                            "unit": "만원",
+                            "required": True,
+                            "description": "연간 소득 금액"
+                        }
+                    ],
+                    "field_groups": [
+                        {
+                            "id": "personal_info",
+                            "name": "개인 정보",
+                            "fields": ["marital_status"]
+                        },
+                        {
+                            "id": "financial_info",
+                            "name": "재무 정보", 
+                            "fields": ["annual_income"]
+                        }
+                    ]
+                }
+                test_state["collected_product_info"] = {
+                    "loan_purpose_confirmed": True,
+                    "marital_status": "미혼"
+                }
+                
+                await send_slot_filling_update(websocket, test_state)
+                await manager.send_json_to_client(session_id, {
+                    "type": "info",
+                    "message": "테스트 slot filling 업데이트를 전송했습니다."
+                })
             elif message_type == "audio_chunk":
                 if stt_service and GOOGLE_SERVICES_AVAILABLE: await stt_service.process_audio_chunk(raw_payload)
             elif message_type == "activate_voice":
@@ -271,6 +433,11 @@ async def process_input_through_agent(session_id: str, user_text: str, tts_servi
                 elif agent_output_chunk.get("type") == "final_state":
                     final_agent_state_data = agent_output_chunk.get("data")
                     if final_agent_state_data:
+                        # 이전 상태 저장 (변경 감지용)
+                        previous_collected_info = SESSION_STATES[session_id].get("collected_product_info", {}).copy()
+                        previous_scenario_data = SESSION_STATES[session_id].get("active_scenario_data")
+                        previous_product_type = SESSION_STATES[session_id].get("current_product_type")
+                        
                         SESSION_STATES[session_id] = cast(AgentState, final_agent_state_data)
                         # If LLM didn't stream but final_state provides text, use it
                         if not full_ai_response_text and final_agent_state_data.get("final_response_text_for_tts"):
@@ -282,6 +449,25 @@ async def process_input_through_agent(session_id: str, user_text: str, tts_servi
                         # Update current_session_state for TTS logic below
                         current_session_state = SESSION_STATES[session_id]
                         print(f"Session state for {session_id} updated via final_state.")
+                        
+                        # Slot filling 업데이트 전송 (변경사항이 있거나 시나리오가 활성화된 경우)
+                        current_collected_info = current_session_state.get("collected_product_info", {})
+                        current_scenario_stage = current_session_state.get("current_scenario_stage_id", "")
+                        
+                        # 업데이트가 필요한 조건들
+                        info_changed = previous_collected_info != current_collected_info
+                        scenario_changed = previous_scenario_data != current_session_state.get("active_scenario_data")
+                        product_type_changed = previous_product_type != current_session_state.get("current_product_type")
+                        scenario_active = current_session_state.get("active_scenario_data") is not None
+                        is_info_collection_stage = current_scenario_stage in INFO_COLLECTION_STAGES
+                        
+                        # 업데이트 전송 조건 확인
+                        if should_send_slot_filling_update(
+                            info_changed, scenario_changed, product_type_changed, 
+                            scenario_active, is_info_collection_stage
+                        ):
+                            print(f"[{session_id}] Sending slot filling update - Info: {info_changed}, Scenario: {scenario_changed}, Product: {product_type_changed}, Stage: {current_scenario_stage}")
+                            await send_slot_filling_update(websocket, current_session_state)
                 elif agent_output_chunk.get("type") == "error": 
                     await manager.send_json_to_client(session_id, agent_output_chunk)
                     await manager.send_json_to_client(session_id, {"type": "llm_response_end", "full_text": ""}) 

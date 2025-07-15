@@ -22,18 +22,32 @@ GOOGLE_APPLICATION_CREDENTIALS=/path/to/google-credentials.json
 
 ### 3. 서버 실행
 ```bash
+# 가상환경 활성화
+source venv/bin/activate
+
+# 의존성 설치
 pip install -r requirements.txt
+pip install setuptools  # pkg_resources 모듈 문제 해결
+
+# 서버 실행
 uvicorn app.main:app --reload --port 8000
 ```
 
 ## 주요 라이브러리
 
 - **FastAPI**: API 서버 및 WebSocket
-- **LangGraph**: 대화 흐름 관리
+- **LangGraph**: 대화 흐름 관리 및 Slot Filling
 - **LangChain**: LLM 통합
 - **LanceDB**: 벡터 검색 (RAG)
 - **Google Cloud**: STT/TTS
 - **Tavily**: 웹 검색
+
+## 새로운 기능
+
+### Slot Filling 시스템
+- 실시간 정보 수집 상태 추적
+- WebSocket을 통한 Frontend 업데이트
+- 시나리오별 필드 그룹화 지원
 
 ## 시나리오 구조
 
@@ -44,6 +58,9 @@ uvicorn app.main:app --reload --port 8000
 ## 테스트
 
 ```bash
+# 가상환경 활성화
+source venv/bin/activate
+
 # 테스트 의존성 설치
 pip install -r requirements-test.txt
 

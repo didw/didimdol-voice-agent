@@ -51,14 +51,15 @@ npm run dev
 
 ### Backend
 - **FastAPI**: REST API 및 WebSocket 서버
-- **LangGraph**: 대화 흐름 관리 (개선된 다중 정보 수집)
+- **LangGraph**: 대화 흐름 관리 및 Slot Filling
 - **LangChain**: LLM 통합
 - **LanceDB**: 벡터 검색
 - **pytest**: 테스트
 
 ### Frontend
-- **Vue 3**: UI 프레임워크
-- **Pinia**: 상태 관리
+- **Vue 3**: UI 프레임워크 (Composition API)
+- **Pinia**: 상태 관리 (Slot Filling Store)
+- **TypeScript**: 타입 안정성
 - **Vite**: 빌드 도구
 - **Vitest**: 테스트
 

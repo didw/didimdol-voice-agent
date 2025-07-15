@@ -2,6 +2,16 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useChatStore } from '@/stores/chatStore' // 경로 확인
 import { storeToRefs } from 'pinia' // storeToRefs can be useful if not using computed for everything
+import SlotFillingPanel from './SlotFillingPanel.vue'
+
+// Props for layout control
+interface Props {
+  showSlotFilling?: boolean
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  showSlotFilling: true
+})
 
 const chatInputRef = ref<HTMLInputElement | null>(null);
 const userInput = ref('');
@@ -23,6 +33,70 @@ const sessionId = computed(() => chatStore.getSessionId)
 
 const userInputText = ref('') // For the text input field
 const messagesContainer = ref<HTMLElement | null>(null)
+
+// 레이아웃 제어
+const isPanelOpen = ref(true)
+const isMobileView = ref(window.innerWidth < 768)
+
+// 스와이프 제스처 지원
+const touchStartX = ref(0)
+const touchStartY = ref(0)
+const touchEndX = ref(0)
+const touchEndY = ref(0)
+const MIN_SWIPE_DISTANCE = 100
+const MAX_VERTICAL_DISTANCE = 150
+
+// 화면 크기 변경 감지
+const handleResize = () => {
+  isMobileView.value = window.innerWidth < 768
+}
+
+onMounted(() => {
+  window.addEventListener('resize', handleResize)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+})
+
+// 모바일에서 패널 토글
+const togglePanel = () => {
+  isPanelOpen.value = !isPanelOpen.value
+}
+
+// 스와이프 이벤트 핸들러
+const handleTouchStart = (event: TouchEvent) => {
+  if (!isMobileView.value) return
+  
+  touchStartX.value = event.touches[0].clientX
+  touchStartY.value = event.touches[0].clientY
+}
+
+const handleTouchEnd = (event: TouchEvent) => {
+  if (!isMobileView.value) return
+  
+  touchEndX.value = event.changedTouches[0].clientX
+  touchEndY.value = event.changedTouches[0].clientY
+  
+  handleSwipe()
+}
+
+const handleSwipe = () => {
+  const deltaX = touchEndX.value - touchStartX.value
+  const deltaY = Math.abs(touchEndY.value - touchStartY.value)
+  
+  // 세로 스와이프가 너무 크면 무시
+  if (deltaY > MAX_VERTICAL_DISTANCE) return
+  
+  // 오른쪽으로 스와이프 (패널 열기)
+  if (deltaX > MIN_SWIPE_DISTANCE && !isPanelOpen.value) {
+    isPanelOpen.value = true
+  }
+  // 왼쪽으로 스와이프 (패널 닫기)
+  else if (deltaX < -MIN_SWIPE_DISTANCE && isPanelOpen.value) {
+    isPanelOpen.value = false
+  }
+}
 
 // --- Scrolling Logic (Retained from original) ---
 const scrollToBottom = async () => {
@@ -172,7 +246,49 @@ watch(userInputText, (newValue) => {
 </script>
 
 <template>
-  <div class="chat-container">
+  <div class="chat-interface-wrapper">
+    <!-- Mobile Overlay -->
+    <Transition name="fade">
+      <div
+        v-if="showSlotFilling && isMobileView && isPanelOpen"
+        class="overlay"
+        @click="togglePanel"
+        aria-hidden="true"
+      ></div>
+    </Transition>
+
+    <!-- Slot Filling Panel -->
+    <Transition name="slide">
+      <aside 
+        v-if="showSlotFilling && (!isMobileView || isPanelOpen)" 
+        class="slot-filling-section"
+        :class="{ 'mobile-panel': isMobileView }"
+      >
+        <SlotFillingPanel />
+      </aside>
+    </Transition>
+
+    <!-- Chat Container -->
+    <div 
+      class="chat-container" 
+      :class="{ 'full-width': !showSlotFilling || (isMobileView && !isPanelOpen) }"
+      @touchstart="handleTouchStart"
+      @touchend="handleTouchEnd"
+    >
+      <!-- Mobile Toggle Button -->
+      <button 
+        v-if="showSlotFilling && isMobileView" 
+        @click="togglePanel"
+        @keydown.enter="togglePanel"
+        @keydown.space.prevent="togglePanel"
+        class="panel-toggle-btn"
+        :aria-label="isPanelOpen ? '정보 패널 닫기' : '정보 패널 열기'"
+        :aria-expanded="isPanelOpen.toString()"
+        role="button"
+      >
+        <span v-if="!isPanelOpen" aria-hidden="true">☰</span>
+        <span v-else aria-hidden="true">×</span>
+      </button>
     <header class="chat-header">
       <h2>
         디딤돌 대출 음성봇
@@ -259,9 +375,136 @@ watch(userInputText, (newValue) => {
       </button>
     </div>
   </div>
+  </div>
 </template>
 
 <style scoped>
+.chat-interface-wrapper {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  height: 100%;
+  width: 100%;
+  position: relative;
+}
+
+/* 모바일 레이아웃 */
+@media (max-width: 767px) {
+  .chat-interface-wrapper {
+    grid-template-columns: 1fr;
+  }
+  
+  .slot-filling-section.mobile-panel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 80%;
+    max-width: 320px;
+    height: 100%;
+    z-index: 1000;
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+  }
+}
+
+/* 오버레이 스타일 */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 999;
+  backdrop-filter: blur(2px);
+}
+
+/* 트랜지션 정의 */
+.slide-enter-active,
+.slide-leave-active {
+  transition: transform 0.3s ease;
+}
+
+.slide-enter-from {
+  transform: translateX(-100%);
+}
+
+.slide-leave-to {
+  transform: translateX(-100%);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* 태블릿 레이아웃 */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .chat-interface-wrapper {
+    grid-template-columns: 250px 1fr;
+  }
+}
+
+.slot-filling-section {
+  overflow: hidden;
+  background-color: var(--color-background);
+}
+
+.panel-toggle-btn {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 100;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: var(--color-background-soft);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2em;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.panel-toggle-btn:hover {
+  background-color: var(--color-background-mute);
+  transform: scale(1.05);
+}
+
+.panel-toggle-btn:focus {
+  outline: 2px solid #4caf50;
+  outline-offset: 2px;
+}
+
+.panel-toggle-btn:active {
+  transform: scale(0.95);
+}
+
+/* 스와이프 인디케이터 */
+.chat-container::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 5px;
+  width: 3px;
+  height: 30px;
+  background: linear-gradient(to bottom, transparent, #4caf50, transparent);
+  border-radius: 2px;
+  transform: translateY(-50%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 10;
+}
+
+@media (max-width: 767px) {
+  .chat-container:not(.full-width)::before {
+    opacity: 0.6;
+  }
+}
+
 .chat-container {
   display: flex;
   flex-direction: column;
@@ -275,12 +518,15 @@ watch(userInputText, (newValue) => {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
 }
 
-/* 데스크톱 화면에서만 최대 너비 제한 */
+.chat-container.full-width {
+  max-width: 100%;
+}
+
+/* 데스크톱에서 ChatInterface가 혼자 사용될 때 */
 @media (min-width: 768px) {
-  .chat-container {
-    max-width: 700px; /* 기존 최대 너비 */
-    max-height: 90vh; /* 화면 높이의 90%를 넘지 않도록 설정 */
-    border-radius: 8px;
+  .chat-container.full-width {
+    max-width: 700px;
+    margin: 0 auto;
   }
 }
 
@@ -294,6 +540,13 @@ watch(userInputText, (newValue) => {
   justify-content: space-between;
   align-items: center;
   border-bottom: 1px solid #ddd; /* Added for separation */
+  position: relative;
+}
+
+@media (max-width: 767px) {
+  .chat-header {
+    padding-left: 60px; /* Space for toggle button */
+  }
 }
 .chat-header h2 {
   margin: 0;

@@ -21,12 +21,20 @@ npm run dev
 
 ## 주요 라이브러리
 
-- **Vue 3**: UI 프레임워크
+- **Vue 3**: UI 프레임워크 (Composition API)
 - **TypeScript**: 타입 안정성
 - **Vite**: 빌드 도구
-- **Pinia**: 상태 관리
+- **Pinia**: 상태 관리 (Chat + Slot Filling)
 - **Web Audio API**: 음성 처리
 - **Vitest**: 테스트
+
+## 새로운 기능
+
+### Slot Filling Panel
+- 실시간 정보 수집 현황 표시
+- 진행률 바 및 애니메이션
+- 모바일 스와이프 제스처 지원
+- 접근성 최적화 (ARIA, 키보드 네비게이션)
 
 ## 테스트
 

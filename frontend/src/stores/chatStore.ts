@@ -1,6 +1,8 @@
 // frontend/src/stores/chatStore.ts
 import { defineStore } from "pinia";
 import { v4 as uuidv4 } from "uuid";
+import { useSlotFillingStore } from "./slotFillingStore";
+import type { SlotFillingUpdate } from "@/types/slotFilling";
 
 interface Message {
   id: string;
@@ -146,6 +148,10 @@ export const useChatStore = defineStore("chat", {
         );
         this.isWebSocketConnected = true;
         this.error = null;
+        
+        // 세션 초기화 시 슬롯 필링 상태도 초기화
+        const slotFillingStore = useSlotFillingStore();
+        slotFillingStore.clearSlotFilling();
       };
 
       this.webSocket.onmessage = (event) => {
@@ -211,6 +217,16 @@ export const useChatStore = defineStore("chat", {
               console.log("Voice mode deactivated by server confirmation.");
               this.isVoiceModeActive = false;
               this.stopRecording();
+              break;
+            case "slot_filling_update":
+              try {
+                const slotFillingStore = useSlotFillingStore();
+                slotFillingStore.updateSlotFilling(data as SlotFillingUpdate);
+                console.log("Slot filling update received:", data);
+              } catch (error) {
+                console.error("Error processing slot filling update:", error);
+                this.error = "정보 수집 상태 업데이트 중 오류가 발생했습니다.";
+              }
               break;
             case "error":
               this.error = data.message;
