@@ -46,6 +46,23 @@
       "description": "구입 예정 주택의 매매 가격"
     }
   ],
+  "field_groups": [
+    {
+      "id": "loan_basic",
+      "name": "대출 기본 정보",
+      "fields": ["loan_purpose_confirmed"]
+    },
+    {
+      "id": "personal_info",
+      "name": "개인 정보",
+      "fields": ["marital_status", "has_home"]
+    },
+    {
+      "id": "financial_info",
+      "name": "재무 정보",
+      "fields": ["annual_income", "target_home_price"]
+    }
+  ],
   "stages": {
     "greeting": {
       "id": "greeting",

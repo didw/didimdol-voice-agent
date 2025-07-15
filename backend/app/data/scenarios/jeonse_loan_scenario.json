@@ -40,6 +40,18 @@
         "description": "세전 연소득 (부부 합산)"
       }
     ],
+    "field_groups": [
+      {
+        "id": "personal_info",
+        "name": "개인 정보",
+        "fields": ["marital_status_jeonse", "housing_situation_jeonse"]
+      },
+      {
+        "id": "financial_info",
+        "name": "재무 정보",
+        "fields": ["annual_income_jeonse", "target_lease_deposit"]
+      }
+    ],
     "stages": {
       "greeting_jeonse": {
         "id": "greeting_jeonse",

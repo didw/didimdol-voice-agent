@@ -6,6 +6,69 @@
   "end_conversation_message": "네, 알겠습니다. 상담을 종료합니다. 이용해주셔서 감사합니다. 언제든지 다시 찾아주세요.",
   "end_scenario_message": "고객님, 입출금통장 신규 상담이 완료되었습니다. 안내된 내용에 따라 추가적인 가입 절차를 진행해주시기 바랍니다. 더 궁금한 점이 없으시면 상담을 종료하겠습니다.",
   "qa_keywords": ["궁금", "질문", "뭐야", "뭔데", "알려줘", "설명해줘", "입출금통장"],
+  "required_info_fields": [
+    {
+      "key": "additional_services_choice",
+      "display_name": "부가서비스 선택",
+      "required": true,
+      "type": "choice",
+      "choices": ["둘 다 신청", "체크카드만", "인터넷뱅킹만", "아니요"],
+      "description": "체크카드 및 인터넷뱅킹 신청 여부"
+    },
+    {
+      "key": "use_lifelong_account",
+      "display_name": "평생계좌 사용",
+      "required": true,
+      "type": "boolean",
+      "description": "평생계좌번호 지정 여부"
+    },
+    {
+      "key": "cc_issuance_method",
+      "display_name": "카드 발급 방법",
+      "required": false,
+      "type": "choice",
+      "choices": ["즉시발급", "택배발송"],
+      "description": "체크카드 발급 방법 선택",
+      "depends_on": {
+        "field": "additional_services_choice",
+        "values": ["둘 다 신청", "체크카드만"]
+      }
+    },
+    {
+      "key": "ib_service_type",
+      "display_name": "인터넷뱅킹 서비스",
+      "required": false,
+      "type": "choice", 
+      "choices": ["조회", "이체"],
+      "description": "인터넷뱅킹 서비스 종류 선택",
+      "depends_on": {
+        "field": "additional_services_choice",
+        "values": ["둘 다 신청", "인터넷뱅킹만"]
+      }
+    }
+  ],
+  "field_groups": [
+    {
+      "id": "basic_account",
+      "name": "계좌 기본 정보",
+      "fields": ["use_lifelong_account"]
+    },
+    {
+      "id": "additional_services",
+      "name": "부가 서비스",
+      "fields": ["additional_services_choice"]
+    },
+    {
+      "id": "card_services",
+      "name": "체크카드 서비스",
+      "fields": ["cc_issuance_method"]
+    },
+    {
+      "id": "internet_banking",
+      "name": "인터넷뱅킹 서비스",
+      "fields": ["ib_service_type"]
+    }
+  ],
   "stages": {
     "greeting_deposit": {
       "id": "greeting_deposit",

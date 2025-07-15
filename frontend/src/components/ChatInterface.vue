@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useChatStore } from '@/stores/chatStore' // 경로 확인
+import { useSlotFillingStore } from '@/stores/slotFillingStore'
 import { storeToRefs } from 'pinia' // storeToRefs can be useful if not using computed for everything
 import SlotFillingPanel from './SlotFillingPanel.vue'
 
@@ -16,6 +17,7 @@ const props = withDefaults(defineProps<Props>(), {
 const chatInputRef = ref<HTMLInputElement | null>(null);
 const userInput = ref('');
 const chatStore = useChatStore()
+const slotFillingStore = useSlotFillingStore()
 
 // Using computed properties for most store state as per the new script
 
@@ -157,6 +159,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   chatStore.disconnectWebSocket()
+  slotFillingStore.cleanup() // 메모리 누수 방지
 })
 
 const handleSendTextMessage = async () => {

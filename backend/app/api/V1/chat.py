@@ -19,7 +19,22 @@ INFO_COLLECTION_STAGES = {
     "process_collected_info",
     "ask_missing_info_group1", 
     "ask_missing_info_group2", 
-    "ask_missing_info_group3"
+    "ask_missing_info_group3",
+    # 입출금통장 시나리오 모든 스테이지들
+    "greeting_deposit",
+    "clarify_services", 
+    "ask_lifelong_account",
+    "process_service_choices",
+    "ask_cc_issuance_method",
+    "process_cc_collected_info",
+    "ask_missing_cc_info",
+    "check_next_service_or_summary_after_cc",
+    "ask_ib_notification",
+    "process_ib_collected_info",
+    "ask_missing_ib_info",
+    "check_next_service_or_summary_after_ib",
+    "final_summary_deposit",
+    "closing_deposit_confirmed"
 } 
 
 
@@ -101,7 +116,8 @@ def should_send_slot_filling_update(
         info_changed or 
         scenario_changed or 
         product_type_changed or
-        (scenario_active and is_info_collection_stage)
+        # 시나리오가 활성화된 상태라면 항상 업데이트 (정보 수집 단계가 아니어도)
+        scenario_active
     )
 
 
@@ -139,8 +155,11 @@ def _optimize_fields_for_size(fields: List[Dict], max_size: int) -> List[Dict]:
         if "description" in optimized_field and len(optimized_field["description"]) > MAX_DESCRIPTION_LENGTH:
             optimized_field["description"] = optimized_field["description"][:MAX_DESCRIPTION_LENGTH] + "..."
         
-        # 불필요한 빈 값들 제거
-        optimized_field = {k: v for k, v in optimized_field.items() if v is not None and v != ""}
+        # 불필요한 빈 값들 제거 (빈 리스트와 0도 제외)
+        optimized_field = {
+            k: v for k, v in optimized_field.items() 
+            if v is not None and v != "" and v != [] and v != {}
+        }
         
         optimized_fields.append(optimized_field)
     

@@ -1,9 +1,14 @@
 import { defineStore } from 'pinia'
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import type { SlotFillingState, SlotFillingUpdate, RequiredField, FieldGroup } from '@/types/slotFilling'
 
 // 디버그 모드 활성화 여부
 const DEBUG_MODE = import.meta.env.DEV
+
+// 성능 최적화 상수
+const UPDATE_DEBOUNCE_MS = 100 // 업데이트 디바운싱
+const MAX_FIELD_CACHE_SIZE = 500 // 필드 캐시 최대 크기 (줄임)
+const CACHE_CLEANUP_INTERVAL = 5 * 60 * 1000 // 5분마다 캐시 정리
 
 export const useSlotFillingStore = defineStore('slotFilling', () => {
   // State
@@ -13,6 +18,25 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
   const completionStatus = ref<Record<string, boolean>>({})
   const completionRate = ref<number>(0)
   const fieldGroups = ref<FieldGroup[]>([])
+  
+  // 성능 최적화 관련 상태
+  const lastUpdateHash = ref<string>('')
+  const updateDebounceTimer = ref<number | null>(null)
+  const fieldVisibilityCache = ref<Map<string, boolean>>(new Map())
+  const cacheCleanupInterval = ref<number | null>(null)
+  
+  // 메모리 누수 방지를 위한 정리 함수
+  const cleanup = () => {
+    if (updateDebounceTimer.value) {
+      clearTimeout(updateDebounceTimer.value)
+      updateDebounceTimer.value = null
+    }
+    if (cacheCleanupInterval.value) {
+      clearInterval(cacheCleanupInterval.value)
+      cacheCleanupInterval.value = null
+    }
+    fieldVisibilityCache.value.clear()
+  }
 
   // Getters
   const getState = computed<SlotFillingState>(() => ({
@@ -43,20 +67,47 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
     }))
   })
 
-  // 필드가 표시되어야 하는지 확인 (의존성 체크)
+  // 필드가 표시되어야 하는지 확인 (의존성 체크 + 캐시)
   const isFieldVisible = (field: RequiredField): boolean => {
     if (!field.dependsOn) return true
 
-    const { field: dependsOnField, value: dependsOnValue } = field.dependsOn
-    const currentValue = collectedInfo.value[dependsOnField]
+    try {
+      const { field: dependsOnField, value: dependsOnValue } = field.dependsOn
+      const currentValue = collectedInfo.value[dependsOnField]
 
-    // 배열인 경우 포함 여부 확인
-    if (Array.isArray(dependsOnValue)) {
-      return dependsOnValue.includes(currentValue)
+      // 간단한 캐시 키 생성 (JSON.stringify 대신 문자열 조합)
+      const cacheKey = `${field.key}:${dependsOnField}:${currentValue}:${Array.isArray(dependsOnValue) ? dependsOnValue.join(',') : dependsOnValue}`
+      
+      // 캐시에서 확인
+      if (fieldVisibilityCache.value.has(cacheKey)) {
+        return fieldVisibilityCache.value.get(cacheKey)!
+      }
+
+      let isVisible: boolean
+      
+      // 배열인 경우 포함 여부 확인
+      if (Array.isArray(dependsOnValue)) {
+        isVisible = dependsOnValue.includes(currentValue)
+      } else {
+        // 단일 값인 경우 일치 여부 확인
+        isVisible = currentValue === dependsOnValue
+      }
+      
+      // 캐시에 저장 (LRU 방식으로 개선)
+      if (fieldVisibilityCache.value.size >= MAX_FIELD_CACHE_SIZE) {
+        // 가장 오래된 항목 제거
+        const firstKey = fieldVisibilityCache.value.keys().next().value
+        if (firstKey) {
+          fieldVisibilityCache.value.delete(firstKey)
+        }
+      }
+      fieldVisibilityCache.value.set(cacheKey, isVisible)
+      
+      return isVisible
+    } catch (error) {
+      console.error('[SlotFilling] Error in isFieldVisible:', error)
+      return true // 에러 시 기본적으로 표시
     }
-    
-    // 단일 값인 경우 일치 여부 확인
-    return currentValue === dependsOnValue
   }
 
   // 표시 가능한 필드만 필터링
@@ -76,42 +127,91 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
     return Math.round((completed / visible.length) * 100)
   })
 
+  // 메시지 해시 계산 (중복 업데이트 방지용)
+  const calculateUpdateHash = (message: SlotFillingUpdate): string => {
+    const hashData = {
+      productType: message.productType,
+      collectedInfo: message.collectedInfo,
+      completionStatus: message.completionStatus,
+      completionRate: message.completionRate
+    }
+    return JSON.stringify(hashData)
+  }
+
   // Actions
   const updateSlotFilling = (message: SlotFillingUpdate) => {
-    // Backend에서 이미 camelCase로 보내주므로 직접 할당
-    productType.value = message.productType
-    requiredFields.value = message.requiredFields
-    collectedInfo.value = { ...message.collectedInfo }
-    completionStatus.value = { ...message.completionStatus }
-    completionRate.value = message.completionRate
-    fieldGroups.value = message.fieldGroups ? [...message.fieldGroups] : []
-    
-    if (DEBUG_MODE) {
-      console.log('[SlotFilling] State updated:', {
-        productType: productType.value,
-        fieldsCount: requiredFields.value.length,
-        collectedCount: Object.keys(collectedInfo.value).length,
-        completionRate: completionRate.value
-      })
+    // 중복 업데이트 방지
+    const messageHash = calculateUpdateHash(message)
+    if (lastUpdateHash.value === messageHash) {
+      if (DEBUG_MODE) {
+        console.log('[SlotFilling] Skipping duplicate update')
+      }
+      return
     }
-    
-    // localStorage에 상태 저장 (선택사항)
-    saveToLocalStorage()
+    lastUpdateHash.value = messageHash
+
+    // 디바운싱 처리
+    if (updateDebounceTimer.value) {
+      clearTimeout(updateDebounceTimer.value)
+    }
+
+    updateDebounceTimer.value = setTimeout(() => {
+      // 캐시 클리어 (의존성이 변경될 수 있음)
+      fieldVisibilityCache.value.clear()
+      
+      // Backend에서 이미 camelCase로 보내주므로 직접 할당
+      productType.value = message.productType
+      requiredFields.value = message.requiredFields
+      collectedInfo.value = { ...message.collectedInfo }
+      completionStatus.value = { ...message.completionStatus }
+      completionRate.value = message.completionRate
+      fieldGroups.value = message.fieldGroups ? [...message.fieldGroups] : []
+      
+      if (DEBUG_MODE) {
+        console.log('[SlotFilling] State updated:', {
+          productType: productType.value,
+          fieldsCount: requiredFields.value.length,
+          collectedCount: Object.keys(collectedInfo.value).length,
+          completionRate: completionRate.value
+        })
+      }
+      
+      // localStorage에 상태 저장 (선택사항)
+      nextTick(() => {
+        saveToLocalStorage()
+      })
+      
+      updateDebounceTimer.value = null
+    }, UPDATE_DEBOUNCE_MS)
   }
 
   const clearSlotFilling = () => {
-    productType.value = null
-    requiredFields.value = []
-    collectedInfo.value = {}
-    completionStatus.value = {}
-    completionRate.value = 0
-    fieldGroups.value = []
-    
-    // localStorage 클리어
-    clearLocalStorage()
-    
-    if (DEBUG_MODE) {
-      console.log('[SlotFilling] State cleared')
+    try {
+      // 디바운스 타이머 클리어
+      if (updateDebounceTimer.value) {
+        clearTimeout(updateDebounceTimer.value)
+        updateDebounceTimer.value = null
+      }
+      
+      // 캐시 클리어
+      fieldVisibilityCache.value.clear()
+      lastUpdateHash.value = ''
+      
+      productType.value = null
+      requiredFields.value = []
+      collectedInfo.value = {}
+      completionStatus.value = {}
+      completionRate.value = 0
+      fieldGroups.value = []
+      
+      // localStorage 클리어
+      clearLocalStorage()
+      
+      if (DEBUG_MODE) {
+        console.log('[SlotFilling] State cleared')
+      }
+    } catch (error) {
+      console.error('[SlotFilling] Error clearing state:', error)
     }
   }
 
@@ -150,9 +250,22 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
         completionRate: completionRate.value,
         fieldGroups: fieldGroups.value
       }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+      
+      // 크기 제한 (5MB)
+      const stateStr = JSON.stringify(state)
+      if (stateStr.length > 5 * 1024 * 1024) {
+        console.warn('[SlotFilling] State too large for localStorage, skipping save')
+        return
+      }
+      
+      localStorage.setItem(STORAGE_KEY, stateStr)
     } catch (error) {
-      console.error('[SlotFilling] Failed to save to localStorage:', error)
+      if (error instanceof DOMException && error.code === 22) {
+        console.warn('[SlotFilling] localStorage quota exceeded, clearing old data')
+        clearLocalStorage()
+      } else {
+        console.error('[SlotFilling] Failed to save to localStorage:', error)
+      }
     }
   }
   
@@ -188,14 +301,26 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
   // 초기화 시 localStorage에서 로드 (선택사항)
   // loadFromLocalStorage()
   
+  // 캐시 정리 간격 설정
+  cacheCleanupInterval.value = setInterval(() => {
+    if (fieldVisibilityCache.value.size > MAX_FIELD_CACHE_SIZE / 2) {
+      if (DEBUG_MODE) {
+        console.log('[SlotFilling] Cleaning up cache:', fieldVisibilityCache.value.size)
+      }
+      fieldVisibilityCache.value.clear()
+    }
+  }, CACHE_CLEANUP_INTERVAL)
+  
   // 특정 필드 변경 감지 예시
   if (DEBUG_MODE) {
     watch(collectedInfo, (newInfo, oldInfo) => {
-      const changedKeys = Object.keys(newInfo).filter(
-        key => newInfo[key] !== oldInfo[key]
-      )
-      if (changedKeys.length > 0) {
-        console.log('[SlotFilling] Fields changed:', changedKeys)
+      if (oldInfo) {
+        const changedKeys = Object.keys(newInfo).filter(
+          key => newInfo[key] !== oldInfo[key]
+        )
+        if (changedKeys.length > 0) {
+          console.log('[SlotFilling] Fields changed:', changedKeys)
+        }
       }
     }, { deep: true })
   }
@@ -225,6 +350,9 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
     // localStorage 관련 (선택적 사용)
     saveToLocalStorage,
     loadFromLocalStorage,
-    clearLocalStorage
+    clearLocalStorage,
+    
+    // 정리 함수
+    cleanup
   }
 })
