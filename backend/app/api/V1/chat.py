@@ -105,8 +105,50 @@ def should_send_slot_filling_update(
     )
 
 
-async def send_slot_filling_update(websocket: WebSocket, state: AgentState):
-    """Slot filling 상태 업데이트를 WebSocket으로 전송"""
+# 성능 최적화를 위한 메시지 크기 제한 및 캐시
+MAX_MESSAGE_SIZE = 512 * 1024  # 512KB
+MAX_DESCRIPTION_LENGTH = 200  # 설명 최대 길이
+_last_sent_message_hash = {}  # 세션별 마지막 전송 메시지 해시
+
+
+def _calculate_message_hash(message: dict) -> str:
+    """메시지 해시 계산 (중복 전송 방지용)"""
+    import hashlib
+    import json
+    
+    # 메시지에서 변경되는 부분만 해시 계산에 포함
+    hash_data = {
+        "productType": message.get("productType"),
+        "collectedInfo": message.get("collectedInfo"),
+        "completionStatus": message.get("completionStatus"),
+        "completionRate": message.get("completionRate")
+    }
+    
+    message_str = json.dumps(hash_data, sort_keys=True, ensure_ascii=False)
+    return hashlib.md5(message_str.encode()).hexdigest()
+
+
+def _optimize_fields_for_size(fields: List[Dict], max_size: int) -> List[Dict]:
+    """필드 데이터 크기 최적화"""
+    optimized_fields = []
+    
+    for field in fields:
+        optimized_field = field.copy()
+        
+        # 설명이 너무 긴 경우 잘라내기
+        if "description" in optimized_field and len(optimized_field["description"]) > MAX_DESCRIPTION_LENGTH:
+            optimized_field["description"] = optimized_field["description"][:MAX_DESCRIPTION_LENGTH] + "..."
+        
+        # 불필요한 빈 값들 제거
+        optimized_field = {k: v for k, v in optimized_field.items() if v is not None and v != ""}
+        
+        optimized_fields.append(optimized_field)
+    
+    return optimized_fields
+
+
+async def send_slot_filling_update(websocket: WebSocket, state: AgentState, session_id: str = None):
+    """Slot filling 상태 업데이트를 WebSocket으로 전송 (성능 최적화)"""
     try:
         scenario_data = state.get("active_scenario_data")
         if not scenario_data:
@@ -134,9 +176,12 @@ async def send_slot_filling_update(websocket: WebSocket, state: AgentState):
             if field.get("type") == "number" and "unit" in field:
                 frontend_field["unit"] = field["unit"]
                 
-            # 설명 추가
+            # 설명 추가 (크기 최적화)
             if "description" in field:
-                frontend_field["description"] = field["description"]
+                description = field["description"]
+                if len(description) > MAX_DESCRIPTION_LENGTH:
+                    description = description[:MAX_DESCRIPTION_LENGTH] + "..."
+                frontend_field["description"] = description
                 
             # 의존성 정보 추가
             if "depends_on" in field:
@@ -162,7 +207,7 @@ async def send_slot_filling_update(websocket: WebSocket, state: AgentState):
         update_message = {
             "type": "slot_filling_update",
             "productType": state.get("current_product_type"),
-            "requiredFields": frontend_fields,  # 변환된 필드 사용
+            "requiredFields": frontend_fields,
             "collectedInfo": collected_info,
             "completionStatus": completion_status,
             "completionRate": completion_rate
@@ -172,8 +217,34 @@ async def send_slot_filling_update(websocket: WebSocket, state: AgentState):
         if "field_groups" in scenario_data:
             update_message["fieldGroups"] = scenario_data["field_groups"]
         
+        # 중복 메시지 전송 방지
+        message_hash = _calculate_message_hash(update_message)
+        if session_id:
+            last_hash = _last_sent_message_hash.get(session_id)
+            if last_hash == message_hash:
+                print(f"[send_slot_filling_update] Skipping duplicate message for session {session_id}")
+                return
+            _last_sent_message_hash[session_id] = message_hash
+        
+        # 메시지 크기 확인 및 최적화
+        import json
+        message_size = len(json.dumps(update_message, ensure_ascii=False))
+        
+        if message_size > MAX_MESSAGE_SIZE:
+            print(f"[send_slot_filling_update] Message too large ({message_size} bytes), optimizing...")
+            
+            # 필드 최적화
+            update_message["requiredFields"] = _optimize_fields_for_size(
+                update_message["requiredFields"], 
+                MAX_MESSAGE_SIZE // 2
+            )
+            
+            # 재계산
+            message_size = len(json.dumps(update_message, ensure_ascii=False))
+            print(f"[send_slot_filling_update] Optimized message size: {message_size} bytes")
+        
         await websocket.send_json(update_message)
-        print(f"[send_slot_filling_update] Sent update - Product: {state.get('current_product_type')}, Rate: {completion_rate:.1f}%, Fields: {len(required_fields)}")
+        print(f"[send_slot_filling_update] Sent update - Product: {state.get('current_product_type')}, Rate: {completion_rate:.1f}%, Fields: {len(required_fields)}, Size: {message_size} bytes")
         
     except WebSocketException as e:
         print(f"[send_slot_filling_update] WebSocket error: {e}")
@@ -222,7 +293,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         
         # 초기 slot filling 상태 전송 (빈 상태)
         try:
-            await send_slot_filling_update(websocket, SESSION_STATES[session_id])
+            await send_slot_filling_update(websocket, SESSION_STATES[session_id], session_id)
             print(f"[{session_id}] Initial slot filling state sent")
         except Exception as e:
             print(f"[{session_id}] Failed to send initial slot filling state: {e}")
@@ -349,7 +420,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     "marital_status": "미혼"
                 }
                 
-                await send_slot_filling_update(websocket, test_state)
+                await send_slot_filling_update(websocket, test_state, session_id)
                 await manager.send_json_to_client(session_id, {
                     "type": "info",
                     "message": "테스트 slot filling 업데이트를 전송했습니다."
@@ -467,7 +538,7 @@ async def process_input_through_agent(session_id: str, user_text: str, tts_servi
                             scenario_active, is_info_collection_stage
                         ):
                             print(f"[{session_id}] Sending slot filling update - Info: {info_changed}, Scenario: {scenario_changed}, Product: {product_type_changed}, Stage: {current_scenario_stage}")
-                            await send_slot_filling_update(websocket, current_session_state)
+                            await send_slot_filling_update(websocket, current_session_state, session_id)
                 elif agent_output_chunk.get("type") == "error": 
                     await manager.send_json_to_client(session_id, agent_output_chunk)
                     await manager.send_json_to_client(session_id, {"type": "llm_response_end", "full_text": ""}) 
