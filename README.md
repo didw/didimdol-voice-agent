@@ -35,6 +35,9 @@
 - 입출금통장 상담 시나리오: `backend/app/data/scenarios/deposit_account_scenario.json`
 - 디딤돌 대출 QA 지식베이스: `backend/app/data/kb/didimdol.md`
 - 서비스 설명 정보: `backend/app/config/service_descriptions.yaml`
+- 개체 추출 에이전트: `backend/app/agents/entity_agent.py`
+
+**참고**: 시나리오 JSON 파일의 각 필드에 `extraction_prompt` 필드가 추가되어 LLM 기반 개체 추출을 지원합니다.
 
 ## 🧪 테스팅
 

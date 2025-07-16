@@ -221,12 +221,41 @@ export const useChatStore = defineStore("chat", {
             case "slot_filling_update":
               try {
                 const slotFillingStore = useSlotFillingStore();
+                
+                // DEBUG: 수신한 데이터 상세 로그
+                console.log("===== SLOT FILLING UPDATE RECEIVED =====");
+                console.log("Raw data:", data);
+                console.log("Product Type:", data.productType);
+                console.log("Required Fields Count:", data.requiredFields?.length || 0);
+                console.log("Collected Info Count:", Object.keys(data.collectedInfo || {}).length);
+                console.log("Completion Rate:", data.completionRate);
+                console.log("Field Groups Count:", data.fieldGroups?.length || 0);
+                
+                // 필드별 상세 정보
+                if (data.requiredFields) {
+                  data.requiredFields.forEach((field: any) => {
+                    const value = data.collectedInfo?.[field.key] || 'NOT_SET';
+                    const completed = data.completionStatus?.[field.key] || false;
+                    console.log(`Field '${field.key}': ${value} (completed: ${completed})`);
+                  });
+                }
+                
+                console.log("Full received data:", JSON.stringify(data, null, 2));
+                console.log("===== END SLOT FILLING DEBUG =====");
+                
                 slotFillingStore.updateSlotFilling(data as SlotFillingUpdate);
-                console.log("Slot filling update received:", data);
+                console.log("Slot filling update processed successfully");
               } catch (error) {
                 console.error("Error processing slot filling update:", error);
                 this.error = "정보 수집 상태 업데이트 중 오류가 발생했습니다.";
               }
+              break;
+            case "debug_slot_filling":
+              console.log("===== DEBUG SLOT FILLING MESSAGE =====");
+              console.log("Debug message received:", data);
+              console.log("Data hash:", data.data_hash);
+              console.log("Summary:", data.summary);
+              console.log("===== END DEBUG MESSAGE =====");
               break;
             case "error":
               this.error = data.message;

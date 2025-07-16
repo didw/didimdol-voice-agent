@@ -4,6 +4,7 @@ import { useChatStore } from '@/stores/chatStore' // 경로 확인
 import { useSlotFillingStore } from '@/stores/slotFillingStore'
 import { storeToRefs } from 'pinia' // storeToRefs can be useful if not using computed for everything
 import SlotFillingPanel from './SlotFillingPanel.vue'
+import SlotFillingDebug from './SlotFillingDebug.vue'
 
 // Props for layout control
 interface Props {
@@ -754,3 +755,6 @@ watch(userInputText, (newValue) => {
   }
 }
 </style>
+
+<!-- Debug Panel -->
+<SlotFillingDebug />

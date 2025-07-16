@@ -140,12 +140,23 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
 
   // Actions
   const updateSlotFilling = (message: SlotFillingUpdate) => {
+    // DEBUG: 업데이트 시작 로그
+    console.log('[SlotFilling] ===== UPDATE SLOT FILLING START =====')
+    console.log('[SlotFilling] Received message:', message)
+    console.log('[SlotFilling] Message type:', message.type)
+    console.log('[SlotFilling] Product type:', message.productType)
+    console.log('[SlotFilling] Required fields:', message.requiredFields)
+    console.log('[SlotFilling] Collected info:', message.collectedInfo)
+    console.log('[SlotFilling] Completion status:', message.completionStatus)
+    console.log('[SlotFilling] Field groups:', message.fieldGroups)
+    
     // 중복 업데이트 방지
     const messageHash = calculateUpdateHash(message)
+    console.log('[SlotFilling] Message hash:', messageHash)
+    console.log('[SlotFilling] Last update hash:', lastUpdateHash.value)
+    
     if (lastUpdateHash.value === messageHash) {
-      if (DEBUG_MODE) {
-        console.log('[SlotFilling] Skipping duplicate update')
-      }
+      console.log('[SlotFilling] Skipping duplicate update')
       return
     }
     lastUpdateHash.value = messageHash
@@ -153,28 +164,46 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
     // 디바운싱 처리
     if (updateDebounceTimer.value) {
       clearTimeout(updateDebounceTimer.value)
+      console.log('[SlotFilling] Cleared previous debounce timer')
     }
 
     updateDebounceTimer.value = setTimeout(() => {
+      console.log('[SlotFilling] Executing debounced update')
+      
+      // 이전 상태 로그
+      console.log('[SlotFilling] Previous state:', {
+        productType: productType.value,
+        fieldsCount: requiredFields.value.length,
+        collectedCount: Object.keys(collectedInfo.value).length,
+        completionRate: completionRate.value
+      })
+      
       // 캐시 클리어 (의존성이 변경될 수 있음)
       fieldVisibilityCache.value.clear()
       
       // Backend에서 이미 camelCase로 보내주므로 직접 할당
       productType.value = message.productType
-      requiredFields.value = message.requiredFields
+      requiredFields.value = message.requiredFields || []
       collectedInfo.value = { ...message.collectedInfo }
       completionStatus.value = { ...message.completionStatus }
       completionRate.value = message.completionRate
       fieldGroups.value = message.fieldGroups ? [...message.fieldGroups] : []
       
-      if (DEBUG_MODE) {
-        console.log('[SlotFilling] State updated:', {
-          productType: productType.value,
-          fieldsCount: requiredFields.value.length,
-          collectedCount: Object.keys(collectedInfo.value).length,
-          completionRate: completionRate.value
-        })
-      }
+      // 업데이트 후 상태 로그
+      console.log('[SlotFilling] Updated state:', {
+        productType: productType.value,
+        fieldsCount: requiredFields.value.length,
+        collectedCount: Object.keys(collectedInfo.value).length,
+        completionRate: completionRate.value,
+        fieldGroups: fieldGroups.value
+      })
+      
+      // 필드별 상세 정보
+      requiredFields.value.forEach(field => {
+        const value = collectedInfo.value[field.key]
+        const completed = completionStatus.value[field.key]
+        console.log(`[SlotFilling] Field '${field.key}': ${value} (completed: ${completed})`)
+      })
       
       // localStorage에 상태 저장 (선택사항)
       nextTick(() => {
@@ -182,6 +211,7 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
       })
       
       updateDebounceTimer.value = null
+      console.log('[SlotFilling] ===== UPDATE SLOT FILLING END =====')
     }, UPDATE_DEBOUNCE_MS)
   }
 
