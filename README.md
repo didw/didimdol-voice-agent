@@ -30,8 +30,10 @@
 
 ## 데이터 파일
 
-- 대출 상담 시나리오: `backend/app/data/loan_scenario.json`
-- 디딤돌 대출 QA 지식베이스: `backend/app/data/didimdol.md`
+- 디딤돌 대출 상담 시나리오: `backend/app/data/scenarios/didimdol_loan_scenario.json`
+- 전세 대출 상담 시나리오: `backend/app/data/scenarios/jeonse_loan_scenario.json`
+- 입출금통장 상담 시나리오: `backend/app/data/scenarios/deposit_account_scenario.json`
+- 디딤돌 대출 QA 지식베이스: `backend/app/data/kb/didimdol.md`
 
 ## 🧪 테스팅
 

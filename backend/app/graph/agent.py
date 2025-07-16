@@ -714,22 +714,45 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
 
         print(f"Updated Info: {collected_info}")
     
-    # 먼저 LLM을 통해 다음 스테이지를 결정
-    prompt_template = ALL_PROMPTS.get('main_agent', {}).get('determine_next_scenario_stage', '')
-    llm_prompt = prompt_template.format(
-        active_scenario_name=active_scenario_data.get("scenario_name"),
-        current_stage_id=str(current_stage_id),
-        current_stage_prompt=current_stage_info.get("prompt", "No prompt"),
-        user_input=state.get("stt_result", ""),
-        scenario_agent_intent=scenario_output.get("intent", "N/A"),
-        scenario_agent_entities=str(scenario_output.get("entities", {})),
-        collected_product_info=str(collected_info),
-        formatted_transitions=format_transitions_for_prompt(current_stage_info.get("transitions", []), current_stage_info.get("prompt", "")),
-        default_next_stage_id=current_stage_info.get("default_next_stage_id", "None")
-    )
-    response = await json_llm.ainvoke([HumanMessage(content=llm_prompt)])
-    decision_data = next_stage_decision_parser.parse(response.content)
-    next_stage_id = decision_data.chosen_next_stage_id
+    # 스테이지 전환 로직 결정
+    transitions = current_stage_info.get("transitions", [])
+    default_next = current_stage_info.get("default_next_stage_id", "None")
+    
+    # Case 1: 분기가 없는 경우 (transitions가 없거나 1개)
+    if len(transitions) <= 1:
+        # 필요한 정보가 수집되었는지 확인
+        expected_info_key = current_stage_info.get("expected_info_key")
+        if expected_info_key and expected_info_key not in collected_info:
+            # 필요한 정보가 아직 수집되지 않았으면 현재 스테이지 유지
+            next_stage_id = current_stage_id
+            print(f"--- 자동 진행 차단: '{expected_info_key}' 정보 미수집 ---")
+        elif len(transitions) == 1:
+            # 단일 전환 경로가 있으면 자동 진행
+            next_stage_id = transitions[0].get("next_stage_id", default_next)
+            print(f"--- 자동 진행: 단일 경로 '{current_stage_id}' → '{next_stage_id}' ---")
+        else:
+            # transitions이 없으면 default로 진행
+            next_stage_id = default_next
+            print(f"--- 자동 진행: 기본 경로 '{current_stage_id}' → '{next_stage_id}' ---")
+    
+    # Case 2: 분기가 있는 경우 (transitions가 2개 이상) - LLM 판단
+    else:
+        print(f"--- LLM 판단 필요: {len(transitions)}개 분기 존재 ---")
+        prompt_template = ALL_PROMPTS.get('main_agent', {}).get('determine_next_scenario_stage', '')
+        llm_prompt = prompt_template.format(
+            active_scenario_name=active_scenario_data.get("scenario_name"),
+            current_stage_id=str(current_stage_id),
+            current_stage_prompt=current_stage_info.get("prompt", "No prompt"),
+            user_input=state.get("stt_result", ""),
+            scenario_agent_intent=scenario_output.get("intent", "N/A") if scenario_output else "N/A",
+            scenario_agent_entities=str(scenario_output.get("entities", {}) if scenario_output else {}),
+            collected_product_info=str(collected_info),
+            formatted_transitions=format_transitions_for_prompt(transitions, current_stage_info.get("prompt", "")),
+            default_next_stage_id=default_next
+        )
+        response = await json_llm.ainvoke([HumanMessage(content=llm_prompt)])
+        decision_data = next_stage_decision_parser.parse(response.content)
+        next_stage_id = decision_data.chosen_next_stage_id
 
     # --- 로직 전용 스테이지 처리 루프 ---
     while True:

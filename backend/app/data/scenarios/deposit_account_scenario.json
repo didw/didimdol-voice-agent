@@ -1,318 +1,401 @@
 {
   "scenario_name": "신한은행 입출금통장 신규 상담",
-  "initial_stage_id": "greeting_deposit",
+  "initial_stage_id": "greeting",
   "system_prompt": "당신은 신한은행의 친절하고 전문적인 입출금통장 신규 상담원입니다. 사용자의 질문에 명확하고 이해하기 쉽게 답변하며, 필요한 정보를 단계별로 안내해주세요.",
   "fallback_message": "죄송합니다, 고객님의 말씀을 정확히 이해하지 못했습니다. 다시 한번 말씀해주시겠어요?",
   "end_conversation_message": "네, 알겠습니다. 상담을 종료합니다. 이용해주셔서 감사합니다. 언제든지 다시 찾아주세요.",
-  "end_scenario_message": "고객님, 입출금통장 신규 상담이 완료되었습니다. 안내된 내용에 따라 추가적인 가입 절차를 진행해주시기 바랍니다. 더 궁금한 점이 없으시면 상담을 종료하겠습니다.",
-  "qa_keywords": ["궁금", "질문", "뭐야", "뭔데", "알려줘", "설명해줘", "입출금통장"],
+  "end_scenario_message": "고객님, 입출금통장 신규 상담이 완료되었습니다. 안내된 내용에 따라 추가적인 가입 절차를 진행해주시기 바랍니다.",
   "required_info_fields": [
     {
-      "key": "additional_services_choice",
-      "display_name": "부가서비스 선택",
+      "key": "customer_name",
+      "display_name": "고객명",
       "required": true,
-      "type": "choice",
-      "choices": ["둘 다 신청", "체크카드만", "인터넷뱅킹만", "아니요"],
-      "description": "체크카드 및 인터넷뱅킹 신청 여부"
+      "type": "text",
+      "default": "홍길동",
+      "description": "고객 이름 (현재는 랜덤 생성)"
+    },
+    {
+      "key": "customer_phone",
+      "display_name": "연락처",
+      "required": true,
+      "type": "text",
+      "default": "010-1234-5678",
+      "description": "고객 연락처 (현재는 랜덤 생성)"
+    },
+    {
+      "key": "confirm_personal_info",
+      "display_name": "개인정보 확인",
+      "required": true,
+      "type": "boolean",
+      "description": "개인정보 확인 여부"
     },
     {
       "key": "use_lifelong_account",
-      "display_name": "평생계좌 사용",
+      "display_name": "평생계좌 등록",
       "required": true,
       "type": "boolean",
-      "description": "평생계좌번호 지정 여부"
+      "description": "평생계좌번호 등록 여부"
     },
     {
-      "key": "cc_issuance_method",
-      "display_name": "카드 발급 방법",
+      "key": "use_internet_banking",
+      "display_name": "인터넷뱅킹 가입",
+      "required": true,
+      "type": "boolean",
+      "description": "인터넷뱅킹 가입 여부"
+    },
+    {
+      "key": "security_medium",
+      "display_name": "보안매체",
       "required": false,
       "type": "choice",
-      "choices": ["즉시발급", "택배발송"],
-      "description": "체크카드 발급 방법 선택",
-      "depends_on": {
-        "field": "additional_services_choice",
-        "values": ["둘 다 신청", "체크카드만"]
-      }
+      "choices": ["보안카드", "신한 OTP", "타행 OTP"],
+      "default": "보안카드",
+      "description": "인터넷뱅킹 보안매체 선택"
     },
     {
-      "key": "ib_service_type",
-      "display_name": "인터넷뱅킹 서비스",
+      "key": "other_otp_manufacturer",
+      "display_name": "타행 OTP 제조사",
       "required": false,
-      "type": "choice", 
-      "choices": ["조회", "이체"],
-      "description": "인터넷뱅킹 서비스 종류 선택",
-      "depends_on": {
-        "field": "additional_services_choice",
-        "values": ["둘 다 신청", "인터넷뱅킹만"]
-      }
+      "type": "text",
+      "description": "타행 OTP 제조사"
+    },
+    {
+      "key": "other_otp_serial",
+      "display_name": "타행 OTP 일련번호",
+      "required": false,
+      "type": "text",
+      "description": "타행 OTP 일련번호"
+    },
+    {
+      "key": "transfer_limit_per_time",
+      "display_name": "1회 이체한도",
+      "required": false,
+      "type": "number",
+      "unit": "만원",
+      "default": 500,
+      "description": "1회 이체한도 (최대 5000만원)"
+    },
+    {
+      "key": "transfer_limit_per_day",
+      "display_name": "1일 이체한도",
+      "required": false,
+      "type": "number",
+      "unit": "만원",
+      "default": 1000,
+      "description": "1일 이체한도 (최대 1억원)"
+    },
+    {
+      "key": "important_transaction_alert",
+      "display_name": "중요거래통보",
+      "required": false,
+      "type": "boolean",
+      "default": true,
+      "description": "중요거래통보 신청 여부"
+    },
+    {
+      "key": "withdrawal_alert",
+      "display_name": "출금내역통보",
+      "required": false,
+      "type": "boolean",
+      "default": true,
+      "description": "출금내역통보 신청 여부"
+    },
+    {
+      "key": "overseas_ip_restriction",
+      "display_name": "해외IP이체 제한",
+      "required": false,
+      "type": "boolean",
+      "default": true,
+      "description": "해외IP이체 제한 신청 여부"
+    },
+    {
+      "key": "additional_withdrawal_account",
+      "display_name": "출금계좌 추가",
+      "required": false,
+      "type": "boolean",
+      "default": false,
+      "description": "출금계좌 추가 여부"
+    },
+    {
+      "key": "use_check_card",
+      "display_name": "체크카드 신청",
+      "required": true,
+      "type": "boolean",
+      "description": "체크카드 신청 여부"
+    },
+    {
+      "key": "card_receive_method",
+      "display_name": "카드 수령 방법",
+      "required": true,
+      "type": "choice",
+      "choices": ["즉시발급", "배송"],
+      "default": "즉시발급",
+      "description": "카드 수령 방법"
+    },
+    {
+      "key": "card_delivery_location",
+      "display_name": "배송 장소",
+      "required": false,
+      "type": "choice",
+      "choices": ["자택", "직장", "지점"],
+      "description": "카드 배송 장소"
+    },
+    {
+      "key": "card_type",
+      "display_name": "카드 종류",
+      "required": false,
+      "type": "choice",
+      "choices": ["S-line", "딥드림(Deep Dream)"],
+      "default": "S-line",
+      "description": "체크카드 종류"
+    },
+    {
+      "key": "postpaid_transport",
+      "display_name": "후불교통기능",
+      "required": false,
+      "type": "boolean",
+      "default": false,
+      "description": "후불교통기능 신청 여부"
+    },
+    {
+      "key": "payment_date",
+      "display_name": "결제일",
+      "required": false,
+      "type": "number",
+      "default": 15,
+      "description": "결제일 (1~30일)"
+    },
+    {
+      "key": "statement_method",
+      "display_name": "명세서 수령 방법",
+      "required": false,
+      "type": "choice",
+      "choices": ["휴대폰", "이메일", "홈페이지"],
+      "default": "휴대폰",
+      "description": "명세서 수령 방법"
+    },
+    {
+      "key": "same_password_as_account",
+      "display_name": "계좌비밀번호 동일 사용",
+      "required": false,
+      "type": "boolean",
+      "default": true,
+      "description": "계좌비밀번호와 동일한 비밀번호 사용 여부"
+    },
+    {
+      "key": "card_usage_alert",
+      "display_name": "카드사용알림",
+      "required": false,
+      "type": "choice",
+      "choices": ["5만원 이상 무료", "모든내역 200원", "선택안함"],
+      "default": "5만원 이상 무료",
+      "description": "카드사용알림 문자서비스"
     }
   ],
   "field_groups": [
     {
-      "id": "basic_account",
-      "name": "계좌 기본 정보",
+      "id": "basic_info",
+      "name": "기본 정보",
+      "fields": ["customer_name", "customer_phone", "confirm_personal_info"]
+    },
+    {
+      "id": "account_settings",
+      "name": "계좌 설정",
       "fields": ["use_lifelong_account"]
     },
     {
-      "id": "additional_services",
-      "name": "부가 서비스",
-      "fields": ["additional_services_choice"]
-    },
-    {
-      "id": "card_services",
-      "name": "체크카드 서비스",
-      "fields": ["cc_issuance_method"]
-    },
-    {
       "id": "internet_banking",
-      "name": "인터넷뱅킹 서비스",
-      "fields": ["ib_service_type"]
+      "name": "인터넷뱅킹",
+      "fields": ["use_internet_banking", "security_medium", "other_otp_manufacturer", "other_otp_serial", "transfer_limit_per_time", "transfer_limit_per_day", "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction", "additional_withdrawal_account"]
+    },
+    {
+      "id": "check_card",
+      "name": "체크카드",
+      "fields": ["use_check_card", "card_receive_method", "card_delivery_location", "card_type", "postpaid_transport", "payment_date", "statement_method", "same_password_as_account", "card_usage_alert"]
     }
   ],
   "stages": {
-    "greeting_deposit": {
-      "id": "greeting_deposit",
-      "prompt": "안녕하세요, 고객님! 신한은행 입출금통장 신규 서비스입니다. 입출금통장을 새로 만드시면 한도제한계좌로 개설되며, 금융거래 목적 확인 전까지는 이체 및 출금 한도가 제한될 수 있습니다. 한도 해제는 영업점 방문 또는 모바일 앱을 통해 증빙서류 제출 후 가능합니다. 또한, 급여 이체 등 특정 조건을 충족하시면 다양한 금융 혜택을 받으실 수 있습니다. 혹시 체크카드나 인터넷뱅킹도 함께 신청하시겠어요? (예: 둘 다 신청, 체크카드만, 인터넷뱅킹만, 아니요)",
+    "greeting": {
+      "id": "greeting",
+      "prompt": "안녕하세요, 신한은행 입출금통장 신규 서비스입니다. 한도제한계좌로 개설되며, 한도 해제는 영업점 방문 또는 모바일앱으로 가능합니다. \n\n현재 등록된 고객님 정보는 다음과 같습니다:\n- 성함: 홍길동\n- 연락처: 010-1234-5678\n\n이 정보가 맞으신가요?",
       "is_question": true,
-      "input_type": "text",
-      "expected_info_key": "additional_services_choice",
+      "input_type": "yes_no",
+      "expected_info_key": "confirm_personal_info",
       "transitions": [
         {
-          "next_stage_id": "clarify_services",
-          "condition_description": "사용자가 '네'와 같이 긍정적으로 답했으나, additional_services_choice가 추출되지 않았을 때",
-          "example_phrases": ["네"]
+          "next_stage_id": "ask_lifelong_account",
+          "condition_description": "개인정보가 맞다고 확인한 경우",
+          "example_phrases": ["네", "맞아요", "예", "맞습니다"]
         },
         {
-          "next_stage_id": "ask_lifelong_account",
-          "condition_description": "사용자가 부가 서비스 선택 의사를 명확히 밝힌 경우 (모든 경우 일단 평생계좌 여부로 이동 후 분기 처리)",
-          "example_phrases": ["둘 다요", "체크카드만요", "인터넷뱅킹도 같이", "아니요 괜찮아요", "나중에 할게요"]
+          "next_stage_id": "info_correction_end",
+          "condition_description": "개인정보가 틀리다고 한 경우",
+          "example_phrases": ["아니요", "틀려요", "수정할게요", "다릅니다"]
         }
       ],
-      "default_next_stage_id": "ask_lifelong_account"
+      "default_next_stage_id": "greeting"
     },
-    "clarify_services": {
-      "id": "clarify_services",
-      "prompt": "네, 알겠습니다. 체크카드와 인터넷뱅킹 중 어떤 것을 신청하시겠어요? 둘 다 신청하실 수도 있습니다. (예: 둘 다 신청, 체크카드만, 인터넷뱅킹만, 아니요)",
-      "is_question": true,
-      "input_type": "text",
-      "expected_info_key": "additional_services_choice",
-      "default_next_stage_id": "ask_lifelong_account"
+    "info_correction_end": {
+      "id": "info_correction_end",
+      "prompt": "네, 알겠습니다. 정보 수정을 위해 고객정보 수정 화면으로 이동해 주세요. 수정 후 다시 신청해 주시기 바랍니다.",
+      "is_question": false,
+      "default_next_stage_id": "END_SCENARIO"
     },
     "ask_lifelong_account": {
       "id": "ask_lifelong_account",
-      "prompt": "네, 알겠습니다. 개설하실 입출금통장을 평생계좌번호로 지정하시겠어요? 평생계좌로 지정하시면 휴대폰번호 등 기억하기 쉬운 번호로 계좌번호를 설정하실 수 있습니다.",
+      "prompt": "평생계좌번호로 등록하시겠어요? 휴대폰번호 등 기억하기 쉬운 번호로 계좌번호를 설정할 수 있습니다.",
       "is_question": true,
       "input_type": "yes_no",
       "expected_info_key": "use_lifelong_account",
-      "default_next_stage_id": "process_service_choices"
+      "default_next_stage_id": "ask_internet_banking"
     },
-    "process_service_choices": {
-      "id": "process_service_choices",
-      "prompt": "", 
-      "is_question": false,
-      "transitions": [
-        {
-          "next_stage_id": "ask_cc_issuance_method",
-          "condition_description": "사용자가 '체크카드' 또는 '둘 다' 신청을 선택한 경우. (collected_product_info.additional_services_choice 확인)",
-          "example_phrases": ["체크카드만 신청", "둘 다 신청", "체크카드요"]
-        },
-        {
-          "next_stage_id": "ask_ib_notification",
-          "condition_description": "사용자가 '인터넷뱅킹만' 신청을 선택했고 체크카드는 선택하지 않은 경우. (collected_product_info.additional_services_choice 확인)",
-          "example_phrases": ["인터넷뱅킹만 신청", "인뱅만요"]
-        },
-        {
-          "next_stage_id": "final_summary_deposit",
-          "condition_description": "사용자가 부가서비스를 '아니요'라고 선택했거나, 다른 조건에 해당하지 않는 경우. (collected_product_info.additional_services_choice 확인)",
-          "example_phrases": ["아니요", "괜찮아요", "필요 없어요"]
-        }
-      ],
-      "default_next_stage_id": "final_summary_deposit" 
-    },
-    "ask_cc_issuance_method": {
-      "id": "ask_cc_issuance_method",
-      "prompt": "체크카드 관련 설정을 안내해드리겠습니다. 다음 정보를 편하게 말씀해주세요:\n\n• 수령 방법 (즉시발급/배송)\n• 후불교통 기능 추가 여부 (예/아니요)\n• 명세서 수신 방법 및 알림 서비스\n• 배송 주소 (자택/직장)\n\n알고 계신 내용부터 편하게 말씀해주세요!",
+    "ask_internet_banking": {
+      "id": "ask_internet_banking",
+      "prompt": "인터넷뱅킹을 가입하시겠어요?",
       "is_question": true,
-      "input_type": "text", 
-      "collect_multiple_info": true,
-      "cc_info_fields": [
-        {
-          "key": "cc_issuance_method",
-          "display_name": "수령 방법",
-          "required": true,
-          "type": "choice",
-          "choices": ["즉시발급", "배송"],
-          "description": "체크카드 수령 방법"
-        },
-        {
-          "key": "cc_postpaid_transport",
-          "display_name": "후불교통 기능",
-          "required": true,
-          "type": "boolean",
-          "description": "후불교통 기능 추가 여부"
-        },
-        {
-          "key": "cc_statement_and_alerts",
-          "display_name": "명세서 및 알림 설정",
-          "required": true,
-          "type": "text",
-          "description": "명세서 수신 방법 및 알림 서비스 설정"
-        },
-        {
-          "key": "cc_address_type",
-          "display_name": "배송 주소",
-          "required": false,
-          "type": "choice",
-          "choices": ["자택", "직장"],
-          "description": "카드 배송 주소 (배송 선택 시)"
-        }
-      ],
-      "default_next_stage_id": "process_cc_collected_info"
-    },
-    "process_cc_collected_info": {
-      "id": "process_cc_collected_info",
-      "prompt": "",
-      "is_question": false,
-      "collect_multiple_info": true,
+      "input_type": "yes_no",
+      "expected_info_key": "use_internet_banking",
       "transitions": [
         {
-          "next_stage_id": "ask_missing_cc_info",
-          "condition_description": "체크카드 필수 정보가 부족한 경우"
+          "next_stage_id": "collect_internet_banking_info",
+          "condition_description": "인터넷뱅킹 가입을 원하는 경우",
+          "example_phrases": ["네", "가입할게요", "예"]
         },
         {
-          "next_stage_id": "check_next_service_or_summary_after_cc",
-          "condition_description": "체크카드 정보가 모두 수집된 경우"
+          "next_stage_id": "ask_check_card",
+          "condition_description": "인터넷뱅킹 가입을 원하지 않는 경우",
+          "example_phrases": ["아니요", "괜찮아요", "나중에"]
         }
       ],
-      "default_next_stage_id": "ask_missing_cc_info"
+      "default_next_stage_id": "ask_internet_banking"
     },
-    "ask_missing_cc_info": {
-      "id": "ask_missing_cc_info",
-      "prompt": "체크카드 설정을 위해 몇 가지 추가 정보가 필요해요. 부족한 정보를 말씀해주세요.",
+    "collect_internet_banking_info": {
+      "id": "collect_internet_banking_info",
+      "prompt": "인터넷뱅킹 설정을 도와드리겠습니다. 다음 정보들을 알려주세요:\n\n1. 보안매체 선택 (보안카드/신한 OTP/타행 OTP)\n2. 이체한도 설정 (1회 최대 5천만원, 1일 최대 1억원)\n3. 알림 설정 (중요거래통보, 출금내역통보, 해외IP이체 제한)\n4. 출금계좌 추가 여부\n\n편하신 순서대로 말씀해 주세요.",
       "is_question": true,
       "input_type": "text",
       "collect_multiple_info": true,
-      "default_next_stage_id": "check_next_service_or_summary_after_cc"
+      "default_next_stage_id": "process_internet_banking_info"
     },
-    "check_next_service_or_summary_after_cc": {
-      "id": "check_next_service_or_summary_after_cc",
-      "prompt": "", 
-      "is_question": false,
-      "transitions": [
-        {
-          "next_stage_id": "ask_ib_notification",
-          "condition_description": "사용자가 '둘 다 신청'을 선택했고, 체크카드 안내가 완료된 경우. (collected_product_info.additional_services_choice 확인)",
-          "example_phrases": ["둘 다 신청했을 때"]
-        },
-        {
-          "next_stage_id": "final_summary_deposit",
-          "condition_description": "사용자가 '체크카드만' 신청했거나, 다른 조건에 해당하지 않는 경우. (collected_product_info.additional_services_choice 확인)",
-          "example_phrases": ["체크카드만 신청했을 때", "인터넷뱅킹은 신청 안함"]
-        }
-      ],
-      "default_next_stage_id": "final_summary_deposit"
-    },
-    "ask_ib_notification": {
-      "id": "ask_ib_notification",
-      "prompt": "인터넷뱅킹 관련 설정을 안내해드리겠습니다. 다음 정보를 편하게 말씀해주세요:\n\n• 거래 및 출금 내역 알림 설정 (예/아니요)\n• 해외 IP 접속 제한 여부 (예/아니요)\n• 추가 출금계좌 등록 여부 (예/아니요)\n• 보안매체 선택 (보안카드/신한OTP/타행OTP/모바일OTP)\n• 이체한도 설정 (1회/1일 한도)\n\n알고 계신 내용부터 편하게 말씀해주세요!",
-      "is_question": true,
-      "input_type": "text",
-      "collect_multiple_info": true,
-      "ib_info_fields": [
-        {
-          "key": "ib_notification_preference",
-          "display_name": "알림 설정",
-          "required": true,
-          "type": "boolean",
-          "description": "거래 및 출금 내역 알림 설정"
-        },
-        {
-          "key": "ib_overseas_ip_limit",
-          "display_name": "해외 IP 제한",
-          "required": true,
-          "type": "boolean",
-          "description": "해외 IP에서의 접속 제한 여부"
-        },
-        {
-          "key": "ib_add_withdrawal_account",
-          "display_name": "추가 출금계좌 등록",
-          "required": true,
-          "type": "boolean",
-          "description": "추가 출금계좌 등록 여부"
-        },
-        {
-          "key": "ib_security_medium",
-          "display_name": "보안매체",
-          "required": true,
-          "type": "choice",
-          "choices": ["보안카드", "신한OTP", "타행OTP", "모바일OTP"],
-          "description": "사용할 보안매체 선택"
-        },
-        {
-          "key": "ib_transfer_limits",
-          "display_name": "이체한도",
-          "required": true,
-          "type": "text",
-          "description": "1회 및 1일 이체한도 설정"
-        }
-      ],
-      "default_next_stage_id": "process_ib_collected_info"
-    },
-    "process_ib_collected_info": {
-      "id": "process_ib_collected_info",
+    "process_internet_banking_info": {
+      "id": "process_internet_banking_info",
       "prompt": "",
       "is_question": false,
-      "collect_multiple_info": true,
       "transitions": [
         {
-          "next_stage_id": "ask_missing_ib_info",
-          "condition_description": "인터넷뱅킹 필수 정보가 부족한 경우"
+          "next_stage_id": "ask_other_otp_info",
+          "condition_description": "타행 OTP를 선택했고 제조사/일련번호가 없는 경우"
         },
         {
-          "next_stage_id": "check_next_service_or_summary_after_ib",
+          "next_stage_id": "ask_remaining_ib_info",
+          "condition_description": "필수 인터넷뱅킹 정보가 부족한 경우"
+        },
+        {
+          "next_stage_id": "ask_check_card",
           "condition_description": "인터넷뱅킹 정보가 모두 수집된 경우"
         }
       ],
-      "default_next_stage_id": "ask_missing_ib_info"
+      "default_next_stage_id": "ask_remaining_ib_info"
     },
-    "ask_missing_ib_info": {
-      "id": "ask_missing_ib_info",
-      "prompt": "인터넷뱅킹 설정을 위해 몇 가지 추가 정보가 필요해요. 부족한 정보를 말씀해주세요.",
+    "ask_other_otp_info": {
+      "id": "ask_other_otp_info",
+      "prompt": "타행 OTP를 선택하셨네요. 제조사와 일련번호를 알려주세요.",
       "is_question": true,
       "input_type": "text",
       "collect_multiple_info": true,
-      "default_next_stage_id": "check_next_service_or_summary_after_ib"
+      "default_next_stage_id": "process_internet_banking_info"
     },
-    "check_next_service_or_summary_after_ib": { 
-      "id": "check_next_service_or_summary_after_ib",
-      "prompt": "",
-      "is_question": false,
-      "default_next_stage_id": "final_summary_deposit"
+    "ask_remaining_ib_info": {
+      "id": "ask_remaining_ib_info",
+      "prompt": "추가로 필요한 정보를 알려주세요.",
+      "is_question": true,
+      "input_type": "text",
+      "collect_multiple_info": true,
+      "default_next_stage_id": "process_internet_banking_info"
     },
-    "final_summary_deposit": {
-      "id": "final_summary_deposit",
-      "prompt": "고객님, 요청하신 입출금통장 신규 및 부가서비스 신청 정보 확인되었습니다. 평생계좌 신청여부: %{use_lifelong_account}%. %{additional_services_summary}%. 이 정보로 가입 절차를 진행하시겠습니까? 이후 안내에 따라 추가 인증 및 서류 제출이 필요할 수 있습니다.",
+    "ask_check_card": {
+      "id": "ask_check_card",
+      "prompt": "체크카드를 신청하시겠어요?",
       "is_question": true,
       "input_type": "yes_no",
+      "expected_info_key": "use_check_card",
       "transitions": [
         {
-          "next_stage_id": "closing_deposit_confirmed",
-          "condition_description": "사용자가 최종 확인하고 가입 진행에 동의한 경우",
-          "example_phrases": ["네", "맞아요", "진행해주세요"]
+          "next_stage_id": "collect_check_card_info",
+          "condition_description": "체크카드 신청을 원하는 경우",
+          "example_phrases": ["네", "신청할게요", "예"]
         },
         {
-          "next_stage_id": "greeting_deposit", 
-          "condition_description": "사용자가 정보를 수정하거나 처음으로 돌아가길 원하는 경우",
-          "example_phrases": ["아니요", "수정할래요", "다시 할래요"]
+          "next_stage_id": "final_summary",
+          "condition_description": "체크카드 신청을 원하지 않는 경우",
+          "example_phrases": ["아니요", "괜찮아요", "필요없어요"]
         }
       ],
-      "default_next_stage_id": "closing_deposit_confirmed"
+      "default_next_stage_id": "ask_check_card"
     },
-    "closing_deposit_confirmed": {
-      "id": "closing_deposit_confirmed",
-      "prompt": "%{end_scenario_message}%", 
+    "collect_check_card_info": {
+      "id": "collect_check_card_info",
+      "prompt": "체크카드 설정을 도와드리겠습니다. 다음 정보들을 알려주세요:\n\n1. 카드 수령 방법 (즉시발급/배송)\n2. 배송 선택시 배송지 (자택/직장/지점)\n3. 카드 종류 (S-line/딥드림)\n4. 후불교통기능 (신청/미신청)\n5. 결제일 (1~30일)\n6. 명세서 수령 방법 (휴대폰/이메일/홈페이지)\n7. 계좌비밀번호와 동일 사용 여부\n8. 카드사용알림 (5만원이상 무료/모든내역 200원/선택안함)\n\n편하신 순서대로 말씀해 주세요.",
+      "is_question": true,
+      "input_type": "text",
+      "collect_multiple_info": true,
+      "default_next_stage_id": "process_check_card_info"
+    },
+    "process_check_card_info": {
+      "id": "process_check_card_info",
+      "prompt": "",
       "is_question": false,
-      "default_next_stage_id": "END_SCENARIO_COMPLETE_DEPOSIT_APPLICATION_FLAG_SET"
+      "transitions": [
+        {
+          "next_stage_id": "ask_remaining_card_info",
+          "condition_description": "필수 체크카드 정보가 부족한 경우"
+        },
+        {
+          "next_stage_id": "final_summary",
+          "condition_description": "체크카드 정보가 모두 수집된 경우"
+        }
+      ],
+      "default_next_stage_id": "ask_remaining_card_info"
+    },
+    "ask_remaining_card_info": {
+      "id": "ask_remaining_card_info",
+      "prompt": "추가로 필요한 체크카드 정보를 알려주세요.",
+      "is_question": true,
+      "input_type": "text",
+      "collect_multiple_info": true,
+      "default_next_stage_id": "process_check_card_info"
+    },
+    "final_summary": {
+      "id": "final_summary",
+      "prompt": "고객님께서 신청하신 내용을 확인해 드리겠습니다:\n\n[기본정보]\n- 성함: %{customer_name}%\n- 연락처: %{customer_phone}%\n- 평생계좌: %{use_lifelong_account}%\n\n[인터넷뱅킹]\n- 가입여부: %{use_internet_banking}%\n%{security_medium}%\n%{transfer_limit_per_time}%\n%{transfer_limit_per_day}%\n\n[체크카드]\n- 신청여부: %{use_check_card}%\n%{card_type}%\n%{card_receive_method}%\n\n수정하고 싶은 내용이 있으신가요?",
+      "is_question": true,
+      "input_type": "text",
+      "transitions": [
+        {
+          "next_stage_id": "handle_modification",
+          "condition_description": "수정을 원하는 경우",
+          "example_phrases": ["수정", "변경", "바꾸고 싶어요", "틀렸어요"]
+        },
+        {
+          "next_stage_id": "complete_application",
+          "condition_description": "수정이 필요없는 경우",
+          "example_phrases": ["아니요", "괜찮아요", "맞아요", "신청할게요"]
+        }
+      ],
+      "default_next_stage_id": "complete_application"
+    },
+    "handle_modification": {
+      "id": "handle_modification",
+      "prompt": "어떤 내용을 수정하고 싶으신가요? 수정하실 항목과 변경하실 내용을 말씀해 주세요.",
+      "is_question": true,
+      "input_type": "text",
+      "default_next_stage_id": "final_summary"
+    },
+    "complete_application": {
+      "id": "complete_application",
+      "prompt": "네, 확인되었습니다. 입출금통장 신청 화면으로 이동합니다. 감사합니다.",
+      "is_question": false,
+      "default_next_stage_id": "END_SCENARIO"
     }
   }
 }
