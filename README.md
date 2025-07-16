@@ -34,6 +34,7 @@
 - 전세 대출 상담 시나리오: `backend/app/data/scenarios/jeonse_loan_scenario.json`
 - 입출금통장 상담 시나리오: `backend/app/data/scenarios/deposit_account_scenario.json`
 - 디딤돌 대출 QA 지식베이스: `backend/app/data/kb/didimdol.md`
+- 서비스 설명 정보: `backend/app/config/service_descriptions.yaml`
 
 ## 🧪 테스팅
 

@@ -306,6 +306,43 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
     
     try:
         prompt_kwargs = {"user_input": user_input, "format_instructions": format_instructions}
+        
+        # business_guidance_prompt에 서비스 설명 추가
+        if not current_product_type:
+            # service_descriptions.yaml 로드
+            service_desc_path = Path(__file__).parent.parent / "config" / "service_descriptions.yaml"
+            if service_desc_path.exists():
+                with open(service_desc_path, 'r', encoding='utf-8') as f:
+                    service_data = yaml.safe_load(f)
+                    
+                # 서비스 설명 포맷팅
+                service_descriptions = ""
+                for service_id in ["didimdol", "jeonse", "deposit_account"]:
+                    if service_id in service_data:
+                        svc = service_data[service_id]
+                        service_descriptions += f"\n**{svc['name']}** ({service_id})\n"
+                        service_descriptions += f"- 대상: {svc['target']}\n"
+                        service_descriptions += f"- 설명: {svc['summary'].strip()}\n"
+                        if 'benefits' in svc:
+                            service_descriptions += f"- 주요 혜택: {', '.join(svc['benefits'][:2])}\n"
+                
+                prompt_kwargs["service_descriptions"] = service_descriptions
+            else:
+                # 폴백: 기본 설명 사용
+                prompt_kwargs["service_descriptions"] = """
+**디딤돌 대출** (didimdol)
+- 대상: 무주택 서민 (연소득 6-7천만원 이하)
+- 설명: 정부 지원 주택구입자금 대출, 최대 3-4억원, 연 2.15~2.75%
+
+**전세 대출** (jeonse)  
+- 대상: 무주택 세대주
+- 설명: 전세 보증금 대출, 보증금의 80-90%, 만기일시상환
+
+**입출금통장** (deposit_account)
+- 대상: 모든 고객
+- 설명: 기본 계좌, 평생계좌 서비스, 체크카드/인터넷뱅킹 동시 신청
+"""
+        
         if current_product_type:
              active_scenario_data = get_active_scenario_data(state) or {}
              current_stage_id = state.get("current_scenario_stage_id", "N/A")
@@ -808,14 +845,22 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
 async def synthesize_response_node(state: AgentState) -> dict:
     has_factual = bool(state.get("factual_response"))
     has_contextual = bool(state.get("current_product_type"))
-    log_node_execution("Synthesizer", f"factual={has_factual}, contextual={has_contextual}")
+    has_direct = bool(state.get("main_agent_direct_response"))
+    log_node_execution("Synthesizer", f"factual={has_factual}, contextual={has_contextual}, direct={has_direct}")
     
-    # 이미 final_response_text_for_tts가 설정되어 있으면 그것을 우선 사용
+    # 1. 이미 final_response_text_for_tts가 설정되어 있으면 그것을 우선 사용
     existing_response = state.get("final_response_text_for_tts")
     if existing_response:
         print(f"이미 설정된 응답 사용: {existing_response}")
         updated_messages = list(state['messages']) + [AIMessage(content=existing_response)]
         return {"final_response_text_for_tts": existing_response, "messages": updated_messages, "is_final_turn_response": True}
+    
+    # 2. main_agent_direct_response가 있으면 우선 사용 (business_guidance에서 생성된 응답)
+    direct_response = state.get("main_agent_direct_response")
+    if direct_response:
+        print(f"Main agent direct response 사용: {direct_response[:50]}...")
+        updated_messages = list(state['messages']) + [AIMessage(content=direct_response)]
+        return {"final_response_text_for_tts": direct_response, "messages": updated_messages, "is_final_turn_response": True}
     
     user_question = state["messages"][-1].content
     factual_answer = state.get("factual_response", "")
@@ -839,7 +884,7 @@ async def synthesize_response_node(state: AgentState) -> dict:
                         contextual_response)
     
     if not factual_answer or "Could not find" in factual_answer:
-        final_answer = contextual_response or state.get("main_agent_direct_response", "죄송합니다, 도움을 드리지 못했습니다.")
+        final_answer = contextual_response or "죄송합니다, 도움을 드리지 못했습니다."
     elif not contextual_response:
         final_answer = factual_answer
     else:
@@ -929,31 +974,6 @@ async def set_product_type_node(state: AgentState) -> AgentState:
         "scenario_awaiting_user_response": True
     }
     
-async def prepare_direct_response_node(state: AgentState) -> AgentState:
-    response_text = state.get("main_agent_direct_response", "")
-    log_node_execution("Direct_Response", f"response='{response_text[:30]}...'" if response_text else "generating fallback")
-    response_text = state.get("main_agent_direct_response")
-    
-    # 메인 에이전트가 직접적인 응답을 생성하지 않은 경우 (e.g., chit-chat)
-    if not response_text:
-        print("--- Direct response not found, generating chit-chat response... ---")
-        user_input = state.get("stt_result", "안녕하세요.") # 입력이 없는 경우 대비
-        try:
-            chitchat_prompt_template = ALL_PROMPTS.get('qa_agent', {}).get('simple_chitchat_prompt')
-            if not chitchat_prompt_template:
-                raise ValueError("Simple chitchat prompt not found.")
-            
-            prompt = ChatPromptTemplate.from_template(chitchat_prompt_template)
-            chain = prompt | generative_llm
-            response = await chain.ainvoke({"user_input": user_input})
-            response_text = response.content.strip()
-
-        except Exception as e:
-            print(f"Error generating chit-chat response: {e}")
-            response_text = "네, 안녕하세요. 무엇을 도와드릴까요?" # 최종 fallback
-
-    updated_messages = list(state.get("messages", [])) + [AIMessage(content=response_text)]
-    return {**state, "final_response_text_for_tts": response_text, "messages": updated_messages, "is_final_turn_response": True}
 
 def route_after_scenario_logic(state: AgentState) -> str:
     return "synthesize_response_node"
@@ -974,14 +994,9 @@ def execute_plan_router(state: AgentState) -> str:
         "invoke_qa_agent": "rag_worker", 
         "invoke_web_search": "web_worker",
         "set_product_type": "set_product_type_node",
-        "prepare_direct_response": "prepare_direct_response_node",
-        "end_conversation": "end_conversation_node",
-        # Legacy 지원
-        "clarify_and_requery": "prepare_direct_response_node",
-        "answer_directly_chit_chat": "prepare_direct_response_node",
-        "select_product_type": "prepare_direct_response_node"
+        "end_conversation": "end_conversation_node"
     }
-    target_node = worker_routing_map.get(next_action, "prepare_direct_response_node")
+    target_node = worker_routing_map.get(next_action, "synthesize_response_node")
     log_node_execution("Router", f"{next_action} → {target_node.replace('_node', '').replace('_worker', '')}")
     return target_node
 
@@ -1001,7 +1016,6 @@ workflow.add_node("web_worker", web_search_node)
 # Response & Control Nodes
 workflow.add_node("synthesize_response_node", synthesize_response_node)
 workflow.add_node("set_product_type_node", set_product_type_node)
-workflow.add_node("prepare_direct_response_node", prepare_direct_response_node)
 workflow.add_node("end_conversation_node", end_conversation_node)
 
 # Orchestrator Flow
@@ -1017,7 +1031,6 @@ workflow.add_conditional_edges(
         "rag_worker": "rag_worker", 
         "web_worker": "web_worker",
         "synthesize_response_node": "synthesize_response_node",
-        "prepare_direct_response_node": "prepare_direct_response_node",
         "set_product_type_node": "set_product_type_node",
         "end_conversation_node": "end_conversation_node",
     }
@@ -1031,7 +1044,6 @@ workflow.add_conditional_edges("web_worker", execute_plan_router)
 
 workflow.add_edge("synthesize_response_node", END)
 workflow.add_edge("set_product_type_node", END)
-workflow.add_edge("prepare_direct_response_node", END)
 workflow.add_edge("end_conversation_node", END)
 
 app_graph = workflow.compile()

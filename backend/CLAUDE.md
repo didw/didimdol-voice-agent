@@ -47,6 +47,7 @@ uvicorn app.main:app --reload --port 8000
 - `app/graph/agent.py`: LLM 기반 Orchestrator와 특화된 Worker들
 - 메인 에이전트가 모든 대화를 LLM으로 처리 (룰 기반 제거)
 - Worker: scenario_worker, rag_worker, web_worker
+- 직접 응답 생성: direct_response 필드를 통한 즉시 응답 (prepare_direct_response 제거)
 
 ### Product ID 매핑
 - `didimdol`: 디딤돌 대출
@@ -60,8 +61,9 @@ uvicorn app.main:app --reload --port 8000
 
 ### 프롬프트 관리
 - `app/config/main_agent_prompts.yaml`: 메인 에이전트 프롬프트
-  - `business_guidance_prompt`: 일반 상담 모드
+  - `business_guidance_prompt`: 일반 상담 모드 (한국어, direct_response 활용)
   - `task_management_prompt`: 특정 제품 상담 모드
+- `app/config/service_descriptions.yaml`: 서비스 설명 정보 관리
 
 ### 시나리오 연속성
 - 시나리오 진행 중 사용자 응답 대기 상태 자동 관리
