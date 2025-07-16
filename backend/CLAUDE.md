@@ -27,7 +27,6 @@ source venv/bin/activate
 
 # 의존성 설치
 pip install -r requirements.txt
-pip install setuptools  # pkg_resources 모듈 문제 해결
 
 # 서버 실행
 uvicorn app.main:app --reload --port 8000
@@ -42,18 +41,20 @@ uvicorn app.main:app --reload --port 8000
 - **Google Cloud**: STT/TTS
 - **Tavily**: 웹 검색
 
-## 새로운 기능
+## 구조 개선사항
+
+### 정리된 디렉토리 구조
+- `app/agents/`: 핵심 에이전트 (entity_agent, unified_main_agent)
+- `app/agents/archive/`: 미사용 에이전트 보관
+- `app/api/V1/`: 리팩토링된 API 엔드포인트
+- `app/config/`: 통합된 설정 및 프롬프트 파일
+- `tests/`: 모든 테스트 파일 통합
+- `docs/design/`: PRD 및 설계 문서
 
 ### Slot Filling 시스템
 - 실시간 정보 수집 상태 추적
 - WebSocket을 통한 Frontend 업데이트
 - 시나리오별 필드 그룹화 지원
-
-## 시나리오 구조
-
-- `app/data/scenarios/`: 대화 시나리오 JSON 파일
-- `app/data/docs/`: 지식베이스 MD 파일
-- 개선된 다중 정보 수집 방식 지원
 
 ## 테스트
 

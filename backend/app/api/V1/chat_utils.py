@@ -1,0 +1,250 @@
+"""
+채팅 관련 유틸리티 함수들
+"""
+
+import json
+from typing import Dict, Any, List, Optional
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from ...graph.state import AgentState
+
+
+def should_send_slot_filling_update(
+    info_changed: bool,
+    scenario_changed: bool,
+    product_type_changed: bool,
+    scenario_active: bool,
+    is_info_collection_stage: bool
+) -> bool:
+    """슬롯 필링 업데이트를 전송해야 하는지 확인"""
+    return (
+        info_changed or 
+        scenario_changed or 
+        product_type_changed or
+        (scenario_active and is_info_collection_stage)
+    )
+
+
+async def send_slot_filling_update(
+    websocket: Any,
+    state: AgentState,
+    session_id: str
+) -> None:
+    """슬롯 필링 상태 업데이트를 WebSocket으로 전송"""
+    
+    # 시나리오 데이터 확인
+    scenario_data = state.get("active_scenario_data")
+    if not scenario_data:
+        print(f"[{session_id}] No active scenario data for slot filling update")
+        
+        # deposit_account의 경우 기본 시나리오 데이터 생성
+        if state.get("current_product_type") == "deposit_account":
+            await _send_deposit_account_update(websocket, state, session_id)
+        return
+    
+    try:
+        # 필요한 정보 필드들 (시나리오 데이터 구조에 맞춤)
+        required_fields = scenario_data.get("slot_fields", [])
+        field_groups = scenario_data.get("field_groups", [])
+        collected_info = state.get("collected_product_info", {})
+        current_stage = state.get("current_scenario_stage_id", "")
+        
+        # 각 필드의 수집 상태 확인
+        fields_status = []
+        for field in required_fields:
+            field_key = field.get("key", "")
+            field_status = {
+                "key": field_key,
+                "display_name": field.get("display_name", field_key),
+                "value": collected_info.get(field_key, ""),
+                "is_collected": field_key in collected_info,
+                "is_required": field.get("required", True)
+            }
+            fields_status.append(field_status)
+        
+        # 그룹별 진행률 계산
+        groups_status = []
+        for group in field_groups:
+            group_fields = group.get("fields", [])
+            collected_count = sum(1 for field in group_fields if field in collected_info)
+            total_count = len(group_fields)
+            
+            groups_status.append({
+                "id": group.get("id", ""),
+                "name": group.get("name", ""),
+                "progress": (collected_count / total_count * 100) if total_count > 0 else 0,
+                "collected": collected_count,
+                "total": total_count
+            })
+        
+        # 전체 진행률
+        total_required = len([f for f in required_fields if f.get("required", True)])
+        total_collected = sum(1 for f in required_fields if f.get("key") in collected_info and f.get("required", True))
+        overall_progress = (total_collected / total_required * 100) if total_required > 0 else 0
+        
+        # WebSocket 메시지 구성 (프론트엔드 인터페이스에 맞게)
+        slot_filling_data = {
+            "type": "slot_filling_update",
+            "productType": state.get("current_product_type", ""),
+            "requiredFields": [{
+                "key": f["key"],
+                "displayName": f["display_name"],
+                "type": f.get("type", "text"),
+                "required": f.get("required", True),
+                "choices": f.get("choices", []) if f.get("type") == "choice" else None,
+                "unit": f.get("unit") if f.get("type") == "number" else None,
+                "description": f.get("description", ""),
+                "dependsOn": f.get("depends_on") if "depends_on" in f else None
+            } for f in required_fields],
+            "collectedInfo": collected_info,
+            "completionStatus": {f["key"]: f["key"] in collected_info for f in required_fields},
+            "completionRate": overall_progress,
+            "fieldGroups": [{
+                "id": group["id"],
+                "name": group["name"],
+                "fields": group["fields"]
+            } for group in field_groups] if field_groups else []
+        }
+        
+        await websocket.send_json(slot_filling_data)
+        print(f"[{session_id}] Slot filling update sent: {overall_progress:.1f}% complete")
+        print(f"[{session_id}] Collected info in update: {collected_info}")
+        print(f"[{session_id}] Required fields in update: {[f['key'] for f in required_fields]}")
+        
+    except Exception as e:
+        print(f"[{session_id}] Error sending slot filling update: {e}")
+
+
+def format_messages_for_display(messages: List[BaseMessage]) -> List[Dict[str, str]]:
+    """메시지 리스트를 표시용 포맷으로 변환"""
+    formatted = []
+    for msg in messages:
+        if isinstance(msg, HumanMessage):
+            formatted.append({"role": "user", "content": msg.content})
+        elif isinstance(msg, AIMessage):
+            formatted.append({"role": "assistant", "content": msg.content})
+        elif isinstance(msg, SystemMessage):
+            formatted.append({"role": "system", "content": msg.content})
+    return formatted
+
+
+async def _send_deposit_account_update(
+    websocket: Any,
+    state: AgentState,
+    session_id: str
+) -> None:
+    """입출금통장용 기본 슬롯 필링 업데이트"""
+    try:
+        collected_info = state.get("collected_product_info", {})
+        current_stage = state.get("current_scenario_stage_id", "collect_basic")
+        
+        # 실제 시나리오 데이터에서 필드 가져오기
+        scenario_data = state.get("active_scenario_data")
+        if scenario_data and "slot_fields" in scenario_data:
+            default_fields = scenario_data["slot_fields"]
+        else:
+            # 폴백 필드 정의
+            default_fields = [
+                {"key": "customer_name", "display_name": "성함", "required": True},
+                {"key": "phone_number", "display_name": "연락처", "required": True},
+                {"key": "use_lifelong_account", "display_name": "평생계좌 사용", "required": True},
+                {"key": "ib_service_type", "display_name": "인터넷뱅킹 서비스", "required": False},
+                {"key": "cc_type", "display_name": "체크카드 종류", "required": False}
+            ]
+        
+        # 그룹 정의
+        field_groups = [
+            {
+                "id": "basic_info",
+                "name": "기본 정보",
+                "fields": ["customer_name", "phone_number", "birth_date", "address"]
+            },
+            {
+                "id": "service_options", 
+                "name": "부가 서비스",
+                "fields": ["lifelong_account", "internet_banking", "check_card"]
+            }
+        ]
+        
+        # 그룹별 진행률 계산
+        groups_status = []
+        for group in field_groups:
+            group_fields = group["fields"]
+            collected_count = sum(1 for field in group_fields if field in collected_info)
+            total_count = len(group_fields)
+            
+            groups_status.append({
+                "id": group["id"],
+                "name": group["name"],
+                "progress": (collected_count / total_count * 100) if total_count > 0 else 0,
+                "collected": collected_count,
+                "total": total_count
+            })
+        
+        # 전체 진행률 (필수 필드만)
+        required_fields = [f for f in default_fields if f["required"]]
+        total_required = len(required_fields)
+        total_collected = sum(1 for f in required_fields if f["key"] in collected_info)
+        overall_progress = (total_collected / total_required * 100) if total_required > 0 else 0
+        
+        # 필드 상태
+        fields_status = []
+        for field in default_fields:
+            field_key = field["key"]
+            fields_status.append({
+                "key": field_key,
+                "display_name": field["display_name"],
+                "value": collected_info.get(field_key, ""),
+                "is_collected": field_key in collected_info,
+                "is_required": field["required"]
+            })
+        
+        # WebSocket 메시지 전송 (프론트엔드 인터페이스에 맞게)
+        slot_filling_data = {
+            "type": "slot_filling_update",
+            "productType": "deposit_account",
+            "requiredFields": [{
+                "key": f["key"],
+                "displayName": f["display_name"],
+                "type": f.get("type", "text"),
+                "required": f["required"],
+                "choices": f.get("choices", []) if f.get("type") == "choice" else None,
+                "unit": f.get("unit") if f.get("type") == "number" else None,
+                "description": f.get("description", ""),
+                "dependsOn": f.get("depends_on") if "depends_on" in f else None
+            } for f in default_fields],
+            "collectedInfo": collected_info,
+            "completionStatus": {f["key"]: f["key"] in collected_info for f in default_fields},
+            "completionRate": overall_progress,
+            "fieldGroups": [{
+                "id": group["id"],
+                "name": group["name"],
+                "fields": group["fields"]
+            } for group in field_groups] if field_groups else []
+        }
+        
+        await websocket.send_json(slot_filling_data)
+        print(f"[{session_id}] Deposit account slot filling update sent: {overall_progress:.1f}% complete")
+        
+    except Exception as e:
+        print(f"[{session_id}] Error sending deposit account slot filling update: {e}")
+
+
+def get_info_collection_stages() -> List[str]:
+    """정보 수집 단계 목록 반환"""
+    return [
+        # 디딤돌 대출
+        "ask_address_status", "ask_residence_type", "ask_acquisition_details",
+        "ask_loan_details", "ask_marital_houseowner_status", 
+        "ask_missing_info_group_personal", "ask_missing_info_group_property",
+        "ask_missing_info_group_financial", "process_collected_info",
+        
+        # 전세자금 대출
+        "ask_property_info", "ask_contract_info", "ask_tenant_info",
+        "ask_existing_loans",
+        
+        # 입출금통장
+        "greeting_deposit", "collect_customer_info",
+        "clarify_services", "process_service_choices", 
+        "collect_basic", "ask_internet_banking", "collect_ib_info",
+        "ask_check_card", "collect_cc_info", "confirm_all"
+    ]
