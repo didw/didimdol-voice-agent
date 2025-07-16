@@ -731,7 +731,7 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         
         current_stage_id_for_prompt = str(next_stage_id)
         
-        # 로직 스테이지용 prompt_template 정의
+        # 루프 내에서 prompt_template 재설정
         prompt_template = ALL_PROMPTS.get('main_agent', {}).get('determine_next_scenario_stage', '')
         llm_prompt = prompt_template.format(
             active_scenario_name=active_scenario_data.get("scenario_name"),
