@@ -37,6 +37,17 @@ import re
 from ..services.rag_service import rag_service
 from ..services.web_search_service import web_search_service
 
+# --- Flow Tracking ---
+
+def log_node_execution(node_name: str, input_info: str = "", output_info: str = ""):
+    """간결한 노드 실행 추적 로깅"""
+    if input_info and output_info:
+        print(f"🔄 [{node_name}] {input_info} → {output_info}")
+    elif input_info:
+        print(f"🔄 [{node_name}] {input_info}")
+    else:
+        print(f"🔄 [{node_name}]")
+
 # --- Helper Functions for Information Collection ---
 
 def extract_multiple_info_from_text(text: str, required_fields: List[Dict]) -> Dict[str, Any]:
@@ -202,7 +213,9 @@ def generate_group_specific_prompt(stage_id: str, collected_info: Dict) -> str:
 # --- LangGraph Node Functions ---
 
 async def entry_point_node(state: AgentState) -> AgentState:
-    print("--- Node: Entry Point ---")
+    user_text = state.get("user_input_text", "")
+    product = state.get("current_product_type", "None")
+    log_node_execution("Entry", f"input='{user_text[:20]}...', product={product}")
     if not ALL_SCENARIOS_DATA or not ALL_PROMPTS:
         error_msg = "Service initialization failed (Cannot load scenarios or prompts)."
         return {**state, "error_message": error_msg, "final_response_text_for_tts": error_msg, "is_final_turn_response": True}
@@ -270,14 +283,18 @@ def _check_scenario_continuation(prev_state: AgentState, current_state: AgentSta
     return {}
 
 async def main_agent_router_node(state: AgentState) -> AgentState:
-    print("--- Node: Main Agent Router (Orchestrator) ---")
+    user_input = state.get("stt_result", "")
+    current_product_type = state.get("current_product_type")
+    mode = "business_guidance" if not current_product_type else "task_management"
+    log_node_execution("Orchestrator", f"mode={mode}, input='{user_input[:20]}...'")
     if not json_llm:
-        return {**state, "error_message": "Router service unavailable (LLM not initialized).", "is_final_turn_response": True}
+        return {**state, "error_message": "Orchestrator service unavailable (LLM not initialized).", "is_final_turn_response": True}
 
     user_input = state.get("stt_result", "")
     current_product_type = state.get("current_product_type")
-
-    prompt_key = 'initial_task_selection_prompt' if not current_product_type else 'router_prompt'
+    
+    # LLM 기반 대화 처리 및 Worker 결정
+    prompt_key = 'business_guidance_prompt' if not current_product_type else 'task_management_prompt'
     print(f"Main Agent using prompt: '{prompt_key}'")
 
     prompt_template = ALL_PROMPTS.get('main_agent', {}).get(prompt_key, '')
@@ -295,20 +312,42 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
              current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
              valid_choices = current_stage_info.get("choices", []) 
              available_types = ", ".join([ALL_SCENARIOS_DATA[pt]["scenario_name"] for pt in state.get("available_product_types", []) if pt in ALL_SCENARIOS_DATA])
+             
+             # 업무 관련 JSON 정보 추가
+             task_context = {
+                 "collected_info": state.get("collected_product_info", {}),
+                 "current_stage": current_stage_info,
+                 "stage_id": current_stage_id,
+                 "expected_info": current_stage_info.get("expected_info_key", ""),
+                 "valid_choices": valid_choices
+             }
+             
+             # 매뉴얼 정보 로드
+             product_type = state.get("current_product_type")
+             manual_content = await load_knowledge_base_content_async(product_type) if product_type else ""
+             
              prompt_kwargs.update({
                 "active_scenario_name": state.get("active_scenario_name", "Not Selected"),
                 "formatted_messages_history": format_messages_for_prompt(state.get("messages", [])[:-1]),
-                "current_scenario_stage_id": current_stage_id,
-                "current_stage_prompt": current_stage_info.get("prompt", "No prompt"),
-                "collected_product_info": str(state.get("collected_product_info", {})),
-                "expected_info_key": current_stage_info.get("expected_info_key", "Not specified"),
-                "current_stage_valid_choices": str(valid_choices), 
+                "task_context_json": json.dumps(task_context, ensure_ascii=False, indent=2),
+                "manual_content": manual_content[:2000] if manual_content else "매뉴얼 정보 없음",
                 "available_product_types_display": available_types
              })
         else:
             # 초기 프롬프트에 필요한 available_product_types_list를 추가합니다.
             available_types_list = state.get("available_product_types", [])
-            prompt_kwargs["available_product_types_list"] = available_types_list
+            available_services = {
+                "didimdol": "디딤돌 대출 - 주택구입을 위한 정부지원 대출",
+                "jeonse": "전세자금대출 - 전세 보증금 마련을 위한 대출", 
+                "deposit_account": "입출금통장 - 일상적인 금융거래를 위한 기본 계좌"
+            }
+            
+            service_descriptions = [f"- {available_services.get(pt, pt)}" for pt in available_types_list]
+            
+            prompt_kwargs.update({
+                "available_product_types_list": available_types_list,
+                "available_services_description": "\n".join(service_descriptions)
+            })
         
         prompt_filled = prompt_template.format(**prompt_kwargs)
         response = await json_llm.ainvoke([HumanMessage(content=prompt_filled)])
@@ -345,16 +384,22 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
         new_state["action_plan"] = [model.tool for model in action_plan_models]
         new_state["action_plan_struct"] = [model.model_dump() for model in action_plan_models]
 
-        print(f"Main Agent final plan: {new_state.get('action_plan')}")
+        action_plan = new_state.get('action_plan', [])
+        direct_resp = new_state.get('main_agent_direct_response', '')
+        if direct_resp:
+            log_node_execution("Orchestrator", output_info=f"direct_response='{direct_resp[:30]}...'")
+        else:
+            log_node_execution("Orchestrator", output_info=f"plan={action_plan}")
         return new_state
 
     except Exception as e:
-        print(f"Main Agent Router Error: {e}"); traceback.print_exc()
+        print(f"Main Agent Orchestrator Error: {e}"); traceback.print_exc()
         err_msg = "Error processing request. Please try again."
         return {**state, "error_message": err_msg, "main_agent_routing_decision": "unclear_input", "is_final_turn_response": True}
 
 async def factual_answer_node(state: AgentState) -> dict:
-    print("--- Node: Factual Answer (QA Tool with Query Expansion) ---")
+    original_question = state.get("stt_result", "")
+    log_node_execution("RAG_Worker", f"query='{original_question[:30]}...'")
     original_question = state.get("stt_result", "")
     messages = state.get("messages", [])
     chat_history = format_messages_for_prompt(messages[:-1]) if len(messages) > 1 else "No previous conversation."
@@ -409,14 +454,16 @@ async def factual_answer_node(state: AgentState) -> dict:
     if updated_struct:
         updated_struct.pop(0)
 
+    log_node_execution("RAG_Worker", output_info=f"response='{factual_response[:40]}...'")
     return {"factual_response": factual_response, "action_plan": updated_plan, "action_plan_struct": updated_struct}
 
 async def web_search_node(state: AgentState) -> dict:
     """
-    Performs a web search for out-of-domain questions using Tavily
-    and synthesizes a user-friendly answer.
+    Web Search Worker - 외부 정보 검색 전문 처리
     """
-    print("--- Node: Web Search ---")
+    action_struct = state.get("action_plan_struct", [{}])[0]
+    query = action_struct.get("tool_input", {}).get("query", "")
+    log_node_execution("Web_Worker", f"query='{query[:30]}...'")
     action_struct = state.get("action_plan_struct", [{}])[0]
     query = action_struct.get("tool_input", {}).get("query", "")
     
@@ -452,10 +499,13 @@ async def web_search_node(state: AgentState) -> dict:
         updated_struct.pop(0)
         
     # 웹 검색 결과를 사실 기반 답변으로 간주하여 factual_response에 저장
+    log_node_execution("Web_Worker", output_info=f"response='{final_answer[:40]}...'")
     return {"factual_response": final_answer, "action_plan": updated_plan, "action_plan_struct": updated_struct}
 
 async def call_scenario_agent_node(state: AgentState) -> AgentState:
-    print("--- Node: Call Scenario Agent (Scenario Tool) ---")
+    user_input = state.get("stt_result", "")
+    scenario_name = state.get("active_scenario_name", "N/A")
+    log_node_execution("Scenario_NLU", f"scenario={scenario_name}, input='{user_input[:20]}...'")
     user_input = state.get("stt_result", "")
     active_scenario_data = get_active_scenario_data(state)
     if not active_scenario_data or not user_input:
@@ -471,10 +521,15 @@ async def call_scenario_agent_node(state: AgentState) -> AgentState:
         messages_history=state.get("messages", [])[:-1],
         scenario_name=active_scenario_data.get("scenario_name", "Consultation")
     )
+    intent = output.get("intent", "N/A")
+    entities = list(output.get("entities", {}).keys())
+    log_node_execution("Scenario_NLU", output_info=f"intent={intent}, entities={entities}")
     return {**state, "scenario_agent_output": output}
 
 async def process_scenario_logic_node(state: AgentState) -> AgentState:
-    print("--- Node: Process Scenario Logic ---")
+    current_stage_id = state.get("current_scenario_stage_id", "N/A")
+    scenario_name = state.get("active_scenario_name", "N/A")
+    log_node_execution("Scenario_Flow", f"scenario={scenario_name}, stage={current_stage_id}")
     active_scenario_data = get_active_scenario_data(state)
     current_stage_id = state.get("current_scenario_stage_id")
     
@@ -728,7 +783,9 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
     }
 
 async def synthesize_response_node(state: AgentState) -> dict:
-    print("--- Node: Synthesize Response ---")
+    has_factual = bool(state.get("factual_response"))
+    has_contextual = bool(state.get("current_product_type"))
+    log_node_execution("Synthesizer", f"factual={has_factual}, contextual={has_contextual}")
     
     # 이미 final_response_text_for_tts가 설정되어 있으면 그것을 우선 사용
     existing_response = state.get("final_response_text_for_tts")
@@ -779,13 +836,13 @@ async def synthesize_response_node(state: AgentState) -> dict:
     if not final_answer:
         final_answer = "죄송합니다, 응답을 생성하는데 문제가 발생했습니다."
 
-    print(f"Final Synthesized Answer: {final_answer}")
+    log_node_execution("Synthesizer", output_info=f"response='{final_answer[:40]}...'")
     updated_messages = list(state['messages']) + [AIMessage(content=final_answer)]
     
     return {"final_response_text_for_tts": final_answer, "messages": updated_messages, "is_final_turn_response": True}
 
 async def end_conversation_node(state: AgentState) -> AgentState:
-    print("--- Node: End Conversation ---")
+    log_node_execution("End_Conversation", "terminating session")
     response_text = "상담을 종료합니다. 이용해주셔서 감사합니다."
     
     updated_messages = list(state.get("messages", [])) + [AIMessage(content=response_text)]
@@ -797,7 +854,12 @@ async def end_conversation_node(state: AgentState) -> AgentState:
     }
 
 async def set_product_type_node(state: AgentState) -> AgentState:
-    print(f"--- Node: Set Product Type ---")
+    action_plan_struct = state.get("action_plan_struct", [])
+    if action_plan_struct:
+        product_id = action_plan_struct[0].get("tool_input", {}).get("product_id", "N/A")
+        log_node_execution("Set_Product", f"product={product_id}")
+    else:
+        log_node_execution("Set_Product", "ERROR: no action plan")
     
     action_plan_struct = state.get("action_plan_struct", [])
     if not action_plan_struct:
@@ -845,7 +907,8 @@ async def set_product_type_node(state: AgentState) -> AgentState:
     }
     
 async def prepare_direct_response_node(state: AgentState) -> AgentState:
-    print("--- Node: Prepare Direct Response ---")
+    response_text = state.get("main_agent_direct_response", "")
+    log_node_execution("Direct_Response", f"response='{response_text[:30]}...'" if response_text else "generating fallback")
     response_text = state.get("main_agent_direct_response")
     
     # 메인 에이전트가 직접적인 응답을 생성하지 않은 경우 (e.g., chit-chat)
@@ -869,72 +932,67 @@ async def prepare_direct_response_node(state: AgentState) -> AgentState:
     updated_messages = list(state.get("messages", [])) + [AIMessage(content=response_text)]
     return {**state, "final_response_text_for_tts": response_text, "messages": updated_messages, "is_final_turn_response": True}
 
-# --- Conditional Edges ---
-def route_from_main_agent_router(state: AgentState) -> str:
-    decision = state.get("main_agent_routing_decision")
-    print(f"Routing from Main Agent based on: '{decision}'")
-    if state.get("is_final_turn_response"): return END
-    
-    route_map = {
-        "set_product_type_didimdol": "set_product_type_node",
-        "set_product_type_jeonse": "set_product_type_node",
-        "set_product_type_deposit_account": "set_product_type_node",
-        "select_product_type": "prepare_direct_response_node",
-        "answer_directly_chit_chat": "prepare_direct_response_node",
-        "invoke_scenario_agent": "call_scenario_agent_node",
-        "invoke_qa_agent": "factual_answer_node",
-        "end_conversation": END
-    }
-    return route_map.get(decision, "prepare_direct_response_node")
-
 def route_after_scenario_logic(state: AgentState) -> str:
     return "synthesize_response_node"
 
 def execute_plan_router(state: AgentState) -> str:
+    """간소화된 라우터 - Worker 중심 라우팅"""
     plan = state.get("action_plan", [])
     if not plan:
-        print("Routing: Plan complete -> Synthesize Response")
+        log_node_execution("Router", "plan_complete → synthesizer")
         return "synthesize_response_node"
 
     next_action = plan[0] 
-    print(f"Routing: Inspecting next action '{next_action}' from plan.")
+    target_node = None
     
-    action_to_node_map = {
-        "invoke_scenario_agent": "call_scenario_agent_node",
-        "invoke_qa_agent": "factual_answer_node",
+    # Worker 중심 라우팅 맵
+    worker_routing_map = {
+        "invoke_scenario_agent": "scenario_worker",
+        "invoke_qa_agent": "rag_worker", 
+        "invoke_web_search": "web_worker",
+        "set_product_type": "set_product_type_node",
+        "prepare_direct_response": "prepare_direct_response_node",
+        "end_conversation": "end_conversation_node",
+        # Legacy 지원
         "clarify_and_requery": "prepare_direct_response_node",
         "answer_directly_chit_chat": "prepare_direct_response_node",
-        "select_product_type": "prepare_direct_response_node", # clarify_product_type에서 변환됨
-        "set_product_type": "set_product_type_node",
-        "invoke_web_search": "web_search_node",
-        "end_conversation": "end_conversation_node",
+        "select_product_type": "prepare_direct_response_node"
     }
-    return action_to_node_map.get(next_action, "prepare_direct_response_node")
+    target_node = worker_routing_map.get(next_action, "prepare_direct_response_node")
+    log_node_execution("Router", f"{next_action} → {target_node.replace('_node', '').replace('_worker', '')}")
+    return target_node
 
-# --- Graph Build ---
+# --- Orchestration-Worker Graph Build ---
 workflow = StateGraph(AgentState)
 
+# Core Orchestrator
 workflow.add_node("entry_point_node", entry_point_node)
 workflow.add_node("main_agent_router_node", main_agent_router_node)
-workflow.add_node("call_scenario_agent_node", call_scenario_agent_node)
-workflow.add_node("process_scenario_logic_node", process_scenario_logic_node)
-workflow.add_node("factual_answer_node", factual_answer_node)
-workflow.add_node("web_search_node", web_search_node)
+
+# Specialized Workers
+workflow.add_node("scenario_worker", call_scenario_agent_node)
+workflow.add_node("scenario_flow_worker", process_scenario_logic_node) 
+workflow.add_node("rag_worker", factual_answer_node)
+workflow.add_node("web_worker", web_search_node)
+
+# Response & Control Nodes
 workflow.add_node("synthesize_response_node", synthesize_response_node)
 workflow.add_node("set_product_type_node", set_product_type_node)
 workflow.add_node("prepare_direct_response_node", prepare_direct_response_node)
 workflow.add_node("end_conversation_node", end_conversation_node)
 
+# Orchestrator Flow
 workflow.set_entry_point("entry_point_node")
 workflow.add_edge("entry_point_node", "main_agent_router_node")
 
+# Orchestrator to Workers
 workflow.add_conditional_edges(
     "main_agent_router_node",
     execute_plan_router,
     {
-        "call_scenario_agent_node": "call_scenario_agent_node",
-        "factual_answer_node": "factual_answer_node",
-        "web_search_node": "web_search_node",
+        "scenario_worker": "scenario_worker",
+        "rag_worker": "rag_worker", 
+        "web_worker": "web_worker",
         "synthesize_response_node": "synthesize_response_node",
         "prepare_direct_response_node": "prepare_direct_response_node",
         "set_product_type_node": "set_product_type_node",
@@ -942,10 +1000,11 @@ workflow.add_conditional_edges(
     }
 )
 
-workflow.add_edge("call_scenario_agent_node", "process_scenario_logic_node")
-workflow.add_conditional_edges("process_scenario_logic_node", execute_plan_router)
-workflow.add_conditional_edges("factual_answer_node", execute_plan_router)
-workflow.add_conditional_edges("web_search_node", execute_plan_router)
+# Worker Flows
+workflow.add_edge("scenario_worker", "scenario_flow_worker")
+workflow.add_conditional_edges("scenario_flow_worker", execute_plan_router)
+workflow.add_conditional_edges("rag_worker", execute_plan_router)
+workflow.add_conditional_edges("web_worker", execute_plan_router)
 
 workflow.add_edge("synthesize_response_node", END)
 workflow.add_edge("set_product_type_node", END)
@@ -953,7 +1012,7 @@ workflow.add_edge("prepare_direct_response_node", END)
 workflow.add_edge("end_conversation_node", END)
 
 app_graph = workflow.compile()
-print("--- LangGraph compiled successfully (Multi-Action Orchestrator model). ---")
+print("--- LangGraph compiled successfully (Orchestration-Worker Architecture). ---")
 
 async def run_agent_streaming(
     user_input_text: Optional[str] = None,
@@ -984,8 +1043,8 @@ async def run_agent_streaming(
         "scenario_awaiting_user_response": current_state_dict.get("scenario_awaiting_user_response", False) if current_state_dict else False,
     })
 
-    print(f"\n--- [{session_id}] Agent Turn Start ---")
-    print(f"Initial State Summary: product='{initial_state['current_product_type']}', stage='{initial_state['current_scenario_stage_id']}', text='{user_input_text}'")
+    print(f"\n🚀 ===== AGENT FLOW START [{session_id}] =====")
+    log_node_execution("Session", f"product={initial_state['current_product_type']}, input='{user_input_text[:30]}...'")
 
     final_state: Optional[AgentState] = None
     streamed_text = ""
@@ -1024,4 +1083,4 @@ async def run_agent_streaming(
             final_state["error_message"] = "Agent execution failed critically, no final state produced."
             final_state["is_final_turn_response"] = True
             yield {"type": "final_state", "data": final_state}
-        print(f"--- [{session_id}] Agent Turn End ---")
+        print(f"🏁 ===== AGENT FLOW END [{session_id}] =====")

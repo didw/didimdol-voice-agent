@@ -314,11 +314,10 @@ async def process_input_through_agent(
     # TTS 취소 플래그 초기화
     SESSION_STATES[session_id]['tts_cancelled'] = False
     
-    # 사용할 에이전트 결정
+    # 새로운 LLM 기반 에이전트 사용
     product_type = current_state.get("current_product_type", "")
-    use_unified = product_type == "deposit_account"
     
-    print(f"[{session_id}] Using {'Unified' if use_unified else 'Legacy'} Agent")
+    print(f"[{session_id}] Using New LLM-based Agent")
     
     full_ai_response_text = ""
     previous_state = {
@@ -330,7 +329,7 @@ async def process_input_through_agent(
     try:
         # 에이전트 출력 처리
         async for chunk in get_agent_generator(
-            use_unified, user_text, session_id, current_state, websocket
+            user_text, session_id, current_state, websocket
         ):
             full_ai_response_text, stream_ended, final_data = await handle_agent_output_chunk(
                 chunk, session_id, websocket, SESSION_STATES, full_ai_response_text

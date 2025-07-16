@@ -5,28 +5,8 @@ WebSocket 채팅 핸들러 - 에이전트 처리 로직
 import json
 from typing import Optional, Dict, Any, AsyncGenerator
 from langchain_core.messages import HumanMessage, AIMessage
-from ...graph.unified_agent_integration import process_with_unified_agent
-# from ...graph.agent import run_agent_streaming
-def run_agent_streaming(*args, **kwargs):
-    """임시 더미 함수"""
-    import asyncio
-    async def dummy_generator():
-        yield "안녕하세요! 입출금통장 개설을 도와드리겠습니다."
-        yield {"type": "stream_end"}
-        yield {
-            "type": "final_state", 
-            "data": {
-                "current_product_type": "deposit_account",
-                "active_scenario_data": None,
-                "collected_product_info": {},
-                "current_scenario_stage_id": "greeting_deposit",
-                "messages": [],
-                "final_response_text_for_tts": "안녕하세요! 입출금통장 개설을 도와드리겠습니다.",
-                "error_message": None,
-                "is_final_turn_response": True
-            }
-        }
-    return dummy_generator()
+# from ...graph.unified_agent_integration import process_with_unified_agent
+from ...graph.agent import run_agent_streaming
 from ...services.google_services import StreamTTSService
 from ...utils import split_into_sentences
 from ...services.google_services import GOOGLE_SERVICES_AVAILABLE
@@ -161,26 +141,16 @@ async def process_tts_for_response(
 
 
 async def get_agent_generator(
-    use_unified: bool,
     user_text: str,
     session_id: str,
     current_session_state: Dict[str, Any],
     websocket: Any
 ) -> AsyncGenerator:
-    """적절한 에이전트 제너레이터 반환"""
-    if use_unified:
-        # UnifiedMainAgent 사용
-        async for chunk in process_with_unified_agent(
-            state=current_session_state,
-            user_input=user_text,
-            websocket=websocket
-        ):
-            yield chunk
-    else:
-        # 기존 agent 사용 (GeneralMainAgent 포함)
-        async for chunk in run_agent_streaming(
-            user_input_text=user_text,
-            session_id=session_id,
-            current_state_dict=current_session_state
-        ):
-            yield chunk
+    """새로운 LLM 기반 에이전트 사용"""
+    # 새로운 LLM 기반 에이전트 사용
+    async for chunk in run_agent_streaming(
+        user_input_text=user_text,
+        session_id=session_id,
+        current_state_dict=current_session_state
+    ):
+        yield chunk

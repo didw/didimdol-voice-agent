@@ -41,20 +41,31 @@ uvicorn app.main:app --reload --port 8000
 - **Google Cloud**: STT/TTS
 - **Tavily**: 웹 검색
 
-## 구조 개선사항
+## 주요 개선사항
 
-### 정리된 디렉토리 구조
-- `app/agents/`: 핵심 에이전트 (entity_agent, unified_main_agent)
-- `app/agents/archive/`: 미사용 에이전트 보관
-- `app/api/V1/`: 리팩토링된 API 엔드포인트
-- `app/config/`: 통합된 설정 및 프롬프트 파일
-- `tests/`: 모든 테스트 파일 통합
-- `docs/design/`: PRD 및 설계 문서
+### Orchestration-Worker 아키텍처
+- `app/graph/agent.py`: LLM 기반 Orchestrator와 특화된 Worker들
+- 메인 에이전트가 모든 대화를 LLM으로 처리 (룰 기반 제거)
+- Worker: scenario_worker, rag_worker, web_worker
 
-### Slot Filling 시스템
-- 실시간 정보 수집 상태 추적
-- WebSocket을 통한 Frontend 업데이트
-- 시나리오별 필드 그룹화 지원
+### Product ID 매핑
+- `didimdol`: 디딤돌 대출
+- `jeonse`: 전세 대출
+- `deposit_account`: 입출금통장
+
+### 로깅 시스템
+- 노드 실행 추적: `🔄 [NodeName] input → output`
+- Agent Flow 시작/종료 표시
+- Slot Filling 업데이트 추적
+
+### 프롬프트 관리
+- `app/config/main_agent_prompts.yaml`: 메인 에이전트 프롬프트
+  - `business_guidance_prompt`: 일반 상담 모드
+  - `task_management_prompt`: 특정 제품 상담 모드
+
+### 시나리오 연속성
+- 시나리오 진행 중 사용자 응답 대기 상태 자동 관리
+- `scenario_ready_for_continuation` 플래그로 자동 진행
 
 ## 테스트
 

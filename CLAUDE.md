@@ -100,9 +100,19 @@ git commit -m "작업 내용 설명"
 git push origin main
 ```
 
+## 구조 개선사항
+
+### 정리된 프로젝트 구조
+- `backend/app/agents/`: 핵심 에이전트만 유지, 미사용 파일은 archive/ 폴더로 이동
+- `backend/app/api/V1/`: 중복 API 파일 통합 및 리팩토링
+- `backend/app/config/`: 모든 설정 및 프롬프트 파일 통합
+- `backend/tests/`: 모든 테스트 파일을 tests/ 디렉토리로 통합
+- `docs/design/`: PRD 및 설계 문서 별도 관리
+
 ## 추가 문서
 
 - [Backend 개발 가이드](backend/CLAUDE.md)
 - [Frontend 개발 가이드](frontend/CLAUDE.md)
 - [Nginx 설정 가이드](nginx/CLAUDE.md)
 - [테스트 가이드](README_TESTING.md)
+- [설계 문서](docs/design/)
