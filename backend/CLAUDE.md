@@ -29,6 +29,10 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # 서버 실행
+# 로컬 개발 (포트 충돌 시)
+uvicorn app.main:app --reload --port 8001
+
+# 프로덕션 (표준 포트)
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -41,49 +45,26 @@ uvicorn app.main:app --reload --port 8000
 - **Google Cloud**: STT/TTS
 - **Tavily**: 웹 검색
 
-## 주요 개선사항
+## 아키텍처 및 주요 기능
 
 ### Orchestration-Worker 아키텍처
-- `app/graph/agent.py`: LLM 기반 Orchestrator와 특화된 Worker들
-- 메인 에이전트가 모든 대화를 LLM으로 처리 (룰 기반 제거)
-- Worker: scenario_worker, rag_worker, web_worker
-- 직접 응답 생성: direct_response 필드를 통한 즉시 응답 (prepare_direct_response 제거)
+- `app/graph/agent.py`: 메인 Orchestrator와 Worker들
+- Workers: scenario_worker, rag_worker, web_worker
+- direct_response 필드를 통한 즉시 응답
 
-### Entity Agent 기반 개체 추출
-- `app/agents/entity_agent.py`: 전용 개체 추출 에이전트
-- 키워드 매칭 방식 제거, LLM 기반 지능형 추출로 전환
-- 시나리오 JSON 파일에 `extraction_prompt` 필드 추가
-- 필드별 맞춤형 추출 가이드 제공
+### Entity Agent
+- `app/agents/entity_agent.py`: LLM 기반 개체 추출
+- 시나리오 JSON의 `extraction_prompt` 필드 활용
 
-### Product ID 매핑
+### Product ID
 - `didimdol`: 디딤돌 대출
 - `jeonse`: 전세 대출
 - `deposit_account`: 입출금통장
 
-### 로깅 시스템
-- 노드 실행 추적: `🔄 [NodeName] input → output`
-- Agent Flow 시작/종료 표시
-- Slot Filling 업데이트 추적
-
-### 프롬프트 관리
-- `app/config/main_agent_prompts.yaml`: 메인 에이전트 프롬프트
-  - `business_guidance_prompt`: 일반 상담 모드 (한국어, direct_response 활용)
-  - `task_management_prompt`: 특정 제품 상담 모드
-- `app/config/service_descriptions.yaml`: 서비스 설명 정보 관리
-
-### 시나리오 연속성
-- 시나리오 진행 중 사용자 응답 대기 상태 자동 관리
-- `scenario_ready_for_continuation` 플래그로 자동 진행
-
-### Slot Filling 시스템 개선
-- `app/api/V1/chat_utils.py`: 개체 정보 전송 시스템 개선
-  - `required_info_fields` 우선 지원 (`slot_fields` 폴백)
-  - 시나리오 데이터에서 필드 그룹 자동 로드
-  - 디버깅용 상세 로그 및 추적 메시지 추가
-- 프론트엔드 디버깅 시스템 구축
-  - `SlotFillingDebug.vue`: 실시간 개체 수집 상태 모니터링
-  - WebSocket 메시지 수신/처리 상세 로그
-  - 필드별 상태 추적 및 히스토리 관리
+### 설정 파일
+- `app/config/main_agent_prompts.yaml`: 에이전트 프롬프트
+- `app/config/service_descriptions.yaml`: 서비스 설명
+- `app/data/scenarios/`: 시나리오 JSON 파일
 
 ## 테스트
 
@@ -101,12 +82,30 @@ python test_runner.py unit
 python test_runner.py coverage
 ```
 
+## 코드 품질 가이드
+
+### 1. 파일 수정 원칙
+- 파일명에 접미사 (_v2, _new, _temp) 금지
+- 기존 파일 직접 수정 또는 브랜치 사용
+
+### 2. 로깅
+- 노드 실행: `🔄 [NodeName] input → output`
+- 중요 이벤트만 로깅
+- 개발 환경에서만 DEBUG 레벨 사용
+
+### 3. 예외 처리
+- 모든 API 엔드포인트에 try-except 추가
+- 사용자 친화적 에러 메시지 반환
+
 ## 개발 완료 후
 
 ```bash
+# 기능 브랜치에서 작업
 git add .
-git commit -m "작업 설명"
-git push origin main
+git commit -m "feat: 기능 설명"
+git push origin feature/branch-name
+
+# PR 생성 후 리뷰 요청
 ```
 
 ## 관련 문서

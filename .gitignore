@@ -9,6 +9,8 @@ build/
 venv/
 .env
 backend/.env
+backend/.env.local
+backend/.env.production
 *.sqlite3
 
 # Node
@@ -19,6 +21,9 @@ yarn-debug.log*
 yarn-error.log*
 dist/
 frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
 
 # IDE / OS
 .vscode/
@@ -34,6 +39,50 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 .pnpm-debug.log*
+backend/log/
+backend/conversation_logs/
 
-# google credentials
+# Test files
+backend/test_*.py
+backend/*.json
+!backend/requirements*.json
+!backend/package*.json
+
+# Temporary files
+*.tmp
+*.temp
+*.cache
+.pytest_cache/
+
+# SSL/TLS certificates (security)
+*.pem
+*.key
+*.crt
+*.cer
+key/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+lancedb/
+backend/lancedb/
+
+# Google credentials
 key/shinhan-*.json
+*-credentials.json
+google-credentials.json
+
+# Nginx logs
+nginx/*.log
+nginx/logs/
+
+# Build artifacts
+frontend/.nuxt/
+frontend/.output/
+frontend/dist-ssr/
+*.local
+
+# Environment specific configs
+nginx/sites-enabled/
+nginx/sites-available/

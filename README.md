@@ -24,9 +24,21 @@
 
 ## 실행 방법
 
-1.  **Backend 설정 및 실행**: `backend/README.md` 참고
-2.  **Frontend 설정 및 실행**: `frontend/README.md` 참고
-3.  개발 환경 동시 실행: `scripts/run_dev.sh` 스크립트 사용 (필요시 경로 및 명령어 수정)
+### 로컬 개발 환경
+1. **환경 설정**: `LOCAL_SETUP.md` 참고
+2. **Backend 실행**: 
+   ```bash
+   cd backend
+   uvicorn app.main:app --reload --port 8001
+   ```
+3. **Frontend 실행**:
+   ```bash
+   cd frontend
+   npm run dev
+   ```
+
+### 프로덕션 환경
+- nginx 설정 및 빌드 배포: `LOCAL_SETUP.md` 참고
 
 ## 데이터 파일
 

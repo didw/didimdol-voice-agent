@@ -38,9 +38,10 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173", 
-        "http://127.0.0.1:5173", 
-        "https://3.36.13.147"
+        "http://localhost:5173",      # 로컬 개발
+        "http://127.0.0.1:5173",     # 로컬 개발
+        "https://aibranch.zapto.org", # 외부 호스팅
+        "https://43.202.47.188"       # 외부 호스팅 IP
     ],
     allow_credentials=True,
     allow_methods=["*"],

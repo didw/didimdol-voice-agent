@@ -1,5 +1,58 @@
 # Changelog
 
+## [2025-07-16] - 환경 분리 및 WebSocket 설정 개선
+
+### ✨ 새로운 기능
+- **로컬/프로덕션 환경 분리**
+  - `LOCAL_SETUP.md`: 환경별 설정 가이드 추가
+  - `.env.example` 템플릿 파일 제공
+  - 포트 설정 분리 (로컬: 8001, 프로덕션: 8000)
+
+### 🔧 개선사항
+- **nginx WebSocket 프록시 설정**
+  - 중첩 location 블록 제거로 설정 단순화
+  - WebSocket 전용 설정 추가 (buffering off, cache off)
+  - 정적 파일 서빙으로 성능 향상
+- **CORS 설정 업데이트**
+  - `aibranch.zapto.org` 도메인 추가
+  - 환경별 도메인 지원
+- **문서 개선**
+  - CLAUDE.md: 개발 가이드 중심으로 재구성
+  - Git 브랜치 전략 및 코드 품질 가이드 추가
+
+### 🐛 버그 수정
+- WebSocket 연결 오류 (Error 1006) 해결
+- nginx 권한 문제 (Permission denied) 수정
+- 프론트엔드 TypeScript 타입 오류 수정
+- 환경 변수 불일치 문제 해결
+
+### 🗑️ 제거됨
+- 임시 테스트 파일 및 불필요한 문서
+- HTML 커버리지 리포트 (htmlcov/)
+
+## [2025-07-16] - Entity Agent 및 아키텍처 개선
+
+### ✨ 새로운 기능
+- **Entity Agent 시스템**
+  - LLM 기반 지능형 개체 추출
+  - 시나리오별 extraction_prompt 필드
+  - 키워드 매칭 방식 대체
+- **Slot Filling 디버깅 도구**
+  - SlotFillingDebug.vue 컴포넌트
+  - 실시간 개체 수집 상태 모니터링
+  - WebSocket 메시지 추적
+
+### 🏗️ 아키텍처 변경
+- **Orchestration-Worker 패턴**
+  - 메인 Orchestrator와 특화 Worker 분리
+  - scenario_worker, rag_worker, web_worker
+  - direct_response 필드로 즉시 응답 지원
+
+### 🔧 개선사항
+- 통합 테스트 스위트 구축
+- 프롬프트 관리 시스템 개선
+- 디렉토리 구조 정리 (archive 폴더 활용)
+
 ## [2024-07-15] - Slot Filling System 구현
 
 ### ✨ 새로운 기능

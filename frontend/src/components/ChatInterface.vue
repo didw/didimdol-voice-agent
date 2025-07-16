@@ -287,7 +287,7 @@ watch(userInputText, (newValue) => {
         @keydown.space.prevent="togglePanel"
         class="panel-toggle-btn"
         :aria-label="isPanelOpen ? '정보 패널 닫기' : '정보 패널 열기'"
-        :aria-expanded="isPanelOpen.toString()"
+        :aria-expanded="isPanelOpen ? 'true' : 'false'"
         role="button"
       >
         <span v-if="!isPanelOpen" aria-hidden="true">☰</span>
