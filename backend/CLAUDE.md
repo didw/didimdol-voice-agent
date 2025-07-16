@@ -49,6 +49,12 @@ uvicorn app.main:app --reload --port 8000
 - Worker: scenario_worker, rag_worker, web_worker
 - 직접 응답 생성: direct_response 필드를 통한 즉시 응답 (prepare_direct_response 제거)
 
+### Entity Agent 기반 개체 추출
+- `app/agents/entity_agent.py`: 전용 개체 추출 에이전트
+- 키워드 매칭 방식 제거, LLM 기반 지능형 추출로 전환
+- 시나리오 JSON 파일에 `extraction_prompt` 필드 추가
+- 필드별 맞춤형 추출 가이드 제공
+
 ### Product ID 매핑
 - `didimdol`: 디딤돌 대출
 - `jeonse`: 전세 대출
