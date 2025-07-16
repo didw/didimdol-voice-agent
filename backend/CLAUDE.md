@@ -75,6 +75,16 @@ uvicorn app.main:app --reload --port 8000
 - 시나리오 진행 중 사용자 응답 대기 상태 자동 관리
 - `scenario_ready_for_continuation` 플래그로 자동 진행
 
+### Slot Filling 시스템 개선
+- `app/api/V1/chat_utils.py`: 개체 정보 전송 시스템 개선
+  - `required_info_fields` 우선 지원 (`slot_fields` 폴백)
+  - 시나리오 데이터에서 필드 그룹 자동 로드
+  - 디버깅용 상세 로그 및 추적 메시지 추가
+- 프론트엔드 디버깅 시스템 구축
+  - `SlotFillingDebug.vue`: 실시간 개체 수집 상태 모니터링
+  - WebSocket 메시지 수신/처리 상세 로그
+  - 필드별 상태 추적 및 히스토리 관리
+
 ## 테스트
 
 ```bash
