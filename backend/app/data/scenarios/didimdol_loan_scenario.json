@@ -12,7 +12,8 @@
       "display_name": "대출 목적",
       "required": true,
       "type": "boolean",
-      "description": "주택 구입 목적인지 확인"
+      "description": "주택 구입 목적인지 확인",
+      "extraction_prompt": "고객이 '주택 구입', '집 사고 싶어', '내 집 마련', '매수' 등의 표현을 사용하면 true로 추출하세요. '전세', '임대', '투자' 등은 false로 추출하세요."
     },
     {
       "key": "marital_status", 
@@ -20,14 +21,16 @@
       "required": true,
       "type": "choice",
       "choices": ["미혼", "기혼", "예비부부"],
-      "description": "혼인 상태 (미혼/기혼/예비부부)"
+      "description": "혼인 상태 (미혼/기혼/예비부부)",
+      "extraction_prompt": "고객이 '미혼', '싱글', '혼자' 등을 언급하면 '미혼'으로 추출하세요. '기혼', '결혼', '부부', '배우자' 등을 언급하면 '기혼'으로 추출하세요. '예비부부', '약혼', '결혼 예정' 등을 언급하면 '예비부부'로 추출하세요."
     },
     {
       "key": "has_home",
       "display_name": "주택 소유 여부",
       "required": true, 
       "type": "boolean",
-      "description": "현재 주택 소유 여부"
+      "description": "현재 주택 소유 여부",
+      "extraction_prompt": "고객이 '무주택', '집 없어', '주택 없어', '처음 사는' 등을 언급하면 false로 추출하세요. '집 있어', '주택 있어', '소유하고 있어', '1주택' 등을 언급하면 true로 추출하세요."
     },
     {
       "key": "annual_income",
@@ -35,7 +38,8 @@
       "required": true,
       "type": "number",
       "unit": "만원",
-      "description": "세전 연소득 (부부 합산)"
+      "description": "세전 연소득 (부부 합산)",
+      "extraction_prompt": "고객이 '5천만원', '오천만원', '5000만원', '연봉 5000' 등을 언급하면 5000으로 추출하세요. '1억', '일억원' 등은 10000으로 추출하세요. 단위는 만원 기준으로 변환하세요."
     },
     {
       "key": "target_home_price",
@@ -43,7 +47,8 @@
       "required": true,
       "type": "number", 
       "unit": "만원",
-      "description": "구입 예정 주택의 매매 가격"
+      "description": "구입 예정 주택의 매매 가격",
+      "extraction_prompt": "고객이 '3억', '삼억원', '30000만원' 등을 언급하면 30000으로 추출하세요. '5억 5천', '오억 오천만원' 등은 55000으로 추출하세요. 단위는 만원 기준으로 변환하세요."
     }
   ],
   "field_groups": [

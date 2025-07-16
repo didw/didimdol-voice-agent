@@ -50,74 +50,7 @@ def log_node_execution(node_name: str, input_info: str = "", output_info: str = 
 
 # --- Helper Functions for Information Collection ---
 
-def extract_multiple_info_from_text(text: str, required_fields: List[Dict]) -> Dict[str, Any]:
-    """텍스트에서 여러 정보를 한번에 추출"""
-    extracted_info = {}
-    
-    # 각 필드별로 키워드 기반 추출
-    field_patterns = {
-        "loan_purpose_confirmed": {
-            "keywords": ["주택 구입", "구매", "구입", "집 사", "내집마련", "주택구입", "주택 구매"],
-            "negative_keywords": ["아니", "다른", "전세", "임대"],
-            "type": "boolean"
-        },
-        "marital_status": {
-            "keywords": {"미혼": ["미혼", "싱글", "혼자"], "기혼": ["기혼", "결혼", "부부"], "예비부부": ["예비부부", "약혼", "결혼예정"]},
-            "type": "choice"
-        },
-        "has_home": {
-            "keywords": ["무주택", "집 없", "주택 없"],
-            "negative_keywords": ["집 있", "주택 있", "소유", "1주택"],
-            "type": "boolean",
-            "default_negative": True
-        },
-        "annual_income": {
-            "patterns": [r"(\d+)천만?원?", r"(\d+)만원", r"(\d+)억", r"소득\s*(\d+)", r"연봉\s*(\d+)"],
-            "type": "number",
-            "unit": "만원"
-        },
-        "target_home_price": {
-            "patterns": [r"(\d+)억", r"(\d+)천만?원?", r"집값\s*(\d+)", r"주택\s*(\d+)", r"가격\s*(\d+)"],
-            "type": "number", 
-            "unit": "만원"
-        }
-    }
-    
-    text_lower = text.lower()
-    
-    for field_key, field_config in field_patterns.items():
-        if field_config["type"] == "boolean":
-            if any(keyword in text_lower for keyword in field_config["keywords"]):
-                extracted_info[field_key] = True
-            elif "negative_keywords" in field_config and any(keyword in text_lower for keyword in field_config["negative_keywords"]):
-                extracted_info[field_key] = False
-            elif field_config.get("default_negative"):
-                if any(keyword in text_lower for keyword in field_config.get("negative_keywords", [])):
-                    extracted_info[field_key] = False
-                    
-        elif field_config["type"] == "choice" and "keywords" in field_config:
-            for choice_value, choice_keywords in field_config["keywords"].items():
-                if any(keyword in text_lower for keyword in choice_keywords):
-                    extracted_info[field_key] = choice_value
-                    break
-                    
-        elif field_config["type"] == "number" and "patterns" in field_config:
-            for pattern in field_config["patterns"]:
-                matches = re.findall(pattern, text)
-                if matches:
-                    try:
-                        number = int(matches[0])
-                        # 단위 변환 (억 -> 만원)
-                        if "억" in text:
-                            number *= 10000
-                        elif "천만" in text:
-                            number *= 1000
-                        extracted_info[field_key] = number
-                        break
-                    except ValueError:
-                        continue
-    
-    return extracted_info
+# 키워드 기반 추출 로직 제거 - Entity Agent 사용으로 대체
 
 def check_required_info_completion(collected_info: Dict, required_fields: List[Dict]) -> tuple[bool, List[str]]:
     """필수 정보 수집 완료 여부 확인"""
@@ -559,6 +492,7 @@ async def call_scenario_agent_node(state: AgentState) -> AgentState:
         scenario_name=active_scenario_data.get("scenario_name", "Consultation")
     )
     intent = output.get("intent", "N/A")
+    
     entities = list(output.get("entities", {}).keys())
     log_node_execution("Scenario_NLU", output_info=f"intent={intent}, entities={entities}")
     return {**state, "scenario_agent_output": output}
@@ -598,32 +532,20 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
     print(f"현재 스테이지 ID: {current_stage_id}")
     if current_stage_id in ["info_collection_guidance", "process_collected_info", "ask_missing_info_group1", "ask_missing_info_group2", "ask_missing_info_group3", "eligibility_assessment"]:
         
-        # 사용자 입력에서 정보 추출
+        # Entity Agent를 사용한 정보 추출
         if user_input:
-            extracted_info = extract_multiple_info_from_text(user_input, required_fields)
-            print(f"키워드 기반 추출된 정보: {extracted_info}")
+            from ..agents.entity_agent import entity_agent
             
-            # 시나리오 에이전트 결과도 활용
-            scenario_output = state.get("scenario_agent_output", {})
-            if scenario_output and scenario_output.get("entities"):
-                scenario_entities = scenario_output["entities"]
-                print(f"시나리오 에이전트 추출 정보: {scenario_entities}")
-                
-                # 시나리오 에이전트 결과를 우리 필드로 매핑
-                if "loan_purpose" in scenario_entities and "주택 구입" in scenario_entities["loan_purpose"]:
-                    extracted_info["loan_purpose_confirmed"] = True
-                    print("시나리오 에이전트에서 대출 목적 확인됨")
-                
-                if "marital_status" in scenario_entities:
-                    extracted_info["marital_status"] = scenario_entities["marital_status"]
-                    print(f"시나리오 에이전트에서 혼인상태 확인: {scenario_entities['marital_status']}")
+            # Entity Agent로 정보 추출
+            extraction_result = await entity_agent.process_slot_filling(user_input, required_fields, collected_info)
             
-            # 수집된 정보 업데이트
-            collected_info.update(extracted_info)
+            # 추출된 정보 업데이트
+            collected_info = extraction_result["collected_info"]
+            print(f"Entity Agent 추출 결과: {extraction_result['extracted_entities']}")
             print(f"최종 업데이트된 수집 정보: {collected_info}")
         
         # 정보 수집 완료 여부 확인
-        is_complete, missing_fields = check_required_info_completion(collected_info, required_fields)
+        is_complete, missing_field_names = check_required_info_completion(collected_info, required_fields)
         
         if current_stage_id == "info_collection_guidance":
             # 초기 정보 안내 후 바로 다음 그룹 질문 결정
@@ -706,6 +628,8 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
     if scenario_output and scenario_output.get("is_scenario_related"):
         entities = scenario_output.get("entities", {})
         intent = scenario_output.get("intent", "")
+        
+        print(f"Single info collection - intent: {intent}, entities: {entities}")
         
         if entities and user_input:
             print(f"--- Verifying extracted entities: {entities} ---")
@@ -807,6 +731,8 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         
         current_stage_id_for_prompt = str(next_stage_id)
         
+        # 로직 스테이지용 prompt_template 정의
+        prompt_template = ALL_PROMPTS.get('main_agent', {}).get('determine_next_scenario_stage', '')
         llm_prompt = prompt_template.format(
             active_scenario_name=active_scenario_data.get("scenario_name"),
             current_stage_id=current_stage_id_for_prompt,

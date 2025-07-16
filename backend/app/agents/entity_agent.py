@@ -23,11 +23,13 @@ class EntityRecognitionAgent:
 **현재 상황:**
 - 수집해야 할 정보: {required_fields}
 - 고객 발화: "{user_input}"
+- 추가 추출 가이드: {extraction_prompts}
 
 **추출 규칙:**
 1. 고객이 명시적으로 언급한 정보만 추출하세요.
 2. 추측하거나 암시적인 정보는 추출하지 마세요.
 3. 필드 타입에 맞는 형식으로 추출하세요.
+4. 추가 추출 가이드가 제공된 경우 이를 참고하세요.
 
 **필드 타입별 추출 방법:**
 - text: 고객이 말한 그대로 텍스트로 추출
@@ -94,18 +96,30 @@ class EntityRecognitionAgent:
         
         # 필드 정보를 프롬프트에 포함할 형태로 변환
         field_descriptions = []
+        extraction_prompts = []
+        
         for field in required_fields:
             desc = f"- {field['key']} ({field['type']}): {field['display_name']}"
             if field.get('choices'):
                 desc += f" [선택지: {', '.join(field['choices'])}]"
             field_descriptions.append(desc)
+            
+            # 개별 필드의 추출 프롬프트 수집
+            if field.get('extraction_prompt'):
+                extraction_prompts.append(f"- {field['key']}: {field['extraction_prompt']}")
+        
+        # 추출 가이드 텍스트 생성
+        extraction_guide = '\n'.join(extraction_prompts) if extraction_prompts else "없음"
         
         prompt = self.extraction_prompt.format(
             required_fields='\n'.join(field_descriptions),
-            user_input=user_input
+            user_input=user_input,
+            extraction_prompts=extraction_guide
         )
         
         try:
+            # JSON 형식 요청을 프롬프트에 명시적으로 추가
+            prompt += "\n\n반드시 JSON 형식으로 응답해주세요."
             response = await json_llm.ainvoke([HumanMessage(content=prompt)])
             result = json.loads(response.content)
             
@@ -134,6 +148,8 @@ class EntityRecognitionAgent:
         )
         
         try:
+            # JSON 형식 요청을 프롬프트에 명시적으로 추가
+            prompt += "\n\n반드시 JSON 형식으로 응답해주세요."
             response = await json_llm.ainvoke([HumanMessage(content=prompt)])
             result = json.loads(response.content)
             
