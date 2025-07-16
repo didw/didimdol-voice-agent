@@ -25,17 +25,22 @@
 ## 실행 방법
 
 ### 로컬 개발 환경
+
 1. **환경 설정**: `LOCAL_SETUP.md` 참고
 2. **Backend 실행**: 
    ```bash
    cd backend
    uvicorn app.main:app --reload --port 8001
    ```
+   - 기본 포트: 8000 (사용 중인 경우 8001 등으로 변경 가능)
+   
 3. **Frontend 실행**:
    ```bash
    cd frontend
    npm run dev
    ```
+   - `.env.development.example`을 `.env.development`로 복사하여 사용
+   - 백엔드 포트를 변경했다면 `.env.development` 파일의 포트 번호도 수정
 
 ### 프로덕션 환경
 - nginx 설정 및 빌드 배포: `LOCAL_SETUP.md` 참고
