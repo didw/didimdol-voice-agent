@@ -52,6 +52,29 @@ uvicorn app.main:app --reload --port 8000
 - Workers: scenario_worker, rag_worker, web_worker
 - direct_response 필드를 통한 즉시 응답
 
+### 🆕 모듈화된 노드 구조 (2025-07-17)
+```
+app/graph/nodes/
+├── orchestrator/
+│   ├── entry_point.py      # 진입점 노드
+│   └── main_router.py      # 메인 라우터
+├── workers/
+│   ├── scenario_agent.py   # 시나리오 에이전트 노드
+│   ├── scenario_logic.py   # 시나리오 로직 처리
+│   ├── scenario_helpers.py # 시나리오 헬퍼 함수들
+│   ├── rag_worker.py       # RAG 검색 워커
+│   └── web_worker.py       # 웹 검색 워커
+└── control/
+    ├── synthesize.py       # 응답 합성
+    ├── set_product.py      # 상품 설정
+    └── end_conversation.py # 대화 종료
+```
+
+### 🆕 Pydantic 상태 관리 시스템
+- `app/graph/state.py`: AgentState, ScenarioAgentOutput (Pydantic BaseModel)
+- 타입 안전성 및 validation 강화
+- LangGraph 호환성을 위한 dict-like 인터페이스 제공
+
 ### Entity Agent
 - `app/agents/entity_agent.py`: LLM 기반 개체 추출
 - 시나리오 JSON의 `extraction_prompt` 필드 활용
