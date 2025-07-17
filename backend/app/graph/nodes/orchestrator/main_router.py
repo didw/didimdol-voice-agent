@@ -8,7 +8,7 @@ import traceback
 from pathlib import Path
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from ...state import AgentState, AgentStateModel
+from ...state import AgentState
 from ...state_utils import ensure_pydantic_state, ensure_dict_state
 from ...models import initial_task_decision_parser, main_router_decision_parser, ActionModel
 from ...utils import (

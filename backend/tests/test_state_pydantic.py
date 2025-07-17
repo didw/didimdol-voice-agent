@@ -2,7 +2,7 @@ import pytest
 from typing import Dict, Any
 from datetime import datetime, timedelta
 
-from app.graph.state import AgentState, AgentStateModel, ScenarioAgentOutput, ScenarioAgentOutputModel
+from app.graph.state import AgentState, ScenarioAgentOutput
 from app.graph.state_utils import (
     merge_state_updates, ensure_pydantic_state, ensure_dict_state,
     convert_scenario_output, validate_state_transition, clean_turn_state,
@@ -14,16 +14,16 @@ from langchain_core.messages import HumanMessage, AIMessage
 class TestPydanticStateModels:
     """Test Pydantic state models"""
     
-    def test_scenario_agent_output_model_creation(self):
-        """Test ScenarioAgentOutputModel creation and conversion"""
+    def test_scenario_agent_output_creation(self):
+        """Test ScenarioAgentOutput creation and conversion"""
         # Test creation with defaults
-        output = ScenarioAgentOutputModel()
+        output = ScenarioAgentOutput()
         assert output.intent is None
         assert output.entities == {}
         assert output.is_scenario_related is False
         
         # Test creation with values
-        output = ScenarioAgentOutputModel(
+        output = ScenarioAgentOutput(
             intent="test_intent",
             entities={"key": "value"},
             is_scenario_related=True
@@ -33,29 +33,29 @@ class TestPydanticStateModels:
         assert output.is_scenario_related is True
         
     def test_scenario_agent_output_conversion(self):
-        """Test conversion between Pydantic and TypedDict"""
-        # Pydantic -> TypedDict
-        pydantic_output = ScenarioAgentOutputModel(
+        """Test conversion between Pydantic and dict"""
+        # Pydantic -> dict
+        pydantic_output = ScenarioAgentOutput(
             intent="test_intent",
             entities={"key": "value"},
             is_scenario_related=True
         )
-        dict_output = pydantic_output.to_dict()
+        dict_output = pydantic_output.model_dump()
         
         assert isinstance(dict_output, dict)
         assert dict_output["intent"] == "test_intent"
         assert dict_output["entities"] == {"key": "value"}
         assert dict_output["is_scenario_related"] is True
         
-        # TypedDict -> Pydantic
-        converted_back = ScenarioAgentOutputModel.from_dict(dict_output)
+        # dict -> Pydantic
+        converted_back = ScenarioAgentOutput(**dict_output)
         assert converted_back.intent == "test_intent"
         assert converted_back.entities == {"key": "value"}
         assert converted_back.is_scenario_related is True
         
-    def test_agent_state_model_creation(self):
-        """Test AgentStateModel creation with defaults"""
-        state = AgentStateModel(session_id="test_session")
+    def test_agent_state_creation(self):
+        """Test AgentState creation with defaults"""
+        state = AgentState(session_id="test_session")
         
         assert state.session_id == "test_session"
         assert state.user_input_text is None
@@ -67,22 +67,23 @@ class TestPydanticStateModels:
         assert isinstance(state.created_at, datetime)
         assert isinstance(state.updated_at, datetime)
         
-    def test_agent_state_model_validation(self):
-        """Test AgentStateModel validation"""
+    def test_agent_state_validation(self):
+        """Test AgentState validation"""
         # Test messages validation
-        state = AgentStateModel(session_id="test", messages=None)
+        state = AgentState(session_id="test", messages=None)
         assert state.messages == []
         
         # Test with actual messages
+        from langchain_core.messages import HumanMessage
         messages = [HumanMessage(content="Hello")]
-        state = AgentStateModel(session_id="test", messages=messages)
+        state = AgentState(session_id="test", messages=messages)
         assert len(state.messages) == 1
         assert state.messages[0].content == "Hello"
         
     def test_agent_state_conversion(self):
-        """Test conversion between AgentStateModel and TypedDict"""
+        """Test conversion between AgentState and dict"""
         # Create Pydantic model
-        pydantic_state = AgentStateModel(
+        pydantic_state = AgentState(
             session_id="test_session",
             user_input_text="Hello",
             current_product_type="didimdol",
@@ -90,7 +91,7 @@ class TestPydanticStateModels:
             action_plan=["action1", "action2"]
         )
         
-        # Convert to TypedDict
+        # Convert to dict
         dict_state = pydantic_state.to_dict()
         assert isinstance(dict_state, dict)
         assert dict_state["session_id"] == "test_session"
@@ -104,14 +105,14 @@ class TestPydanticStateModels:
         assert "updated_at" not in dict_state
         
         # Convert back to Pydantic
-        converted_back = AgentStateModel.from_dict(dict_state)
+        converted_back = AgentState.from_dict(dict_state)
         assert converted_back.session_id == "test_session"
         assert converted_back.user_input_text == "Hello"
         assert converted_back.current_product_type == "didimdol"
         
     def test_agent_state_merge_update(self):
         """Test merge_update method"""
-        state = AgentStateModel(session_id="test")
+        state = AgentState(session_id="test")
         original_time = state.updated_at
         
         # Small delay to ensure timestamp difference
@@ -133,7 +134,7 @@ class TestPydanticStateModels:
         
     def test_update_timestamp(self):
         """Test timestamp update"""
-        state = AgentStateModel(session_id="test")
+        state = AgentState(session_id="test")
         original_time = state.updated_at
         
         # Small delay to ensure timestamp difference
@@ -195,8 +196,8 @@ class TestStateUtils:
         
     def test_ensure_pydantic_state(self):
         """Test ensure_pydantic_state function"""
-        # Test with TypedDict
-        dict_state: AgentState = {
+        # Test with dict
+        dict_state = {
             "session_id": "test",
             "user_input_text": "Hello",
             "is_final_turn_response": False,
@@ -224,7 +225,7 @@ class TestStateUtils:
         }
         
         pydantic_state = ensure_pydantic_state(dict_state)
-        assert isinstance(pydantic_state, AgentStateModel)
+        assert isinstance(pydantic_state, AgentState)
         assert pydantic_state.session_id == "test"
         assert pydantic_state.user_input_text == "Hello"
         assert pydantic_state.current_product_type == "didimdol"
@@ -236,7 +237,7 @@ class TestStateUtils:
     def test_ensure_dict_state(self):
         """Test ensure_dict_state function"""
         # Test with Pydantic state
-        pydantic_state = AgentStateModel(
+        pydantic_state = AgentState(
             session_id="test",
             user_input_text="Hello",
             current_product_type="didimdol"
@@ -258,22 +259,22 @@ class TestStateUtils:
         result = convert_scenario_output(None)
         assert result is None
         
-        # Test with Pydantic model
-        pydantic_output = ScenarioAgentOutputModel(
-            intent="test",
-            entities={"key": "value"},
-            is_scenario_related=True
-        )
+        # Test with dict
+        dict_output = {
+            "intent": "test",
+            "entities": {"key": "value"},
+            "is_scenario_related": True
+        }
         
-        dict_output = convert_scenario_output(pydantic_output)
-        assert isinstance(dict_output, dict)
-        assert dict_output["intent"] == "test"
-        assert dict_output["entities"] == {"key": "value"}
-        assert dict_output["is_scenario_related"] is True
+        pydantic_output = convert_scenario_output(dict_output)
+        assert isinstance(pydantic_output, ScenarioAgentOutput)
+        assert pydantic_output.intent == "test"
+        assert pydantic_output.entities == {"key": "value"}
+        assert pydantic_output.is_scenario_related is True
         
-        # Test with already dict format
-        same_output = convert_scenario_output(dict_output)
-        assert same_output is dict_output
+        # Test with already Pydantic format
+        same_output = convert_scenario_output(pydantic_output)
+        assert same_output is pydantic_output
         
     def test_validate_state_transition(self):
         """Test validate_state_transition function"""

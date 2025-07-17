@@ -1,82 +1,80 @@
 # backend/app/graph/state_utils.py
 """
-State conversion utilities for hybrid TypedDict/Pydantic approach
+State conversion utilities for Pydantic-based state management
 """
 
 from typing import Dict, Any, Optional, Union
-from .state import AgentState, AgentStateModel, ScenarioAgentOutput, ScenarioAgentOutputModel
+from .state import AgentState, ScenarioAgentOutput
 
 
-def merge_state_updates(base_state: AgentState, updates: Dict[str, Any]) -> AgentState:
+def merge_state_updates(base_state: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
     """
     Merge updates into base state safely.
     
     Args:
-        base_state: Base AgentState
+        base_state: Base state dict
         updates: Updates to merge
         
     Returns:
-        Updated AgentState
+        Updated state dict
     """
     result = base_state.copy()
     result.update(updates)
     return result
 
 
-def ensure_pydantic_state(state: Union[AgentState, AgentStateModel]) -> AgentStateModel:
+def ensure_pydantic_state(state: Union[AgentState, Dict[str, Any]]) -> AgentState:
     """
     Ensure state is in Pydantic format.
     
     Args:
-        state: State in either TypedDict or Pydantic format
+        state: State in any format
         
     Returns:
-        AgentStateModel instance
+        AgentState instance
     """
-    if isinstance(state, AgentStateModel):
+    if isinstance(state, AgentState):
         return state
     
-    # Convert from TypedDict to Pydantic
-    return AgentStateModel.from_dict(state)
+    return AgentState.from_dict(state)
 
 
-def ensure_dict_state(state: Union[AgentState, AgentStateModel]) -> AgentState:
+def ensure_dict_state(state: Union[AgentState, Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Ensure state is in TypedDict format.
+    Ensure state is in dict format.
     
     Args:
-        state: State in either TypedDict or Pydantic format
+        state: State in any format
         
     Returns:
-        AgentState (TypedDict) instance
+        Dict representation of state
     """
-    if isinstance(state, AgentStateModel):
+    if isinstance(state, AgentState):
         return state.to_dict()
     
-    # Already in TypedDict format
     return state
 
 
-def convert_scenario_output(output: Optional[Union[ScenarioAgentOutput, ScenarioAgentOutputModel]]) -> Optional[ScenarioAgentOutput]:
+def convert_scenario_output(output: Optional[Union[ScenarioAgentOutput, Dict[str, Any]]]) -> Optional[ScenarioAgentOutput]:
     """
-    Convert scenario output to TypedDict format.
+    Convert scenario output to Pydantic format.
     
     Args:
-        output: Scenario output in either format
+        output: Scenario output in any format
         
     Returns:
-        ScenarioAgentOutput or None
+        ScenarioAgentOutput instance or None
     """
     if output is None:
         return None
     
-    if isinstance(output, ScenarioAgentOutputModel):
-        return output.to_dict()
+    if isinstance(output, dict):
+        return ScenarioAgentOutput(**output)
     
     return output
 
 
-def validate_state_transition(old_state: AgentState, new_state: AgentState) -> bool:
+def validate_state_transition(old_state: Dict[str, Any], new_state: Dict[str, Any]) -> bool:
     """
     Validate that a state transition is valid.
     
@@ -99,7 +97,7 @@ def validate_state_transition(old_state: AgentState, new_state: AgentState) -> b
     return True
 
 
-def clean_turn_state(state: AgentState) -> AgentState:
+def clean_turn_state(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Clean turn-specific state for new turn.
     
@@ -139,7 +137,7 @@ def clean_turn_state(state: AgentState) -> AgentState:
     return cleaned
 
 
-def extract_conversation_context(state: AgentState) -> Dict[str, Any]:
+def extract_conversation_context(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Extract conversation context from state.
     

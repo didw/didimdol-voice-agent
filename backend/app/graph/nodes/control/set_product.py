@@ -4,7 +4,7 @@
 """
 from langchain_core.messages import AIMessage
 
-from ...state import AgentState, AgentStateModel
+from ...state import AgentState
 from ...state_utils import ensure_pydantic_state, ensure_dict_state
 from ...models import ActionModel
 from ...utils import ALL_SCENARIOS_DATA

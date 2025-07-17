@@ -1,89 +1,24 @@
 # backend/app/graph/state.py
 
-from typing import Dict, TypedDict, Optional, Sequence, Literal, Any, List, Union, cast
+from typing import Dict, Optional, Sequence, Literal, Any, List, Union, cast
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from datetime import datetime
 
 
-PRODUCT_TYPES = Literal["didimdol", "jeonse", "deposit_account"] # Existing
+PRODUCT_TYPES = Literal["didimdol", "jeonse", "deposit_account"]
 
-class ScenarioAgentOutput(TypedDict, total=False):
-    intent: Optional[str]
-    entities: Optional[Dict[str, Any]]
-    is_scenario_related: bool
+# === Pydantic Models for Type Safety ===
 
-class AgentState(TypedDict):
-    # --- Core Session & Input ---
-    session_id: str
-    user_input_text: Optional[str]
-    user_input_audio_b64: Optional[str] # Retained for completeness
-    
-    # --- Turn-specific State ---
-    stt_result: Optional[str]
-    error_message: Optional[str]
-    is_final_turn_response: bool
-    
-    # --- Product & Scenario Management ---
-    current_product_type: Optional[PRODUCT_TYPES]
-    available_product_types: List[PRODUCT_TYPES]
-    collected_product_info: Dict[str, Any]
-    current_scenario_stage_id: Optional[str]
-    loan_selection_is_fresh: Optional[bool] # True if product was just selected
-
-    # --- Dynamic Data (Loaded per turn) ---
-    active_scenario_data: Optional[Dict]
-    active_knowledge_base_content: Optional[str]
-    active_scenario_name: Optional[str]
-    
-    # --- Agent & Tool Outputs (Major Change) ---
-
-    # NEW: The plan of actions to execute for the turn
-    action_plan: List[str]
-    
-    # The Main Agent's routing decision
-    main_agent_routing_decision: Optional[str] 
-    # A direct response if the action is simple (e.g., chit-chat)
-    main_agent_direct_response: Optional[str] 
-    # The factual answer from the QA tool/chain
-    factual_response: Optional[str]
-    # The output from the Scenario NLU tool
-    scenario_agent_output: Optional[ScenarioAgentOutput]
-    
-    # --- Conversation History & Final Response ---
-    messages: Sequence[BaseMessage]
-    final_response_text_for_tts: Optional[str]
-
-    # --- Turn-specific state (cleared at the start of each turn) ---
-    action_plan_struct: List[Dict[str, Any]] # Holds the full action details
-    
-    # --- Scenario Continuation Management ---
-    scenario_ready_for_continuation: Optional[bool] # True if scenario should continue next turn
-    scenario_awaiting_user_response: Optional[bool] # True if waiting for user input to continue scenario
-
-
-# === Pydantic Models for Enhanced Type Safety ===
-
-class ScenarioAgentOutputModel(BaseModel):
-    """Pydantic version of ScenarioAgentOutput"""
+class ScenarioAgentOutput(BaseModel):
+    """Scenario agent output with type safety"""
     intent: Optional[str] = None
     entities: Optional[Dict[str, Any]] = Field(default_factory=dict)
     is_scenario_related: bool = False
-    
-    def to_dict(self) -> ScenarioAgentOutput:
-        """Convert to TypedDict format"""
-        return cast(ScenarioAgentOutput, self.model_dump(exclude_none=True))
-    
-    @classmethod
-    def from_dict(cls, data: Optional[ScenarioAgentOutput]) -> Optional["ScenarioAgentOutputModel"]:
-        """Create from TypedDict format"""
-        if data is None:
-            return None
-        return cls(**data)
 
 
-class AgentStateModel(BaseModel):
-    """Pydantic version of AgentState with validation and type safety"""
+class AgentState(BaseModel):
+    """Main agent state with validation and type safety"""
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
@@ -139,16 +74,16 @@ class AgentStateModel(BaseModel):
             return []
         return v
     
-    def to_dict(self) -> AgentState:
-        """Convert to TypedDict format for LangGraph compatibility"""
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dict format for LangGraph compatibility"""
         data = self.model_dump(exclude={'created_at', 'updated_at'})
         # Preserve BaseMessage objects as-is
         data['messages'] = list(self.messages)
-        return cast(AgentState, data)
+        return data
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AgentStateModel":
-        """Create from TypedDict format"""
+    def from_dict(cls, data: Dict[str, Any]) -> "AgentState":
+        """Create from dict format"""
         # Handle datetime fields
         now = datetime.now()
         data.setdefault('created_at', now)
@@ -160,9 +95,9 @@ class AgentStateModel(BaseModel):
         """Update the timestamp"""
         self.updated_at = datetime.now()
     
-    def merge_update(self, updates: Dict[str, Any]) -> "AgentStateModel":
+    def merge_update(self, updates: Dict[str, Any]) -> "AgentState":
         """Merge updates and return new instance"""
         current_data = self.model_dump()
         current_data.update(updates)
         current_data['updated_at'] = datetime.now()
-        return AgentStateModel(**current_data)
+        return AgentState(**current_data)

@@ -4,7 +4,7 @@ Web Search Worker 노드 - 외부 웹 검색 및 정보 요약
 """
 from langchain_core.prompts import ChatPromptTemplate
 
-from ...state import AgentState, AgentStateModel
+from ...state import AgentState
 from ...state_utils import ensure_pydantic_state, ensure_dict_state
 from ....services.web_search_service import web_search_service
 from ...chains import generative_llm

@@ -4,7 +4,7 @@ RAG Worker 노드 - 지식 기반 정보 검색 및 답변 생성
 """
 from langchain_core.prompts import ChatPromptTemplate
 
-from ...state import AgentState, AgentStateModel
+from ...state import AgentState
 from ...state_utils import ensure_pydantic_state, ensure_dict_state
 from ....services.rag_service import rag_service
 from ...utils import ALL_PROMPTS, format_messages_for_prompt

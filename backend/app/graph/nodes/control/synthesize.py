@@ -5,7 +5,7 @@
 import re
 from langchain_core.messages import AIMessage
 
-from ...state import AgentState, AgentStateModel
+from ...state import AgentState
 from ...state_utils import ensure_pydantic_state, ensure_dict_state
 from ...utils import get_active_scenario_data
 from ...chains import synthesizer_chain

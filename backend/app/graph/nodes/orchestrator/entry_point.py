@@ -5,13 +5,13 @@
 from typing import cast, Dict, Any
 from langchain_core.messages import HumanMessage
 
-from ...state import AgentState, AgentStateModel
+from ...state import AgentState
 from ...state_utils import ensure_pydantic_state, ensure_dict_state
 from ...utils import ALL_PROMPTS, ALL_SCENARIOS_DATA, get_active_scenario_data
 from ...logger import node_log, log_execution_time
 
 
-def _check_scenario_continuation(prev_state: AgentStateModel, current_state: AgentStateModel) -> Dict[str, Any]:
+def _check_scenario_continuation(prev_state: AgentState, current_state: AgentState) -> Dict[str, Any]:
     """시나리오 연속 진행이 필요한지 확인하고 자동 설정"""
     
     # 이전 상태에서 시나리오 연속성이 준비되어 있고, 현재 사용자 입력이 있는 경우

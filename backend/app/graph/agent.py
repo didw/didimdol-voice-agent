@@ -10,7 +10,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, System
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
 
-from .state import AgentState, ScenarioAgentOutput, PRODUCT_TYPES, AgentStateModel
+from .state import AgentState, ScenarioAgentOutput, PRODUCT_TYPES
 from .state_utils import ensure_pydantic_state, ensure_dict_state
 from ..core.config import OPENAI_API_KEY, LLM_MODEL_NAME
 from .models import (
