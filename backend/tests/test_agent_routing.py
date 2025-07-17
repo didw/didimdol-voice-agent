@@ -167,10 +167,10 @@ class TestFactualAnswerNode:
         mock_response.content = '{"queries": ["디딤돌 대출 금리 정보", "디딤돌 대출 우대금리"]}'
         mock_llm.ainvoke = AsyncMock(return_value=mock_response)
         
-        with patch('app.graph.agent.ALL_PROMPTS', mock_prompts), \
-             patch('app.graph.agent.rag_service', mock_rag_service), \
-             patch('app.graph.agent.json_llm', mock_llm), \
-             patch('app.graph.agent.expanded_queries_parser') as mock_parser:
+        with patch('app.graph.nodes.workers.rag_worker.ALL_PROMPTS', mock_prompts), \
+             patch('app.graph.nodes.workers.rag_worker.rag_service', mock_rag_service), \
+             patch('app.graph.nodes.workers.rag_worker.json_llm', mock_llm), \
+             patch('app.graph.nodes.workers.rag_worker.expanded_queries_parser') as mock_parser:
             
             mock_expanded_result = Mock()
             mock_expanded_result.queries = ["디딤돌 대출 금리 정보", "디딤돌 대출 우대금리"]
@@ -191,7 +191,7 @@ class TestFactualAnswerNode:
         mock_rag_service = Mock()
         mock_rag_service.is_ready.return_value = False
         
-        with patch('app.graph.agent.rag_service', mock_rag_service):
+        with patch('app.graph.nodes.workers.rag_worker.rag_service', mock_rag_service):
             result = await factual_answer_node(state)
             
             assert "현재 정보 검색 기능에 문제가 발생" in result["factual_response"]
@@ -206,8 +206,8 @@ class TestFactualAnswerNode:
         mock_rag_service.is_ready.return_value = True
         mock_rag_service.answer_question = AsyncMock(side_effect=Exception("RAG Error"))
         
-        with patch('app.graph.agent.rag_service', mock_rag_service), \
-             patch('app.graph.agent.ALL_PROMPTS', mock_prompts):
+        with patch('app.graph.nodes.workers.rag_worker.rag_service', mock_rag_service), \
+             patch('app.graph.nodes.workers.rag_worker.ALL_PROMPTS', mock_prompts):
             
             result = await factual_answer_node(state)
             
@@ -231,9 +231,9 @@ class TestWebSearchNode:
         mock_chain = AsyncMock()
         mock_chain.ainvoke = AsyncMock(return_value=mock_response)
         
-        with patch('app.graph.agent.web_search_service', mock_web_search_service), \
-             patch('app.graph.agent.generative_llm', mock_llm), \
-             patch('app.graph.agent.ChatPromptTemplate') as mock_prompt:
+        with patch('app.graph.nodes.workers.web_worker.web_search_service', mock_web_search_service), \
+             patch('app.graph.nodes.workers.web_worker.generative_llm', mock_llm), \
+             patch('app.graph.nodes.workers.web_worker.ChatPromptTemplate') as mock_prompt:
             
             # ChatPromptTemplate의 체인 동작 모킹
             mock_prompt.from_messages.return_value.__or__.return_value = mock_chain
@@ -262,8 +262,8 @@ class TestWebSearchNode:
         mock_llm = AsyncMock()
         mock_llm.ainvoke = AsyncMock(side_effect=Exception("Synthesis Error"))
         
-        with patch('app.graph.agent.web_search_service', mock_web_search_service), \
-             patch('app.graph.agent.generative_llm', mock_llm):
+        with patch('app.graph.nodes.workers.web_worker.web_search_service', mock_web_search_service), \
+             patch('app.graph.nodes.workers.web_worker.generative_llm', mock_llm):
             
             result = await web_search_node(state)
             

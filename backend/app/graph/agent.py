@@ -141,116 +141,13 @@ from .nodes.orchestrator.main_router import main_agent_router_node
 from .nodes.control.end_conversation import end_conversation_node
 from .nodes.control.synthesize import synthesize_response_node
 from .nodes.control.set_product import set_product_type_node
+from .nodes.workers.rag_worker import factual_answer_node
+from .nodes.workers.web_worker import web_search_node
 
 # --- Import Router ---
 from .router import execute_plan_router, route_after_scenario_logic
 
 # --- LangGraph Node Functions ---
-
-async def factual_answer_node(state: AgentState) -> dict:
-    original_question = state.get("stt_result", "")
-    log_node_execution("RAG_Worker", f"query='{original_question[:30]}...'")
-    original_question = state.get("stt_result", "")
-    messages = state.get("messages", [])
-    chat_history = format_messages_for_prompt(messages[:-1]) if len(messages) > 1 else "No previous conversation."
-    scenario_name = state.get("active_scenario_name", "General Financial Advice")
-
-    if not rag_service.is_ready():
-        print("Warning: RAG service is not ready. Using fallback response.")
-        return {"factual_response": "죄송합니다, 현재 정보 검색 기능에 문제가 발생하여 답변을 드릴 수 없습니다. 잠시 후 다시 시도해 주세요."}
-
-    all_queries = [original_question]
-    try:
-        # 1. 질문 확장
-        print("--- Generating expanded queries... ---")
-        expansion_prompt_template = ALL_PROMPTS.get('qa_agent', {}).get('rag_query_expansion_prompt')
-        if not expansion_prompt_template:
-            raise ValueError("RAG query expansion prompt not found.")
-        
-        expansion_prompt = ChatPromptTemplate.from_template(expansion_prompt_template)
-        
-        expansion_chain = expansion_prompt | json_llm | expanded_queries_parser
-        expanded_result = await expansion_chain.ainvoke({
-            "scenario_name": scenario_name,
-            "chat_history": chat_history,
-            "user_question": original_question
-        })
-        
-        if expanded_result and expanded_result.queries:
-            all_queries.extend(expanded_result.queries)
-            print(f"Expanded queries generated: {expanded_result.queries}")
-        else:
-            print("Query expansion did not produce results. Using original question only.")
-
-    except Exception as e:
-        # 질문 확장에 실패하더라도, 원본 질문으로 계속 진행
-        print(f"Could not expand query due to an error: {e}. Proceeding with original question.")
-
-    try:
-        # 2. RAG 파이프라인 호출 (원본 + 확장 질문)
-        print(f"Invoking RAG pipeline with {len(all_queries)} queries.")
-        factual_response = await rag_service.answer_question(all_queries, original_question)
-        print(f"RAG response: {factual_response[:100]}...")
-    except Exception as e:
-        print(f"Factual Answer Node Error (RAG): {e}")
-        factual_response = "정보를 검색하는 중 오류가 발생했습니다."
-
-    # 다음 액션을 위해 plan과 struct에서 현재 액션 제거
-    updated_plan = state.get("action_plan", []).copy()
-    if updated_plan:
-        updated_plan.pop(0)
-    
-    updated_struct = state.get("action_plan_struct", []).copy()
-    if updated_struct:
-        updated_struct.pop(0)
-
-    log_node_execution("RAG_Worker", output_info=f"response='{factual_response[:40]}...'")
-    return {"factual_response": factual_response, "action_plan": updated_plan, "action_plan_struct": updated_struct}
-
-async def web_search_node(state: AgentState) -> dict:
-    """
-    Web Search Worker - 외부 정보 검색 전문 처리
-    """
-    action_struct = state.get("action_plan_struct", [{}])[0]
-    query = action_struct.get("tool_input", {}).get("query", "")
-    log_node_execution("Web_Worker", f"query='{query[:30]}...'")
-    action_struct = state.get("action_plan_struct", [{}])[0]
-    query = action_struct.get("tool_input", {}).get("query", "")
-    
-    if not query:
-        return {"factual_response": "무엇에 대해 검색할지 알려주세요."}
-
-    # 1. Perform web search
-    search_results = await web_search_service.asearch(query)
-    
-    # 2. Synthesize a natural language answer from the results
-    try:
-        synthesis_prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a helpful AI assistant. Your task is to synthesize the provided web search results into a concise and natural-sounding answer to the user's question. Respond in Korean."),
-            ("human", "User Question: {query}\n\nWeb Search Results:\n---\n{search_results}\n---\n\nSynthesized Answer:")
-        ])
-        
-        synthesis_chain = synthesis_prompt | generative_llm
-        response = await synthesis_chain.ainvoke({"query": query, "search_results": search_results})
-        final_answer = response.content.strip()
-        print(f"Synthesized web search answer: {final_answer[:100]}...")
-
-    except Exception as e:
-        print(f"Error synthesizing web search results: {e}")
-        final_answer = "웹 검색 결과를 요약하는 중 오류가 발생했습니다. 원본 검색 결과는 다음과 같습니다.\n\n" + search_results
-
-    # 다음 액션을 위해 plan과 struct에서 현재 액션 제거
-    updated_plan = state.get("action_plan", []).copy()
-    if updated_plan:
-        updated_plan.pop(0)
-    
-    updated_struct = state.get("action_plan_struct", []).copy()
-    if updated_struct:
-        updated_struct.pop(0)
-        
-    # 웹 검색 결과를 사실 기반 답변으로 간주하여 factual_response에 저장
-    log_node_execution("Web_Worker", output_info=f"response='{final_answer[:40]}...'")
-    return {"factual_response": final_answer, "action_plan": updated_plan, "action_plan_struct": updated_struct}
 
 async def call_scenario_agent_node(state: AgentState) -> AgentState:
     user_input = state.get("stt_result", "")
