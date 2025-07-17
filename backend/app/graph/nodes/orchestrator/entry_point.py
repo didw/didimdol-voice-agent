@@ -6,7 +6,6 @@ from typing import cast, Dict, Any
 from langchain_core.messages import HumanMessage
 
 from ...state import AgentState
-from ...state_utils import ensure_pydantic_state, ensure_dict_state
 from ...utils import ALL_PROMPTS, ALL_SCENARIOS_DATA, get_active_scenario_data
 from ...logger import node_log, log_execution_time
 
@@ -39,26 +38,23 @@ def _check_scenario_continuation(prev_state: AgentState, current_state: AgentSta
 @log_execution_time
 async def entry_point_node(state: AgentState) -> AgentState:
     """
-    진입점 노드 - Pydantic 버전
+    진입점 노드
     - 사용자 입력 처리
     - 턴별 상태 초기화
     - 시나리오 데이터 로드
     - 메시지 히스토리 업데이트
     """
-    # Convert to Pydantic for internal processing
-    pydantic_state = ensure_pydantic_state(state)
-    
-    user_text = pydantic_state.user_input_text or ""
-    product = pydantic_state.current_product_type or "None"
+    user_text = state.user_input_text or ""
+    product = state.current_product_type or "None"
     node_log("Entry", input_info=f"input='{user_text[:20]}...', product={product}")
     
     if not ALL_SCENARIOS_DATA or not ALL_PROMPTS:
         error_msg = "Service initialization failed (Cannot load scenarios or prompts)."
-        return ensure_dict_state(pydantic_state.merge_update({
+        return state.merge_update({
             "error_message": error_msg,
             "final_response_text_for_tts": error_msg,
             "is_final_turn_response": True
-        }))
+        })
 
     # Reset turn-specific state using Pydantic merge
     turn_defaults = {
@@ -77,7 +73,7 @@ async def entry_point_node(state: AgentState) -> AgentState:
     }
     
     # Update state with turn defaults
-    updated_state = pydantic_state.merge_update(turn_defaults)
+    updated_state = state.merge_update(turn_defaults)
     
     # Load active scenario data if a product is selected
     active_scenario = get_active_scenario_data(updated_state.to_dict())
@@ -108,8 +104,8 @@ async def entry_point_node(state: AgentState) -> AgentState:
         })
     
     # 시나리오 자동 진행 로직
-    scenario_continuation = _check_scenario_continuation(pydantic_state, updated_state)
+    scenario_continuation = _check_scenario_continuation(state, updated_state)
     if scenario_continuation:
         updated_state = updated_state.merge_update(scenario_continuation)
         
-    return ensure_dict_state(updated_state)
+    return updated_state

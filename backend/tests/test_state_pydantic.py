@@ -4,9 +4,8 @@ from datetime import datetime, timedelta
 
 from app.graph.state import AgentState, ScenarioAgentOutput
 from app.graph.state_utils import (
-    merge_state_updates, ensure_pydantic_state, ensure_dict_state,
-    convert_scenario_output, validate_state_transition, clean_turn_state,
-    extract_conversation_context
+    merge_state_updates, convert_scenario_output, validate_state_transition, 
+    clean_turn_state, extract_conversation_context
 )
 from langchain_core.messages import HumanMessage, AIMessage
 
@@ -194,64 +193,7 @@ class TestStateUtils:
         assert base_state["user_input_text"] is None
         assert base_state["current_product_type"] is None
         
-    def test_ensure_pydantic_state(self):
-        """Test ensure_pydantic_state function"""
-        # Test with dict
-        dict_state = {
-            "session_id": "test",
-            "user_input_text": "Hello",
-            "is_final_turn_response": False,
-            "current_product_type": "didimdol",
-            "available_product_types": ["didimdol", "jeonse", "deposit_account"],
-            "collected_product_info": {},
-            "current_scenario_stage_id": None,
-            "loan_selection_is_fresh": None,
-            "active_scenario_data": None,
-            "active_knowledge_base_content": None,
-            "active_scenario_name": None,
-            "action_plan": [],
-            "main_agent_routing_decision": None,
-            "main_agent_direct_response": None,
-            "factual_response": None,
-            "scenario_agent_output": None,
-            "messages": [],
-            "final_response_text_for_tts": None,
-            "action_plan_struct": [],
-            "scenario_ready_for_continuation": None,
-            "scenario_awaiting_user_response": None,
-            "stt_result": None,
-            "error_message": None,
-            "user_input_audio_b64": None
-        }
-        
-        pydantic_state = ensure_pydantic_state(dict_state)
-        assert isinstance(pydantic_state, AgentState)
-        assert pydantic_state.session_id == "test"
-        assert pydantic_state.user_input_text == "Hello"
-        assert pydantic_state.current_product_type == "didimdol"
-        
-        # Test with already Pydantic state
-        same_state = ensure_pydantic_state(pydantic_state)
-        assert same_state is pydantic_state
-        
-    def test_ensure_dict_state(self):
-        """Test ensure_dict_state function"""
-        # Test with Pydantic state
-        pydantic_state = AgentState(
-            session_id="test",
-            user_input_text="Hello",
-            current_product_type="didimdol"
-        )
-        
-        dict_state = ensure_dict_state(pydantic_state)
-        assert isinstance(dict_state, dict)
-        assert dict_state["session_id"] == "test"
-        assert dict_state["user_input_text"] == "Hello"
-        assert dict_state["current_product_type"] == "didimdol"
-        
-        # Test with already dict state
-        same_state = ensure_dict_state(dict_state)
-        assert same_state is dict_state
+    # Note: conversion utilities removed - LangGraph handles Pydantic models directly
         
     def test_convert_scenario_output(self):
         """Test convert_scenario_output function"""

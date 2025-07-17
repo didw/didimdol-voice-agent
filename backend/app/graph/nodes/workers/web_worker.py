@@ -5,7 +5,6 @@ Web Search Worker 노드 - 외부 웹 검색 및 정보 요약
 from langchain_core.prompts import ChatPromptTemplate
 
 from ...state import AgentState
-from ...state_utils import ensure_pydantic_state, ensure_dict_state
 from ....services.web_search_service import web_search_service
 from ...chains import generative_llm
 from ...logger import node_log as log_node_execution, log_execution_time
@@ -14,21 +13,18 @@ from ...logger import node_log as log_node_execution, log_execution_time
 @log_execution_time
 async def web_search_node(state: AgentState) -> AgentState:
     """
-    Web Search Worker - 외부 정보 검색 전문 처리 - Pydantic 버전
+    Web Search Worker - 외부 정보 검색 전문 처리
     - 웹 검색 실행
     - 검색 결과 요약
     - 에러 처리
     """
-    # Convert to Pydantic for internal processing
-    pydantic_state = ensure_pydantic_state(state)
-    
-    action_struct = pydantic_state.action_plan_struct[0] if pydantic_state.action_plan_struct else {}
+    action_struct = state.action_plan_struct[0] if state.action_plan_struct else {}
     query = action_struct.get("tool_input", {}).get("query", "")
     log_node_execution("Web_Worker", f"query='{query[:30]}...'")
     
     if not query:
         state_updates = {"factual_response": "무엇에 대해 검색할지 알려주세요."}
-        return ensure_dict_state(pydantic_state.merge_update(state_updates))
+        return state.merge_update(state_updates)
 
     # 1. Perform web search
     search_results = await web_search_service.asearch(query)
@@ -50,11 +46,11 @@ async def web_search_node(state: AgentState) -> AgentState:
         final_answer = "웹 검색 결과를 요약하는 중 오류가 발생했습니다. 원본 검색 결과는 다음과 같습니다.\n\n" + search_results
 
     # 다음 액션을 위해 plan과 struct에서 현재 액션 제거
-    updated_plan = pydantic_state.action_plan.copy()
+    updated_plan = state.action_plan.copy()
     if updated_plan:
         updated_plan.pop(0)
     
-    updated_struct = pydantic_state.action_plan_struct.copy()
+    updated_struct = state.action_plan_struct.copy()
     if updated_struct:
         updated_struct.pop(0)
         
@@ -67,5 +63,5 @@ async def web_search_node(state: AgentState) -> AgentState:
         "action_plan_struct": updated_struct
     }
     
-    updated_state = pydantic_state.merge_update(state_updates)
-    return ensure_dict_state(updated_state)
+    updated_state = state.merge_update(state_updates)
+    return updated_state

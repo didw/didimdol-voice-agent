@@ -9,7 +9,6 @@ from pathlib import Path
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ...state import AgentState
-from ...state_utils import ensure_pydantic_state, ensure_dict_state
 from ...models import initial_task_decision_parser, main_router_decision_parser, ActionModel
 from ...utils import (
     ALL_PROMPTS, 
@@ -25,24 +24,21 @@ from ...logger import node_log as log_node_execution, log_execution_time
 @log_execution_time
 async def main_agent_router_node(state: AgentState) -> AgentState:
     """
-    메인 오케스트레이터 노드 - Pydantic 버전
+    메인 오케스트레이터 노드
     - 사용자 입력 분석
     - 적절한 워커 결정
     - 액션 플랜 생성
     """
-    # Convert to Pydantic for internal processing
-    pydantic_state = ensure_pydantic_state(state)
-    
-    user_input = pydantic_state.stt_result or ""
-    current_product_type = pydantic_state.current_product_type
+    user_input = state.stt_result or ""
+    current_product_type = state.current_product_type
     mode = "business_guidance" if not current_product_type else "task_management"
     log_node_execution("Orchestrator", f"mode={mode}, input='{user_input[:20]}...'")
     
     if not json_llm:
-        return ensure_dict_state(pydantic_state.merge_update({
+        return state.merge_update({
             "error_message": "Orchestrator service unavailable (LLM not initialized).",
             "is_final_turn_response": True
-        }))
+        })
 
     # LLM 기반 대화 처리 및 Worker 결정
     prompt_key = 'business_guidance_prompt' if not current_product_type else 'task_management_prompt'
@@ -50,11 +46,11 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
 
     prompt_template = ALL_PROMPTS.get('main_agent', {}).get(prompt_key, '')
     if not prompt_template:
-        return ensure_dict_state(pydantic_state.merge_update({
+        return state.merge_update({
             "error_message": "Router prompt not found.",
             "main_agent_routing_decision": "unclear_input",
             "is_final_turn_response": True
-        }))
+        })
 
     parser = initial_task_decision_parser if not current_product_type else main_router_decision_parser
     format_instructions = parser.get_format_instructions()
@@ -99,15 +95,15 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
 """
         
         if current_product_type:
-             active_scenario_data = get_active_scenario_data(pydantic_state.to_dict()) or {}
-             current_stage_id = pydantic_state.current_scenario_stage_id or "N/A"
+             active_scenario_data = get_active_scenario_data(state.to_dict()) or {}
+             current_stage_id = state.current_scenario_stage_id or "N/A"
              current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
              valid_choices = current_stage_info.get("choices", []) 
-             available_types = ", ".join([ALL_SCENARIOS_DATA[pt]["scenario_name"] for pt in pydantic_state.available_product_types if pt in ALL_SCENARIOS_DATA])
+             available_types = ", ".join([ALL_SCENARIOS_DATA[pt]["scenario_name"] for pt in state.available_product_types if pt in ALL_SCENARIOS_DATA])
              
              # 업무 관련 JSON 정보 추가
              task_context = {
-                 "collected_info": pydantic_state.collected_product_info,
+                 "collected_info": state.collected_product_info,
                  "current_stage": current_stage_info,
                  "stage_id": current_stage_id,
                  "expected_info_key": current_stage_info.get("expected_info_key", ""),
@@ -115,19 +111,19 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
              }
              
              # 매뉴얼 정보 로드
-             product_type = pydantic_state.current_product_type
+             product_type = state.current_product_type
              manual_content = await load_knowledge_base_content_async(product_type) if product_type else ""
              
              prompt_kwargs.update({
-                "active_scenario_name": pydantic_state.active_scenario_name or "Not Selected",
-                "formatted_messages_history": format_messages_for_prompt(list(pydantic_state.messages)[:-1]),
+                "active_scenario_name": state.active_scenario_name or "Not Selected",
+                "formatted_messages_history": format_messages_for_prompt(list(state.messages)[:-1]),
                 "task_context_json": json.dumps(task_context, ensure_ascii=False, indent=2),
                 "manual_content": manual_content[:2000] if manual_content else "매뉴얼 정보 없음",
                 "available_product_types_display": available_types
              })
         else:
             # 초기 프롬프트에 필요한 available_product_types_list를 추가합니다.
-            available_types_list = pydantic_state.available_product_types
+            available_types_list = state.available_product_types
             available_services = {
                 "didimdol": "디딤돌 대출 - 주택구입을 위한 정부지원 대출",
                 "jeonse": "전세자금대출 - 전세 보증금 마련을 위한 대출", 
@@ -153,7 +149,7 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
             state_updates["main_agent_direct_response"] = decision.direct_response
 
         system_log = f"Main Agent Plan: actions={[f'{a.tool}({a.tool_input})' for a in action_plan_models]}"
-        updated_messages = list(pydantic_state.messages) + [SystemMessage(content=system_log)]
+        updated_messages = list(state.messages) + [SystemMessage(content=system_log)]
         state_updates["messages"] = updated_messages
 
         # 초기 상태 분기 처리: action_plan_models 자체를 수정하여 일관성 유지
@@ -181,16 +177,16 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
         else:
             log_node_execution("Orchestrator", output_info=f"plan={action_plan}")
         
-        # Update with Pydantic and return dict
-        updated_state = pydantic_state.merge_update(state_updates)
-        return ensure_dict_state(updated_state)
+        # Update with Pydantic and return
+        updated_state = state.merge_update(state_updates)
+        return updated_state
 
     except Exception as e:
         log_node_execution("Orchestrator", f"ERROR: {e}")
         traceback.print_exc()
         err_msg = "Error processing request. Please try again."
-        return ensure_dict_state(pydantic_state.merge_update({
+        return state.merge_update({
             "error_message": err_msg,
             "main_agent_routing_decision": "unclear_input",
             "is_final_turn_response": True
-        }))
+        })

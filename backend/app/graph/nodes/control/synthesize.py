@@ -6,7 +6,6 @@ import re
 from langchain_core.messages import AIMessage
 
 from ...state import AgentState
-from ...state_utils import ensure_pydantic_state, ensure_dict_state
 from ...utils import get_active_scenario_data
 from ...chains import synthesizer_chain
 from ...logger import node_log as log_node_execution, log_execution_time
@@ -15,50 +14,47 @@ from ...logger import node_log as log_node_execution, log_execution_time
 @log_execution_time
 async def synthesize_response_node(state: AgentState) -> AgentState:
     """
-    응답 합성 노드 - Pydantic 버전
+    응답 합성 노드
     - 우선순위 기반 응답 선택
     - 사실 기반 응답과 문맥 응답 결합
     - 최종 응답 생성
     """
-    # Convert to Pydantic for internal processing
-    pydantic_state = ensure_pydantic_state(state)
-    
-    has_factual = bool(pydantic_state.factual_response)
-    has_contextual = bool(pydantic_state.current_product_type)
-    has_direct = bool(pydantic_state.main_agent_direct_response)
+    has_factual = bool(state.factual_response)
+    has_contextual = bool(state.current_product_type)
+    has_direct = bool(state.main_agent_direct_response)
     log_node_execution("Synthesizer", f"factual={has_factual}, contextual={has_contextual}, direct={has_direct}")
     
     # 1. 이미 final_response_text_for_tts가 설정되어 있으면 그것을 우선 사용
-    existing_response = pydantic_state.final_response_text_for_tts
+    existing_response = state.final_response_text_for_tts
     if existing_response:
         log_node_execution("Synthesizer", f"using existing response: {existing_response[:50]}...")
-        updated_messages = list(pydantic_state.messages) + [AIMessage(content=existing_response)]
+        updated_messages = list(state.messages) + [AIMessage(content=existing_response)]
         state_updates = {
             "final_response_text_for_tts": existing_response,
             "messages": updated_messages,
             "is_final_turn_response": True
         }
-        return ensure_dict_state(pydantic_state.merge_update(state_updates))
+        return state.merge_update(state_updates)
     
     # 2. main_agent_direct_response가 있으면 우선 사용 (business_guidance에서 생성된 응답)
-    direct_response = pydantic_state.main_agent_direct_response
+    direct_response = state.main_agent_direct_response
     if direct_response:
         log_node_execution("Synthesizer", f"using direct response: {direct_response[:50]}...")
-        updated_messages = list(pydantic_state.messages) + [AIMessage(content=direct_response)]
+        updated_messages = list(state.messages) + [AIMessage(content=direct_response)]
         state_updates = {
             "final_response_text_for_tts": direct_response,
             "messages": updated_messages,
             "is_final_turn_response": True
         }
-        return ensure_dict_state(pydantic_state.merge_update(state_updates))
+        return state.merge_update(state_updates)
     
-    user_question = pydantic_state.messages[-1].content
-    factual_answer = pydantic_state.factual_response or ""
+    user_question = state.messages[-1].content
+    factual_answer = state.factual_response or ""
     
     contextual_response = ""
-    active_scenario_data = get_active_scenario_data(pydantic_state.to_dict())
+    active_scenario_data = get_active_scenario_data(state.to_dict())
     if active_scenario_data:
-        current_stage_id = pydantic_state.current_scenario_stage_id
+        current_stage_id = state.current_scenario_stage_id
         if current_stage_id and not str(current_stage_id).startswith("END_"):
              current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
              contextual_response = current_stage_info.get("prompt", "")
@@ -69,7 +65,7 @@ async def synthesize_response_node(state: AgentState) -> AgentState:
                         contextual_response)
                 else:
                     contextual_response = re.sub(r'%\{([^}]+)\}%', 
-                        lambda m: str(pydantic_state.collected_product_info.get(m.group(1), f"")), 
+                        lambda m: str(state.collected_product_info.get(m.group(1), f"")), 
                         contextual_response)
     
     if not factual_answer or "Could not find" in factual_answer:
@@ -79,7 +75,7 @@ async def synthesize_response_node(state: AgentState) -> AgentState:
     else:
         try:
             response = await synthesizer_chain.ainvoke({
-                "chat_history": list(pydantic_state.messages)[:-1],
+                "chat_history": list(state.messages)[:-1],
                 "user_question": user_question,
                 "contextual_response": f"After answering, you need to continue the conversation with this prompt: '{contextual_response}'",
                 "factual_response": factual_answer,
@@ -94,7 +90,7 @@ async def synthesize_response_node(state: AgentState) -> AgentState:
         final_answer = "죄송합니다, 응답을 생성하는데 문제가 발생했습니다."
 
     log_node_execution("Synthesizer", output_info=f"response='{final_answer[:40]}...'")
-    updated_messages = list(pydantic_state.messages) + [AIMessage(content=final_answer)]
+    updated_messages = list(state.messages) + [AIMessage(content=final_answer)]
     
     state_updates = {
         "final_response_text_for_tts": final_answer,
@@ -102,5 +98,5 @@ async def synthesize_response_node(state: AgentState) -> AgentState:
         "is_final_turn_response": True
     }
     
-    updated_state = pydantic_state.merge_update(state_updates)
-    return ensure_dict_state(updated_state)
+    updated_state = state.merge_update(state_updates)
+    return updated_state

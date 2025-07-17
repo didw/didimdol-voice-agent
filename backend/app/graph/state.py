@@ -15,6 +15,29 @@ class ScenarioAgentOutput(BaseModel):
     intent: Optional[str] = None
     entities: Optional[Dict[str, Any]] = Field(default_factory=dict)
     is_scenario_related: bool = False
+    
+    # Dict-like interface for backward compatibility
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get value like dict.get()"""
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            return default
+    
+    def __getitem__(self, key: str) -> Any:
+        """Get item like dict[key]"""
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+    
+    def __setitem__(self, key: str, value: Any) -> None:
+        """Set item like dict[key] = value"""
+        setattr(self, key, value)
+    
+    def __contains__(self, key: str) -> bool:
+        """Check if key exists like 'key' in dict"""
+        return hasattr(self, key)
 
 
 class AgentState(BaseModel):
@@ -101,3 +124,48 @@ class AgentState(BaseModel):
         current_data.update(updates)
         current_data['updated_at'] = datetime.now()
         return AgentState(**current_data)
+    
+    # Dict-like interface for backward compatibility
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get value like dict.get()"""
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            return default
+    
+    def __getitem__(self, key: str) -> Any:
+        """Get item like dict[key]"""
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+    
+    def __setitem__(self, key: str, value: Any) -> None:
+        """Set item like dict[key] = value"""
+        setattr(self, key, value)
+    
+    def __contains__(self, key: str) -> bool:
+        """Check if key exists like 'key' in dict"""
+        return hasattr(self, key)
+    
+    def keys(self):
+        """Return all field names"""
+        return self.model_fields.keys()
+    
+    def values(self):
+        """Return all field values"""
+        return [getattr(self, field) for field in self.model_fields.keys()]
+    
+    def items(self):
+        """Return all field items"""
+        return [(field, getattr(self, field)) for field in self.model_fields.keys()]
+    
+    def copy(self) -> "AgentState":
+        """Create a copy of this state"""
+        return AgentState.model_validate(self.model_dump())
+    
+    def update(self, other: Dict[str, Any]) -> None:
+        """Update this state with values from dict"""
+        for key, value in other.items():
+            if hasattr(self, key):
+                setattr(self, key, value)

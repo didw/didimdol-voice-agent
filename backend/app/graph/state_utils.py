@@ -1,10 +1,10 @@
 # backend/app/graph/state_utils.py
 """
-State conversion utilities for Pydantic-based state management
+State management utilities for Pydantic-based state management
 """
 
 from typing import Dict, Any, Optional, Union
-from .state import AgentState, ScenarioAgentOutput
+from .state import ScenarioAgentOutput
 
 
 def merge_state_updates(base_state: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
@@ -21,38 +21,6 @@ def merge_state_updates(base_state: Dict[str, Any], updates: Dict[str, Any]) -> 
     result = base_state.copy()
     result.update(updates)
     return result
-
-
-def ensure_pydantic_state(state: Union[AgentState, Dict[str, Any]]) -> AgentState:
-    """
-    Ensure state is in Pydantic format.
-    
-    Args:
-        state: State in any format
-        
-    Returns:
-        AgentState instance
-    """
-    if isinstance(state, AgentState):
-        return state
-    
-    return AgentState.from_dict(state)
-
-
-def ensure_dict_state(state: Union[AgentState, Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Ensure state is in dict format.
-    
-    Args:
-        state: State in any format
-        
-    Returns:
-        Dict representation of state
-    """
-    if isinstance(state, AgentState):
-        return state.to_dict()
-    
-    return state
 
 
 def convert_scenario_output(output: Optional[Union[ScenarioAgentOutput, Dict[str, Any]]]) -> Optional[ScenarioAgentOutput]:

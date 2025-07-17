@@ -11,7 +11,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
 
 from .state import AgentState, ScenarioAgentOutput, PRODUCT_TYPES
-from .state_utils import ensure_pydantic_state, ensure_dict_state
 from ..core.config import OPENAI_API_KEY, LLM_MODEL_NAME
 from .models import (
     next_stage_decision_parser,
@@ -152,29 +151,26 @@ from .router import execute_plan_router, route_after_scenario_logic
 
 async def call_scenario_agent_node(state: AgentState) -> AgentState:
     """
-    시나리오 에이전트 호출 노드 - Pydantic 버전
+    시나리오 에이전트 호출 노드
     """
-    # Convert to Pydantic for internal processing
-    pydantic_state = ensure_pydantic_state(state)
-    
-    user_input = pydantic_state.stt_result or ""
-    scenario_name = pydantic_state.active_scenario_name or "N/A"
+    user_input = state.stt_result or ""
+    scenario_name = state.active_scenario_name or "N/A"
     # user_input이 None인 경우 처리
     input_preview = user_input[:20] if user_input else ""
     log_node_execution("Scenario_NLU", f"scenario={scenario_name}, input='{input_preview}...'")
-    active_scenario_data = get_active_scenario_data(pydantic_state.to_dict())
+    active_scenario_data = get_active_scenario_data(state.to_dict())
     if not active_scenario_data or not user_input:
         state_updates = {"scenario_agent_output": cast(ScenarioAgentOutput, {"intent": "error_missing_data", "is_scenario_related": False})}
-        return ensure_dict_state(pydantic_state.merge_update(state_updates))
+        return state.merge_update(state_updates)
     
-    current_stage_id = pydantic_state.current_scenario_stage_id or active_scenario_data.get("initial_stage_id")
+    current_stage_id = state.current_scenario_stage_id or active_scenario_data.get("initial_stage_id")
     current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
 
     output = await invoke_scenario_agent_logic(
         user_input=user_input,
         current_stage_prompt=current_stage_info.get("prompt", ""),
         expected_info_key=current_stage_info.get("expected_info_key"),
-        messages_history=list(pydantic_state.messages)[:-1],
+        messages_history=list(state.messages)[:-1],
         scenario_name=active_scenario_data.get("scenario_name", "Consultation")
     )
     intent = output.get("intent", "N/A")
@@ -183,20 +179,17 @@ async def call_scenario_agent_node(state: AgentState) -> AgentState:
     log_node_execution("Scenario_NLU", output_info=f"intent={intent}, entities={entities}")
     
     state_updates = {"scenario_agent_output": output}
-    return ensure_dict_state(pydantic_state.merge_update(state_updates))
+    return state.merge_update(state_updates)
 
 async def process_scenario_logic_node(state: AgentState) -> AgentState:
     """
-    시나리오 로직 처리 노드 - Pydantic 버전
+    시나리오 로직 처리 노드
     """
-    # Convert to Pydantic for internal processing
-    pydantic_state = ensure_pydantic_state(state)
-    
-    current_stage_id = pydantic_state.current_scenario_stage_id or "N/A"
-    scenario_name = pydantic_state.active_scenario_name or "N/A"
+    current_stage_id = state.current_scenario_stage_id or "N/A"
+    scenario_name = state.active_scenario_name or "N/A"
     log_node_execution("Scenario_Flow", f"scenario={scenario_name}, stage={current_stage_id}")
-    active_scenario_data = get_active_scenario_data(pydantic_state.to_dict())
-    current_stage_id = pydantic_state.current_scenario_stage_id
+    active_scenario_data = get_active_scenario_data(state.to_dict())
+    current_stage_id = state.current_scenario_stage_id
     
     # 스테이지 ID가 없는 경우 초기 스테이지로 설정
     if not current_stage_id:
@@ -205,19 +198,19 @@ async def process_scenario_logic_node(state: AgentState) -> AgentState:
     
     current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
     print(f"현재 스테이지: {current_stage_id}, 스테이지 정보: {current_stage_info.keys()}")
-    collected_info = pydantic_state.collected_product_info.copy()
-    scenario_output = pydantic_state.scenario_agent_output
-    user_input = pydantic_state.stt_result or ""
+    collected_info = state.collected_product_info.copy()
+    scenario_output = state.scenario_agent_output
+    user_input = state.stt_result or ""
     
     # 개선된 다중 정보 수집 처리
     print(f"스테이지 정보 확인 - collect_multiple_info: {current_stage_info.get('collect_multiple_info')}")
     if current_stage_info.get("collect_multiple_info"):
         print("--- 다중 정보 수집 모드 ---")
-        result = await process_multiple_info_collection(pydantic_state.to_dict(), active_scenario_data, current_stage_id, current_stage_info, collected_info, user_input)
+        result = await process_multiple_info_collection(state.to_dict(), active_scenario_data, current_stage_id, current_stage_info, collected_info, user_input)
         return result
     
     # 기존 단일 정보 수집 처리
-    result = await process_single_info_collection(pydantic_state.to_dict(), active_scenario_data, current_stage_id, current_stage_info, collected_info, scenario_output, user_input)
+    result = await process_single_info_collection(state.to_dict(), active_scenario_data, current_stage_id, current_stage_info, collected_info, scenario_output, user_input)
     return result
 
 async def process_multiple_info_collection(state: AgentState, active_scenario_data: Dict, current_stage_id: str, current_stage_info: Dict, collected_info: Dict, user_input: str) -> AgentState:
