@@ -59,17 +59,18 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
     print(f"현재 스테이지 ID: {current_stage_id}")
     if current_stage_id in ["info_collection_guidance", "process_collected_info", "ask_missing_info_group1", "ask_missing_info_group2", "ask_missing_info_group3", "eligibility_assessment"]:
         
-        # Entity Agent를 사용한 정보 추출
-        if user_input:
-            from ....agents.entity_agent import entity_agent
-            
-            # Entity Agent로 정보 추출
-            extraction_result = await entity_agent.process_slot_filling(user_input, required_fields, collected_info)
-            
-            # 추출된 정보 업데이트
-            collected_info = extraction_result["collected_info"]
-            print(f"Entity Agent 추출 결과: {extraction_result['extracted_entities']}")
-            print(f"최종 업데이트된 수집 정보: {collected_info}")
+        # Entity Agent를 사용한 정보 추출 (현재 비활성화 - entity_agent 삭제됨)
+        # if user_input:
+        #     from ....agents.entity_agent import entity_agent
+        #     
+        #     # Entity Agent로 정보 추출
+        #     extraction_result = await entity_agent.process_slot_filling(user_input, required_fields, collected_info)
+        #     
+        #     # 추출된 정보 업데이트
+        #     collected_info = extraction_result["collected_info"]
+        #     print(f"Entity Agent 추출 결과: {extraction_result['extracted_entities']}")
+        #     print(f"최종 업데이트된 수집 정보: {collected_info}")
+        print(f"Entity Agent 기능 비활성화됨 - 기본 정보 수집 모드로 동작")
         
         # 정보 수집 완료 여부 확인
         is_complete, missing_field_names = check_required_info_completion(collected_info, required_fields)
