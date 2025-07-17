@@ -887,13 +887,23 @@ async def set_product_type_node(state: AgentState) -> AgentState:
 
     updated_messages = list(state.get("messages", [])) + [AIMessage(content=response_text)]
     
+    # Default 값 초기화
+    from ..api.V1.chat_utils import initialize_default_values
+    temp_state = {
+        **state, 
+        "current_product_type": new_product_type, 
+        "active_scenario_data": active_scenario
+    }
+    initialized_info = initialize_default_values(temp_state)
+    print(f"Initialized default values: {initialized_info}")
+    
     # 시나리오 연속성을 위한 상태 설정
     print(f"🔄 시나리오 연속성 준비: {active_scenario.get('scenario_name')}")
     
     return {
         **state, "current_product_type": new_product_type, "active_scenario_data": active_scenario,
         "active_scenario_name": active_scenario.get("scenario_name"), "current_scenario_stage_id": initial_stage_id,
-        "collected_product_info": {}, "final_response_text_for_tts": response_text,
+        "collected_product_info": initialized_info, "final_response_text_for_tts": response_text,
         "messages": updated_messages, "is_final_turn_response": True,
         # 시나리오 연속성 관리
         "scenario_ready_for_continuation": True,

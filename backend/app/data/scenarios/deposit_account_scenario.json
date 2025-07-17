@@ -224,6 +224,7 @@
       "is_question": true,
       "input_type": "yes_no",
       "expected_info_key": "confirm_personal_info",
+      "visible_groups": ["basic_info"],
       "transitions": [
         {
           "next_stage_id": "ask_lifelong_account",
@@ -250,6 +251,7 @@
       "is_question": true,
       "input_type": "yes_no",
       "expected_info_key": "use_lifelong_account",
+      "visible_groups": ["account_settings"],
       "default_next_stage_id": "ask_internet_banking"
     },
     "ask_internet_banking": {
@@ -258,6 +260,7 @@
       "is_question": true,
       "input_type": "yes_no",
       "expected_info_key": "use_internet_banking",
+      "visible_groups": ["internet_banking"],
       "transitions": [
         {
           "next_stage_id": "collect_internet_banking_info",
@@ -278,6 +281,7 @@
       "is_question": true,
       "input_type": "text",
       "collect_multiple_info": true,
+      "visible_groups": ["internet_banking"],
       "default_next_stage_id": "process_internet_banking_info"
     },
     "process_internet_banking_info": {
@@ -306,6 +310,7 @@
       "is_question": true,
       "input_type": "text",
       "collect_multiple_info": true,
+      "visible_groups": ["internet_banking"],
       "default_next_stage_id": "process_internet_banking_info"
     },
     "ask_remaining_ib_info": {
@@ -314,6 +319,7 @@
       "is_question": true,
       "input_type": "text",
       "collect_multiple_info": true,
+      "visible_groups": ["internet_banking"],
       "default_next_stage_id": "process_internet_banking_info"
     },
     "ask_check_card": {
@@ -322,6 +328,7 @@
       "is_question": true,
       "input_type": "yes_no",
       "expected_info_key": "use_check_card",
+      "visible_groups": ["check_card"],
       "transitions": [
         {
           "next_stage_id": "collect_check_card_info",
@@ -342,6 +349,7 @@
       "is_question": true,
       "input_type": "text",
       "collect_multiple_info": true,
+      "visible_groups": ["check_card"],
       "default_next_stage_id": "process_check_card_info"
     },
     "process_check_card_info": {
@@ -366,6 +374,7 @@
       "is_question": true,
       "input_type": "text",
       "collect_multiple_info": true,
+      "visible_groups": ["check_card"],
       "default_next_stage_id": "process_check_card_info"
     },
     "final_summary": {
@@ -373,6 +382,7 @@
       "prompt": "고객님께서 신청하신 내용을 확인해 드리겠습니다:\n\n[기본정보]\n- 성함: %{customer_name}%\n- 연락처: %{customer_phone}%\n- 평생계좌: %{use_lifelong_account}%\n\n[인터넷뱅킹]\n- 가입여부: %{use_internet_banking}%\n%{security_medium}%\n%{transfer_limit_per_time}%\n%{transfer_limit_per_day}%\n\n[체크카드]\n- 신청여부: %{use_check_card}%\n%{card_type}%\n%{card_receive_method}%\n\n수정하고 싶은 내용이 있으신가요?",
       "is_question": true,
       "input_type": "text",
+      "visible_groups": ["basic_info", "account_settings", "internet_banking", "check_card"],
       "transitions": [
         {
           "next_stage_id": "handle_modification",

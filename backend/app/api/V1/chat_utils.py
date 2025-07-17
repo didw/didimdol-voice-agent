@@ -84,6 +84,9 @@ async def send_slot_filling_update(
         total_collected = sum(1 for f in required_fields if f.get("key") in collected_info and f.get("required", True))
         overall_progress = (total_collected / total_required * 100) if total_required > 0 else 0
         
+        # 현재 stage에서 표시할 그룹 정보 가져오기
+        visible_groups = get_stage_visible_groups(scenario_data, current_stage)
+        
         # WebSocket 메시지 구성 (프론트엔드 인터페이스에 맞게)
         slot_filling_data = {
             "type": "slot_filling_update",
@@ -105,7 +108,11 @@ async def send_slot_filling_update(
                 "id": group["id"],
                 "name": group["name"],
                 "fields": group["fields"]
-            } for group in field_groups] if field_groups else []
+            } for group in field_groups] if field_groups else [],
+            "currentStage": {
+                "stageId": current_stage,
+                "visibleGroups": visible_groups
+            }
         }
         
         await websocket.send_json(slot_filling_data)
@@ -116,6 +123,8 @@ async def send_slot_filling_update(
         # DEBUG: 디버깅용 상세 로그
         print(f"[{session_id}] ===== SLOT FILLING DEBUG =====")
         print(f"[{session_id}] Product Type: {slot_filling_data['productType']}")
+        print(f"[{session_id}] Current Stage: {slot_filling_data['currentStage']['stageId']}")
+        print(f"[{session_id}] Visible Groups: {slot_filling_data['currentStage']['visibleGroups']}")
         print(f"[{session_id}] Required Fields Count: {len(slot_filling_data['requiredFields'])}")
         print(f"[{session_id}] Collected Info Count: {len(slot_filling_data['collectedInfo'])}")
         print(f"[{session_id}] Completion Rate: {slot_filling_data['completionRate']}")
@@ -294,3 +303,49 @@ def get_info_collection_stages() -> List[str]:
         "collect_basic", "ask_internet_banking", "collect_ib_info",
         "ask_check_card", "collect_cc_info", "confirm_all"
     ]
+
+
+def get_stage_visible_groups(scenario_data: Dict, stage_id: str) -> List[str]:
+    """현재 stage에서 표시할 field_groups 반환 (시나리오 데이터 기반)"""
+    
+    if not scenario_data or not stage_id:
+        return []
+    
+    # 시나리오 데이터에서 stage 정보 가져오기
+    stages = scenario_data.get("stages", {})
+    current_stage = stages.get(stage_id, {})
+    
+    # stage에 visible_groups가 정의되어 있으면 사용
+    visible_groups = current_stage.get("visible_groups", [])
+    
+    if visible_groups:
+        return visible_groups
+    
+    # fallback: 모든 그룹 표시
+    field_groups = scenario_data.get("field_groups", [])
+    return [group["id"] for group in field_groups]
+
+
+def initialize_default_values(state: Dict[str, Any]) -> Dict[str, Any]:
+    """시나리오 시작 시 default 값들을 collected_info에 설정"""
+    from ...graph.utils import get_active_scenario_data
+    
+    scenario_data = get_active_scenario_data(state)
+    collected_info = state.get("collected_product_info", {}).copy()
+    
+    if not scenario_data:
+        return collected_info
+    
+    for field in scenario_data.get("required_info_fields", []):
+        field_key = field["key"]
+        
+        # 이미 값이 있으면 skip
+        if field_key in collected_info:
+            continue
+            
+        # default 값이 있으면 설정
+        if "default" in field:
+            collected_info[field_key] = field["default"]
+            print(f"Initialized default value: {field_key} = {field['default']}")
+    
+    return collected_info
