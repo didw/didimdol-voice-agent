@@ -162,9 +162,17 @@ npm run test:unit
 - 예: `feat: Add WebSocket reconnection logic`
 - 예: `fix: Resolve CORS issue for production`
 
-## 추가 문서
+## 문서 구조
 
+### 개발 가이드
+- [CLAUDE.md](CLAUDE.md) - 현재 문서 (개발 가이드 및 규칙)
 - [Backend 개발 가이드](backend/CLAUDE.md)
 - [Frontend 개발 가이드](frontend/CLAUDE.md)
 - [로컬 환경 설정](LOCAL_SETUP.md)
 - [테스트 가이드](README_TESTING.md)
+
+### 프로젝트 정보
+- [README.md](README.md) - 프로젝트 개요 및 설명
+- [CHANGELOG.md](CHANGELOG.md) - 버전별 변경사항 및 업데이트 기록
+
+**참고**: 개발 시 진행사항은 CHANGELOG.md에, 프로젝트 정보는 README.md에 작성하세요.

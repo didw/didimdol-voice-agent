@@ -1,19 +1,20 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useSlotFillingStore } from '@/stores/slotFillingStore'
-import type { RequiredField } from '@/types/slotFilling'
+import type { SmartField } from '@/types/slotFilling'
 
 const slotFillingStore = useSlotFillingStore()
 
-// Store에서 데이터 가져오기
+// Store에서 데이터 가져오기 (새로운 구조)
 const productType = computed(() => slotFillingStore.productType)
-const fieldGroups = computed(() => slotFillingStore.getFieldsByGroup)
+const hierarchicalFieldGroups = computed(() => slotFillingStore.hierarchicalFieldGroups)
+const currentStage = computed(() => slotFillingStore.currentStage)
 const completionRate = computed(() => slotFillingStore.visibleCompletionRate)
 const collectedInfo = computed(() => slotFillingStore.collectedInfo)
 const completionStatus = computed(() => slotFillingStore.completionStatus)
 
 // 필드 값 포맷팅
-const formatFieldValue = (field: RequiredField, value: any): string => {
+const formatFieldValue = (field: SmartField, value: any): string => {
   if (value === null || value === undefined) return ''
   
   switch (field.type) {
@@ -28,14 +29,32 @@ const formatFieldValue = (field: RequiredField, value: any): string => {
   }
 }
 
-// 필드가 완료되었는지 확인
-const isFieldCompleted = (fieldKey: string): boolean => {
-  return completionStatus.value[fieldKey] || false
+// 필드가 완료되었는지 확인 (default 값이 있는 경우도 완료로 간주)
+const isFieldCompleted = (field: SmartField): boolean => {
+  // 백엔드에서 default 값이 있는 필드는 자동으로 collected_info에 포함되므로
+  // completionStatus만 확인하면 됨
+  return completionStatus.value[field.key] || false
 }
 
-// 필드가 표시되어야 하는지 확인
-const isFieldVisible = (field: RequiredField): boolean => {
-  return slotFillingStore.isFieldVisible(field)
+// 현재 스테이지의 필드인지 확인 (시각적 강조용)
+const isCurrentStageField = (field: SmartField): boolean => {
+  if (!currentStage.value?.visibleGroups) return false
+  
+  // 현재 표시되는 그룹에 속한 필드인지 확인
+  const currentGroups = hierarchicalFieldGroups.value
+  return currentGroups.some(group => 
+    group.fields.some(f => f.key === field.key)
+  )
+}
+
+// 필드 깊이에 따른 스타일 계산
+const getFieldDepthStyle = (field: SmartField) => {
+  const depth = field.depth || 0
+  return {
+    marginLeft: `${depth * 20}px`,
+    paddingLeft: `${depth > 0 ? 12 : 10}px`,
+    borderLeft: depth > 0 ? `2px solid rgba(76, 175, 80, ${0.3 + (depth * 0.2)})` : 'none'
+  }
 }
 </script>
 
@@ -43,6 +62,13 @@ const isFieldVisible = (field: RequiredField): boolean => {
   <div class="slot-filling-panel">
     <div class="panel-header">
       <h3>정보 수집 현황</h3>
+      
+      <!-- 현재 스테이지 정보 표시 -->
+      <div v-if="currentStage" class="stage-info">
+        <div class="stage-label">현재 단계</div>
+        <div class="stage-name">{{ currentStage.stageId }}</div>
+      </div>
+      
       <div class="progress-section">
         <div class="progress-bar">
           <div 
@@ -58,58 +84,79 @@ const isFieldVisible = (field: RequiredField): boolean => {
     </div>
 
     <div class="panel-body">
+      <!-- 새로운 계층적 필드 표시 -->
       <div 
-        v-for="group in fieldGroups" 
+        v-for="group in hierarchicalFieldGroups" 
         :key="group.id"
         class="field-group"
       >
-        <h4 class="group-title">{{ group.name }}</h4>
+        <h4 class="group-title">
+          {{ group.name }}
+          <span v-if="currentStage" class="stage-badge">현재 단계</span>
+        </h4>
         
-        <div class="fields-list">
+        <!-- 계층적 필드 렌더링 (간소화) -->
+        <div class="hierarchical-fields">
           <div 
             v-for="field in group.fields" 
             :key="field.key"
-            v-show="isFieldVisible(field)"
             :class="[
               'field-item',
-              { 'completed': isFieldCompleted(field.key) }
+              `depth-${field.depth || 0}`,
+              { 
+                'completed': isFieldCompleted(field),
+                'current-stage': isCurrentStageField(field)
+              }
             ]"
+            :style="getFieldDepthStyle(field)"
           >
-            <div class="field-status">
-              <span v-if="isFieldCompleted(field.key)" class="check-mark">✓</span>
-              <span v-else class="empty-circle">○</span>
-            </div>
-            
-            <div class="field-content">
-              <div class="field-name">
-                {{ field.displayName }}
-                <span v-if="field.required" class="required-mark">*</span>
+              <div class="field-status">
+                <span v-if="isFieldCompleted(field)" class="check-mark">✓</span>
+                <span v-else class="empty-circle">○</span>
+              </div>
+              
+              <div class="field-content">
+                <div class="field-name">
+                  {{ field.displayName }}
+                  <span v-if="field.required" class="required-mark">*</span>
+                  <span v-if="field.depth && field.depth > 0" class="depth-indicator">
+                    ↳
+                  </span>
+                </div>
+                
+                <div 
+                  v-if="isFieldCompleted(field)" 
+                  class="field-value"
+                >
+                  {{ formatFieldValue(field, collectedInfo[field.key]) }}
+                </div>
+                
+                <!-- 조건 표시 (개발 환경에서만) -->
+                <div 
+                  v-if="false && field.showWhen" 
+                  class="field-condition"
+                  :title="`조건: ${field.showWhen}`"
+                >
+                  <small>{{ field.showWhen }}</small>
+                </div>
               </div>
               
               <div 
-                v-if="isFieldCompleted(field.key)" 
-                class="field-value"
+                v-if="field.description && !isFieldCompleted(field)" 
+                class="field-tooltip"
+                :title="field.description"
+                :aria-label="field.description"
+                role="tooltip"
+                tabindex="0"
               >
-                {{ formatFieldValue(field, collectedInfo[field.key]) }}
+                <span aria-hidden="true">?</span>
               </div>
             </div>
-            
-            <div 
-              v-if="field.description" 
-              class="field-tooltip"
-              :title="field.description"
-              :aria-label="field.description"
-              role="tooltip"
-              tabindex="0"
-            >
-              <span aria-hidden="true">?</span>
-            </div>
-          </div>
         </div>
       </div>
 
       <!-- 필드가 없을 때 메시지 -->
-      <div v-if="fieldGroups.length === 0" class="empty-message">
+      <div v-if="hierarchicalFieldGroups.length === 0" class="empty-message">
         대화를 시작하면 수집된 정보가 여기에 표시됩니다.
       </div>
     </div>
@@ -136,6 +183,31 @@ const isFieldVisible = (field: RequiredField): boolean => {
   margin: 0 0 15px 0;
   font-size: 1.2em;
   color: var(--color-heading);
+}
+
+/* 현재 스테이지 정보 스타일 */
+.stage-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+  border-radius: 6px;
+  border-left: 3px solid #2196f3;
+}
+
+.stage-label {
+  font-size: 0.75em;
+  color: #1976d2;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.stage-name {
+  font-size: 0.85em;
+  color: #1976d2;
+  font-weight: 600;
 }
 
 .progress-section {
@@ -239,6 +311,30 @@ const isFieldVisible = (field: RequiredField): boolean => {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
 
+/* 스테이지 배지 스타일 */
+.stage-badge {
+  font-size: 0.7em;
+  color: #2196f3;
+  background-color: rgba(33, 150, 243, 0.1);
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin-left: 8px;
+  font-weight: 500;
+}
+
+/* 계층적 필드 스타일 */
+.hierarchical-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.depth-layer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .fields-list {
   display: flex;
   flex-direction: column;
@@ -264,6 +360,69 @@ const isFieldVisible = (field: RequiredField): boolean => {
   border-color: #4caf50;
   transform: translateX(2px);
   box-shadow: 0 2px 8px rgba(76, 175, 80, 0.2);
+}
+
+/* 깊이별 필드 스타일 */
+.field-item.depth-0 {
+  background-color: var(--color-background-mute);
+  border-radius: 8px;
+}
+
+.field-item.depth-1 {
+  background-color: rgba(76, 175, 80, 0.05);
+  border-radius: 6px;
+  margin-top: 4px;
+}
+
+.field-item.depth-2 {
+  background-color: rgba(33, 150, 243, 0.05);
+  border-radius: 4px;
+  margin-top: 2px;
+}
+
+.field-item.depth-3 {
+  background-color: rgba(255, 193, 7, 0.05);
+  border-radius: 4px;
+}
+
+/* 깊이 표시기 스타일 */
+.depth-indicator {
+  color: #4caf50;
+  font-size: 0.8em;
+  margin-left: 4px;
+  opacity: 0.7;
+}
+
+/* 조건 표시 스타일 */
+.field-condition {
+  margin-top: 2px;
+  opacity: 0.6;
+}
+
+.field-condition small {
+  font-size: 0.7em;
+  color: #666;
+  font-style: italic;
+}
+
+/* 현재 스테이지 필드 강조 스타일 */
+.field-item.current-stage {
+  border-left: 4px solid #2196f3;
+  background: linear-gradient(135deg, #e3f2fd 0%, #ffffff 100%);
+}
+
+.field-item.current-stage:not(.completed) {
+  opacity: 0.9;
+  animation: pulseCurrentStage 2s ease-in-out infinite;
+}
+
+@keyframes pulseCurrentStage {
+  0%, 100% {
+    box-shadow: 0 2px 8px rgba(33, 150, 243, 0.2);
+  }
+  50% {
+    box-shadow: 0 2px 12px rgba(33, 150, 243, 0.4);
+  }
 }
 
 .field-item:hover {
@@ -317,6 +476,7 @@ const isFieldVisible = (field: RequiredField): boolean => {
   font-weight: 500;
   color: #2e7d32;
 }
+
 
 .field-tooltip {
   flex-shrink: 0;
@@ -384,6 +544,26 @@ const isFieldVisible = (field: RequiredField): boolean => {
   
   .field-item.completed .field-value {
     color: #81c784;
+  }
+  
+  .field-item.current-stage {
+    background: linear-gradient(135deg, #1a237e 0%, #303f9f 100%);
+    border-left-color: #3f51b5;
+  }
+  
+  .stage-info {
+    background: linear-gradient(135deg, #1a237e 0%, #303f9f 100%);
+    border-left-color: #3f51b5;
+  }
+  
+  .stage-label,
+  .stage-name {
+    color: #90caf9;
+  }
+  
+  .stage-badge {
+    color: #90caf9;
+    background-color: rgba(144, 202, 249, 0.1);
   }
   
   .progress-bar {

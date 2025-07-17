@@ -1,5 +1,103 @@
 # Changelog
 
+## [2025-07-17] - 고급 Slot Filling 시스템 구현
+
+### ✨ 새로운 기능
+- **계층적 필드 표시 시스템**
+  - `show_when` 표현식 기반 조건부 필드 표시
+  - `parent_field`를 통한 자동 계층 구조 생성
+  - 깊이별 시각적 구분 (들여쓰기, 색상, 테두리)
+  - 실시간 조건 평가 및 동적 UI 업데이트
+
+- **Default 값 자동 처리**
+  - 조건을 만족하는 필드의 default 값 자동 수집
+  - Default 값이 있는 필드는 즉시 완료 상태로 표시
+  - 사용자 입력과 동일하게 처리 (이탤릭 스타일 제거)
+
+### 🏗️ 아키텍처 변경
+- **Backend 조건 평가 엔진**
+  - `evaluate_show_when()`: 표현식 기반 조건 평가
+  - `get_visible_fields_with_hierarchy()`: 계층적 필드 계산
+  - `calculate_field_depth()`: 자동 깊이 계산
+  - 모든 복잡한 로직을 Backend에서 중앙 처리
+
+- **Frontend 단순화**
+  - Backend에서 계산된 visibility 정보만 렌더링
+  - 복잡한 조건 로직 제거
+  - 성능 최적화 (캐싱, 디바운싱)
+
+### 📝 지원 표현식
+- `field == value`: 특정 값 비교
+- `field != null`: 값 존재 여부
+- `condition1 && condition2`: AND 연산
+- `condition1 || condition2`: OR 연산
+
+### 🎯 구현 예시
+```json
+{
+  "key": "security_medium",
+  "show_when": "use_internet_banking == true",
+  "parent_field": "use_internet_banking",
+  "default": "신한 OTP"
+}
+```
+
+### 🔧 개선사항
+- 실시간 필드 업데이트 시 부모-자식 관계 자동 처리
+- WebSocket을 통한 효율적인 상태 동기화
+- 메모리 누수 방지 및 성능 최적화
+- 타입 안정성 강화 (TypeScript)
+
+### 📱 사용자 경험
+- 선택에 따라 관련 필드만 표시되어 혼란 감소
+- 계층 구조로 논리적 관계 시각화
+- Default 값 자동 입력으로 입력 부담 감소
+- 부드러운 애니메이션과 직관적인 UI
+
+## [2025-07-17] - Step-based Slot Filling 개선
+
+### ✨ 새로운 기능
+- **단계별 슬롯필링 표시**
+  - 현재 시나리오 단계에 해당하는 필드 그룹만 표시
+  - 사용자 인지 부하 감소 및 UX 개선
+  - 대상 시나리오: deposit_account (입출금통장 신규)
+
+### 🏗️ 아키텍처 변경
+- **데이터 기반 설계**
+  - 시나리오 JSON에 `visible_groups` 속성 추가
+  - 하드코딩 제거 및 유연한 시나리오 확장 구조
+- **Backend 함수 추가**
+  - `get_stage_visible_groups()`: 시나리오 데이터 기반 그룹 매핑
+  - `initialize_default_values()`: default 값 자동 설정 및 완료 처리
+- **Frontend 타입 확장**
+  - `CurrentStageInfo` 타입 추가
+  - `visibleFieldGroups` computed로 step-based 필터링
+
+### 🔧 개선사항
+- **자동 Default 값 처리**
+  - 시나리오 시작 시 default 값 자동 입력
+  - default 값이 있는 필드 자동 완료 상태 표시
+- **UI/UX 개선**
+  - 현재 스테이지 정보 표시
+  - 현재 단계 필드 시각적 강조
+  - "현재 단계" 배지 및 애니메이션 효과
+- **호환성 보장**
+  - 기존 시스템과 100% 호환
+  - Fallback 로직으로 기존 방식 지원
+
+### 📱 사용자 경험
+- **단계별 집중**: 현재 필요한 정보만 표시하여 혼란 방지
+- **진행 상황 인식**: 어떤 단계에 있는지 명확하게 표시
+- **자동 완료**: 기본값이 있는 필드는 자동으로 완료 처리
+
+### 🎯 구현 범위
+- **deposit_account_scenario** 4단계 매핑:
+  - `greeting`: 기본 정보 (basic_info)
+  - `ask_lifelong_account`: 계좌 설정 (account_settings)
+  - `collect_internet_banking_info`: 인터넷뱅킹 (internet_banking)
+  - `collect_check_card_info`: 체크카드 (check_card)
+  - `final_summary`: 전체 정보 확인
+
 ## [2025-07-16] - 환경 분리 및 WebSocket 설정 개선
 
 ### ✨ 새로운 기능

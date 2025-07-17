@@ -52,22 +52,28 @@
       "required": false,
       "type": "choice",
       "choices": ["보안카드", "신한 OTP", "타행 OTP"],
-      "default": "보안카드",
-      "description": "인터넷뱅킹 보안매체 선택"
+      "default": "신한 OTP",
+      "description": "인터넷뱅킹 보안매체 선택",
+      "show_when": "use_internet_banking == true",
+      "parent_field": "use_internet_banking"
     },
     {
       "key": "other_otp_manufacturer",
       "display_name": "타행 OTP 제조사",
       "required": false,
       "type": "text",
-      "description": "타행 OTP 제조사"
+      "description": "타행 OTP 제조사",
+      "show_when": "security_medium == '타행 OTP'",
+      "parent_field": "security_medium"
     },
     {
       "key": "other_otp_serial",
       "display_name": "타행 OTP 일련번호",
       "required": false,
       "type": "text",
-      "description": "타행 OTP 일련번호"
+      "description": "타행 OTP 일련번호",
+      "show_when": "security_medium == '타행 OTP'",
+      "parent_field": "security_medium"
     },
     {
       "key": "transfer_limit_per_time",
@@ -76,7 +82,9 @@
       "type": "number",
       "unit": "만원",
       "default": 500,
-      "description": "1회 이체한도 (최대 5000만원)"
+      "description": "1회 이체한도 (최대 5000만원)",
+      "show_when": "use_internet_banking == true",
+      "parent_field": "use_internet_banking"
     },
     {
       "key": "transfer_limit_per_day",
@@ -85,7 +93,9 @@
       "type": "number",
       "unit": "만원",
       "default": 1000,
-      "description": "1일 이체한도 (최대 1억원)"
+      "description": "1일 이체한도 (최대 1억원)",
+      "show_when": "use_internet_banking == true",
+      "parent_field": "use_internet_banking"
     },
     {
       "key": "important_transaction_alert",
@@ -93,7 +103,9 @@
       "required": false,
       "type": "boolean",
       "default": true,
-      "description": "중요거래통보 신청 여부"
+      "description": "중요거래통보 신청 여부",
+      "show_when": "use_internet_banking == true",
+      "parent_field": "use_internet_banking"
     },
     {
       "key": "withdrawal_alert",
@@ -101,7 +113,9 @@
       "required": false,
       "type": "boolean",
       "default": true,
-      "description": "출금내역통보 신청 여부"
+      "description": "출금내역통보 신청 여부",
+      "show_when": "use_internet_banking == true",
+      "parent_field": "use_internet_banking"
     },
     {
       "key": "overseas_ip_restriction",
@@ -109,7 +123,9 @@
       "required": false,
       "type": "boolean",
       "default": true,
-      "description": "해외IP이체 제한 신청 여부"
+      "description": "해외IP이체 제한 신청 여부",
+      "show_when": "use_internet_banking == true",
+      "parent_field": "use_internet_banking"
     },
     {
       "key": "additional_withdrawal_account",
@@ -117,7 +133,9 @@
       "required": false,
       "type": "boolean",
       "default": false,
-      "description": "출금계좌 추가 여부"
+      "description": "출금계좌 추가 여부",
+      "show_when": "use_internet_banking == true",
+      "parent_field": "use_internet_banking"
     },
     {
       "key": "use_check_card",
@@ -133,7 +151,9 @@
       "type": "choice",
       "choices": ["즉시발급", "배송"],
       "default": "즉시발급",
-      "description": "카드 수령 방법"
+      "description": "카드 수령 방법",
+      "show_when": "use_check_card == true",
+      "parent_field": "use_check_card"
     },
     {
       "key": "card_delivery_location",
@@ -141,7 +161,9 @@
       "required": false,
       "type": "choice",
       "choices": ["자택", "직장", "지점"],
-      "description": "카드 배송 장소"
+      "description": "카드 배송 장소",
+      "show_when": "card_receive_method == '배송'",
+      "parent_field": "card_receive_method"
     },
     {
       "key": "card_type",
@@ -150,7 +172,9 @@
       "type": "choice",
       "choices": ["S-line", "딥드림(Deep Dream)"],
       "default": "S-line",
-      "description": "체크카드 종류"
+      "description": "체크카드 종류",
+      "show_when": "use_check_card == true",
+      "parent_field": "use_check_card"
     },
     {
       "key": "postpaid_transport",
@@ -158,7 +182,9 @@
       "required": false,
       "type": "boolean",
       "default": false,
-      "description": "후불교통기능 신청 여부"
+      "description": "후불교통기능 신청 여부",
+      "show_when": "use_check_card == true",
+      "parent_field": "use_check_card"
     },
     {
       "key": "payment_date",
@@ -166,7 +192,9 @@
       "required": false,
       "type": "number",
       "default": 15,
-      "description": "결제일 (1~30일)"
+      "description": "결제일 (1~30일)",
+      "show_when": "use_check_card == true",
+      "parent_field": "use_check_card"
     },
     {
       "key": "statement_method",
@@ -175,7 +203,9 @@
       "type": "choice",
       "choices": ["휴대폰", "이메일", "홈페이지"],
       "default": "휴대폰",
-      "description": "명세서 수령 방법"
+      "description": "명세서 수령 방법",
+      "show_when": "use_check_card == true",
+      "parent_field": "use_check_card"
     },
     {
       "key": "same_password_as_account",
@@ -183,7 +213,9 @@
       "required": false,
       "type": "boolean",
       "default": true,
-      "description": "계좌비밀번호와 동일한 비밀번호 사용 여부"
+      "description": "계좌비밀번호와 동일한 비밀번호 사용 여부",
+      "show_when": "use_check_card == true",
+      "parent_field": "use_check_card"
     },
     {
       "key": "card_usage_alert",
@@ -192,7 +224,9 @@
       "type": "choice",
       "choices": ["5만원 이상 무료", "모든내역 200원", "선택안함"],
       "default": "5만원 이상 무료",
-      "description": "카드사용알림 문자서비스"
+      "description": "카드사용알림 문자서비스",
+      "show_when": "use_check_card == true",
+      "parent_field": "use_check_card"
     }
   ],
   "field_groups": [

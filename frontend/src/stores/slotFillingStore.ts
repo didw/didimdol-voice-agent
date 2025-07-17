@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
-import type { SlotFillingState, SlotFillingUpdate, RequiredField, FieldGroup } from '@/types/slotFilling'
+import type { SlotFillingState, SlotFillingUpdate, SmartField, FieldGroup, CurrentStageInfo } from '@/types/slotFilling'
 
 // 디버그 모드 활성화 여부
 const DEBUG_MODE = import.meta.env.DEV
@@ -11,13 +11,16 @@ const MAX_FIELD_CACHE_SIZE = 500 // 필드 캐시 최대 크기 (줄임)
 const CACHE_CLEANUP_INTERVAL = 5 * 60 * 1000 // 5분마다 캐시 정리
 
 export const useSlotFillingStore = defineStore('slotFilling', () => {
-  // State
+  // State (새로운 구조)
   const productType = ref<string | null>(null)
-  const requiredFields = ref<RequiredField[]>([])
+  const requiredFields = ref<SmartField[]>([])
   const collectedInfo = ref<Record<string, any>>({})
   const completionStatus = ref<Record<string, boolean>>({})
   const completionRate = ref<number>(0)
   const fieldGroups = ref<FieldGroup[]>([])
+  const currentStage = ref<CurrentStageInfo | null>(null)
+  const visibleFields = ref<SmartField[]>([])  // Backend에서 계산된 표시 필드
+  const fieldsByDepth = ref<Record<number, SmartField[]>>({})
   
   // 성능 최적화 관련 상태
   const lastUpdateHash = ref<string>('')
@@ -38,93 +41,76 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
     fieldVisibilityCache.value.clear()
   }
 
-  // Getters
+  // Getters (새로운 구조)
   const getState = computed<SlotFillingState>(() => ({
     productType: productType.value,
     requiredFields: requiredFields.value,
     collectedInfo: collectedInfo.value,
     completionStatus: completionStatus.value,
     completionRate: completionRate.value,
-    fieldGroups: fieldGroups.value
+    fieldGroups: fieldGroups.value,
+    currentStage: currentStage.value || undefined,
+    visibleFields: visibleFields.value,
+    fieldsByDepth: fieldsByDepth.value
   }))
 
-  // 그룹별 필드 반환
-  const getFieldsByGroup = computed(() => {
+  // 계층적 필드 그룹 (Backend에서 계산된 visibleFields 사용)
+  const hierarchicalFieldGroups = computed(() => {
     if (!fieldGroups.value || fieldGroups.value.length === 0) {
-      // 그룹이 없으면 모든 필드를 하나의 그룹으로
+      // 그룹이 없으면 깊이별로 자동 그룹화
       return [{
         id: 'default',
         name: '정보 수집',
-        fields: requiredFields.value
+        fields: visibleFields.value
       }]
     }
 
-    return fieldGroups.value.map(group => ({
+    // currentStage.visibleGroups가 있으면 해당 그룹만 필터링
+    let groupsToShow = fieldGroups.value
+    if (currentStage.value?.visibleGroups?.length) {
+      groupsToShow = fieldGroups.value.filter(group => 
+        currentStage.value!.visibleGroups.includes(group.id)
+      )
+    }
+
+    return groupsToShow.map(group => ({
       ...group,
-      fields: requiredFields.value.filter(field => 
+      fields: visibleFields.value.filter(field => 
         group.fields.includes(field.key)
       )
     }))
   })
 
-  // 필드가 표시되어야 하는지 확인 (의존성 체크 + 캐시)
-  const isFieldVisible = (field: RequiredField): boolean => {
-    if (!field.dependsOn) return true
-
-    try {
-      const { field: dependsOnField, value: dependsOnValue } = field.dependsOn
-      const currentValue = collectedInfo.value[dependsOnField]
-
-      // 간단한 캐시 키 생성 (JSON.stringify 대신 문자열 조합)
-      const cacheKey = `${field.key}:${dependsOnField}:${currentValue}:${Array.isArray(dependsOnValue) ? dependsOnValue.join(',') : dependsOnValue}`
-      
-      // 캐시에서 확인
-      if (fieldVisibilityCache.value.has(cacheKey)) {
-        return fieldVisibilityCache.value.get(cacheKey)!
+  // 깊이별 필드 그룹화
+  const computeFieldsByDepth = () => {
+    const byDepth: Record<number, SmartField[]> = {}
+    
+    visibleFields.value.forEach(field => {
+      const depth = field.depth || 0
+      if (!byDepth[depth]) {
+        byDepth[depth] = []
       }
-
-      let isVisible: boolean
-      
-      // 배열인 경우 포함 여부 확인
-      if (Array.isArray(dependsOnValue)) {
-        isVisible = dependsOnValue.includes(currentValue)
-      } else {
-        // 단일 값인 경우 일치 여부 확인
-        isVisible = currentValue === dependsOnValue
-      }
-      
-      // 캐시에 저장 (LRU 방식으로 개선)
-      if (fieldVisibilityCache.value.size >= MAX_FIELD_CACHE_SIZE) {
-        // 가장 오래된 항목 제거
-        const firstKey = fieldVisibilityCache.value.keys().next().value
-        if (firstKey) {
-          fieldVisibilityCache.value.delete(firstKey)
-        }
-      }
-      fieldVisibilityCache.value.set(cacheKey, isVisible)
-      
-      return isVisible
-    } catch (error) {
-      console.error('[SlotFilling] Error in isFieldVisible:', error)
-      return true // 에러 시 기본적으로 표시
-    }
+      byDepth[depth].push(field)
+    })
+    
+    fieldsByDepth.value = byDepth
   }
 
-  // 표시 가능한 필드만 필터링
-  const visibleFields = computed(() => 
-    requiredFields.value.filter(field => isFieldVisible(field))
-  )
+  // 최대 깊이 계산
+  const maxDepth = computed(() => {
+    if (visibleFields.value.length === 0) return 0
+    return Math.max(...visibleFields.value.map(f => f.depth || 0))
+  })
 
-  // 표시 가능한 필드 기준 완료율 계산
+  // 표시 가능한 필드 기준 완료율 계산 (Backend에서 계산된 값 사용)
   const visibleCompletionRate = computed(() => {
-    const visible = visibleFields.value
-    if (visible.length === 0) return 0
+    if (visibleFields.value.length === 0) return completionRate.value
 
-    const completed = visible.filter(field => 
+    const completed = visibleFields.value.filter(field => 
       completionStatus.value[field.key]
     ).length
 
-    return Math.round((completed / visible.length) * 100)
+    return Math.round((completed / visibleFields.value.length) * 100)
   })
 
   // 메시지 해시 계산 (중복 업데이트 방지용)
@@ -149,6 +135,7 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
     console.log('[SlotFilling] Collected info:', message.collectedInfo)
     console.log('[SlotFilling] Completion status:', message.completionStatus)
     console.log('[SlotFilling] Field groups:', message.fieldGroups)
+    console.log('[SlotFilling] Current stage:', message.currentStage)
     
     // 중복 업데이트 방지
     const messageHash = calculateUpdateHash(message)
@@ -188,6 +175,24 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
       completionStatus.value = { ...message.completionStatus }
       completionRate.value = message.completionRate
       fieldGroups.value = message.fieldGroups ? [...message.fieldGroups] : []
+      currentStage.value = message.currentStage || null
+      
+      // Backend에서 계산된 표시 필드 사용 (모든 필드가 이제 depth 정보를 가짐)
+      visibleFields.value = message.requiredFields || []
+      
+      // 깊이별 필드 그룹화
+      computeFieldsByDepth()
+      
+      console.log('[SlotFilling] Visible fields updated:', visibleFields.value.length)
+      console.log('[SlotFilling] Fields by depth:', fieldsByDepth.value)
+      console.log('[SlotFilling] Sample visible fields:', visibleFields.value.slice(0, 5))
+      console.log('[SlotFilling] Collected info keys:', Object.keys(collectedInfo.value))
+      console.log('[SlotFilling] Boolean fields status:', {
+        use_internet_banking: collectedInfo.value.use_internet_banking,
+        use_check_card: collectedInfo.value.use_check_card,
+        confirm_personal_info: collectedInfo.value.confirm_personal_info,
+        use_lifelong_account: collectedInfo.value.use_lifelong_account
+      })
       
       // 업데이트 후 상태 로그
       console.log('[SlotFilling] Updated state:', {
@@ -195,7 +200,8 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
         fieldsCount: requiredFields.value.length,
         collectedCount: Object.keys(collectedInfo.value).length,
         completionRate: completionRate.value,
-        fieldGroups: fieldGroups.value
+        fieldGroups: fieldGroups.value,
+        currentStage: currentStage.value
       })
       
       // 필드별 상세 정보
@@ -233,6 +239,9 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
       completionStatus.value = {}
       completionRate.value = 0
       fieldGroups.value = []
+      currentStage.value = null
+      visibleFields.value = []
+      fieldsByDepth.value = {}
       
       // localStorage 클리어
       clearLocalStorage()
@@ -278,7 +287,8 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
         collectedInfo: collectedInfo.value,
         completionStatus: completionStatus.value,
         completionRate: completionRate.value,
-        fieldGroups: fieldGroups.value
+        fieldGroups: fieldGroups.value,
+        currentStage: currentStage.value || undefined
       }
       
       // 크기 제한 (5MB)
@@ -310,6 +320,7 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
         completionStatus.value = state.completionStatus
         completionRate.value = state.completionRate
         fieldGroups.value = state.fieldGroups || []
+        currentStage.value = state.currentStage || null
         
         if (DEBUG_MODE) {
           console.log('[SlotFilling] Loaded from localStorage:', state)
@@ -363,19 +374,22 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
     completionStatus,
     completionRate,
     fieldGroups,
+    currentStage,
+    visibleFields,
+    fieldsByDepth,
 
     // Getters
     getState,
-    getFieldsByGroup,
-    visibleFields,
+    hierarchicalFieldGroups,
     visibleCompletionRate,
+    maxDepth,
 
     // Actions
     updateSlotFilling,
     clearSlotFilling,
     updateFieldValue,
     removeFieldValue,
-    isFieldVisible,
+    computeFieldsByDepth,
     
     // localStorage 관련 (선택적 사용)
     saveToLocalStorage,
