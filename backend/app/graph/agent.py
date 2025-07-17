@@ -37,16 +37,8 @@ import re
 from ..services.rag_service import rag_service
 from ..services.web_search_service import web_search_service
 
-# --- Flow Tracking ---
-
-def log_node_execution(node_name: str, input_info: str = "", output_info: str = ""):
-    """간결한 노드 실행 추적 로깅"""
-    if input_info and output_info:
-        print(f"🔄 [{node_name}] {input_info} → {output_info}")
-    elif input_info:
-        print(f"🔄 [{node_name}] {input_info}")
-    else:
-        print(f"🔄 [{node_name}]")
+# --- Import logger ---
+from .logger import log_node_execution
 
 # --- Helper Functions for Information Collection ---
 
@@ -143,229 +135,17 @@ def generate_group_specific_prompt(stage_id: str, collected_info: Dict) -> str:
     
     return "추가 정보를 알려주시겠어요?"
 
+# --- Import Node Functions ---
+from .nodes.orchestrator.entry_point import entry_point_node
+from .nodes.orchestrator.main_router import main_agent_router_node
+from .nodes.control.end_conversation import end_conversation_node
+from .nodes.control.synthesize import synthesize_response_node
+from .nodes.control.set_product import set_product_type_node
+
+# --- Import Router ---
+from .router import execute_plan_router, route_after_scenario_logic
+
 # --- LangGraph Node Functions ---
-
-async def entry_point_node(state: AgentState) -> AgentState:
-    user_text = state.get("user_input_text", "")
-    product = state.get("current_product_type", "None")
-    log_node_execution("Entry", f"input='{user_text[:20]}...', product={product}")
-    if not ALL_SCENARIOS_DATA or not ALL_PROMPTS:
-        error_msg = "Service initialization failed (Cannot load scenarios or prompts)."
-        return {**state, "error_message": error_msg, "final_response_text_for_tts": error_msg, "is_final_turn_response": True}
-
-    # Reset turn-specific state
-    turn_defaults = {
-        "stt_result": None, "main_agent_routing_decision": None, "main_agent_direct_response": None,
-        "scenario_agent_output": None, "final_response_text_for_tts": None,
-        "is_final_turn_response": False, "error_message": None,
-        "active_scenario_data": None, "active_knowledge_base_content": None,
-        "loan_selection_is_fresh": False, "factual_response": None, "action_plan": [],
-    }
-    
-    current_product = state.get("current_product_type")
-    updated_state = {**state, **turn_defaults, "current_product_type": current_product}
-    
-    # Load active scenario data if a product is selected
-    active_scenario = get_active_scenario_data(updated_state)
-    if active_scenario:
-        updated_state["active_scenario_data"] = active_scenario
-        updated_state["active_scenario_name"] = active_scenario.get("scenario_name", "Unknown Product")
-        if not updated_state.get("current_scenario_stage_id"):
-            updated_state["current_scenario_stage_id"] = active_scenario.get("initial_stage_id")
-    else:
-        updated_state["active_scenario_name"] = "Not Selected"
-
-    # Add user input to message history
-    user_text = updated_state.get("user_input_text")
-    if user_text:
-        messages = list(updated_state.get("messages", []))
-        if not messages or not (isinstance(messages[-1], HumanMessage) and messages[-1].content == user_text):
-            messages.append(HumanMessage(content=user_text))
-        updated_state["messages"] = messages
-        updated_state["stt_result"] = user_text
-    
-    # 시나리오 자동 진행 로직
-    scenario_continuation = _check_scenario_continuation(state, updated_state)
-    if scenario_continuation:
-        updated_state.update(scenario_continuation)
-        
-    return cast(AgentState, updated_state)
-
-def _check_scenario_continuation(prev_state: AgentState, current_state: AgentState) -> dict:
-    """시나리오 연속 진행이 필요한지 확인하고 자동 설정"""
-    
-    # 이전 상태에서 시나리오 연속성이 준비되어 있고, 현재 사용자 입력이 있는 경우
-    if (prev_state.get("scenario_ready_for_continuation") and 
-        prev_state.get("current_product_type") and 
-        current_state.get("user_input_text")):
-        
-        print("🔄 시나리오 자동 진행 모드 활성화")
-        print(f"   제품: {prev_state.get('current_product_type')}")
-        print(f"   시나리오: {prev_state.get('active_scenario_name')}")
-        
-        return {
-            "action_plan": ["invoke_scenario_agent"],
-            "scenario_ready_for_continuation": False,  # 자동 진행 후 리셋
-            "scenario_awaiting_user_response": False,
-            # 이전 상태에서 필요한 정보 복원
-            "current_product_type": prev_state.get("current_product_type"),
-            "current_scenario_stage_id": prev_state.get("current_scenario_stage_id"),
-            "collected_product_info": prev_state.get("collected_product_info", {})
-        }
-    
-    return {}
-
-async def main_agent_router_node(state: AgentState) -> AgentState:
-    user_input = state.get("stt_result", "")
-    current_product_type = state.get("current_product_type")
-    mode = "business_guidance" if not current_product_type else "task_management"
-    log_node_execution("Orchestrator", f"mode={mode}, input='{user_input[:20]}...'")
-    if not json_llm:
-        return {**state, "error_message": "Orchestrator service unavailable (LLM not initialized).", "is_final_turn_response": True}
-
-    user_input = state.get("stt_result", "")
-    current_product_type = state.get("current_product_type")
-    
-    # LLM 기반 대화 처리 및 Worker 결정
-    prompt_key = 'business_guidance_prompt' if not current_product_type else 'task_management_prompt'
-    print(f"Main Agent using prompt: '{prompt_key}'")
-
-    prompt_template = ALL_PROMPTS.get('main_agent', {}).get(prompt_key, '')
-    if not prompt_template:
-        return {**state, "error_message": "Router prompt not found.", "main_agent_routing_decision": "unclear_input", "is_final_turn_response": True}
-
-    parser = initial_task_decision_parser if not current_product_type else main_router_decision_parser
-    format_instructions = parser.get_format_instructions()
-    
-    try:
-        prompt_kwargs = {"user_input": user_input, "format_instructions": format_instructions}
-        
-        # business_guidance_prompt에 서비스 설명 추가
-        if not current_product_type:
-            # service_descriptions.yaml 로드
-            service_desc_path = Path(__file__).parent.parent / "config" / "service_descriptions.yaml"
-            if service_desc_path.exists():
-                with open(service_desc_path, 'r', encoding='utf-8') as f:
-                    service_data = yaml.safe_load(f)
-                    
-                # 서비스 설명 포맷팅
-                service_descriptions = ""
-                for service_id in ["didimdol", "jeonse", "deposit_account"]:
-                    if service_id in service_data:
-                        svc = service_data[service_id]
-                        service_descriptions += f"\n**{svc['name']}** ({service_id})\n"
-                        service_descriptions += f"- 대상: {svc['target']}\n"
-                        service_descriptions += f"- 설명: {svc['summary'].strip()}\n"
-                        if 'benefits' in svc:
-                            service_descriptions += f"- 주요 혜택: {', '.join(svc['benefits'][:2])}\n"
-                
-                prompt_kwargs["service_descriptions"] = service_descriptions
-            else:
-                # 폴백: 기본 설명 사용
-                prompt_kwargs["service_descriptions"] = """
-**디딤돌 대출** (didimdol)
-- 대상: 무주택 서민 (연소득 6-7천만원 이하)
-- 설명: 정부 지원 주택구입자금 대출, 최대 3-4억원, 연 2.15~2.75%
-
-**전세 대출** (jeonse)  
-- 대상: 무주택 세대주
-- 설명: 전세 보증금 대출, 보증금의 80-90%, 만기일시상환
-
-**입출금통장** (deposit_account)
-- 대상: 모든 고객
-- 설명: 기본 계좌, 평생계좌 서비스, 체크카드/인터넷뱅킹 동시 신청
-"""
-        
-        if current_product_type:
-             active_scenario_data = get_active_scenario_data(state) or {}
-             current_stage_id = state.get("current_scenario_stage_id", "N/A")
-             current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
-             valid_choices = current_stage_info.get("choices", []) 
-             available_types = ", ".join([ALL_SCENARIOS_DATA[pt]["scenario_name"] for pt in state.get("available_product_types", []) if pt in ALL_SCENARIOS_DATA])
-             
-             # 업무 관련 JSON 정보 추가
-             task_context = {
-                 "collected_info": state.get("collected_product_info", {}),
-                 "current_stage": current_stage_info,
-                 "stage_id": current_stage_id,
-                 "expected_info": current_stage_info.get("expected_info_key", ""),
-                 "valid_choices": valid_choices
-             }
-             
-             # 매뉴얼 정보 로드
-             product_type = state.get("current_product_type")
-             manual_content = await load_knowledge_base_content_async(product_type) if product_type else ""
-             
-             prompt_kwargs.update({
-                "active_scenario_name": state.get("active_scenario_name", "Not Selected"),
-                "formatted_messages_history": format_messages_for_prompt(state.get("messages", [])[:-1]),
-                "task_context_json": json.dumps(task_context, ensure_ascii=False, indent=2),
-                "manual_content": manual_content[:2000] if manual_content else "매뉴얼 정보 없음",
-                "available_product_types_display": available_types
-             })
-        else:
-            # 초기 프롬프트에 필요한 available_product_types_list를 추가합니다.
-            available_types_list = state.get("available_product_types", [])
-            available_services = {
-                "didimdol": "디딤돌 대출 - 주택구입을 위한 정부지원 대출",
-                "jeonse": "전세자금대출 - 전세 보증금 마련을 위한 대출", 
-                "deposit_account": "입출금통장 - 일상적인 금융거래를 위한 기본 계좌"
-            }
-            
-            service_descriptions = [f"- {available_services.get(pt, pt)}" for pt in available_types_list]
-            
-            prompt_kwargs.update({
-                "available_product_types_list": available_types_list,
-                "available_services_description": "\n".join(service_descriptions)
-            })
-        
-        prompt_filled = prompt_template.format(**prompt_kwargs)
-        response = await json_llm.ainvoke([HumanMessage(content=prompt_filled)])
-        raw_content = response.content.strip().replace("```json", "").replace("```", "").strip()
-        decision = parser.parse(raw_content)
-
-        # 새로운 ActionModel 구조를 사용하도록 상태 업데이트
-        action_plan_models = decision.actions
-        action_plan_tools = [action.tool for action in action_plan_models]
-
-        new_state = {}
-        if hasattr(decision, 'direct_response') and decision.direct_response:
-            new_state["main_agent_direct_response"] = decision.direct_response
-
-        system_log = f"Main Agent Plan: actions={[f'{a.tool}({a.tool_input})' for a in action_plan_models]}"
-        updated_messages = list(state.get("messages", [])) + [SystemMessage(content=system_log)]
-        new_state["messages"] = updated_messages
-
-        # 초기 상태 분기 처리: action_plan_models 자체를 수정하여 일관성 유지
-        if not current_product_type:
-            first_action = action_plan_models[0] if action_plan_models else None
-            if first_action:
-                if first_action.tool == "set_product_type":
-                    new_state["loan_selection_is_fresh"] = True
-                elif first_action.tool == "invoke_qa_agent_general":
-                    # action_plan_models의 tool 이름을 직접 변경
-                    first_action.tool = "invoke_qa_agent"
-                    new_state["active_scenario_name"] = "General Financial Advice"
-                elif first_action.tool == "clarify_product_type":
-                    # action_plan_models의 tool 이름을 직접 변경
-                    first_action.tool = "select_product_type"
-
-        # 최종적으로 결정된 모델에서 action_plan과 action_plan_struct를 생성
-        new_state["action_plan"] = [model.tool for model in action_plan_models]
-        new_state["action_plan_struct"] = [model.model_dump() for model in action_plan_models]
-
-        action_plan = new_state.get('action_plan', [])
-        direct_resp = new_state.get('main_agent_direct_response', '')
-        if direct_resp:
-            log_node_execution("Orchestrator", output_info=f"direct_response='{direct_resp[:30]}...'")
-        else:
-            log_node_execution("Orchestrator", output_info=f"plan={action_plan}")
-        return new_state
-
-    except Exception as e:
-        print(f"Main Agent Orchestrator Error: {e}"); traceback.print_exc()
-        err_msg = "Error processing request. Please try again."
-        return {**state, "error_message": err_msg, "main_agent_routing_decision": "unclear_input", "is_final_turn_response": True}
 
 async def factual_answer_node(state: AgentState) -> dict:
     original_question = state.get("stt_result", "")
@@ -475,8 +255,9 @@ async def web_search_node(state: AgentState) -> dict:
 async def call_scenario_agent_node(state: AgentState) -> AgentState:
     user_input = state.get("stt_result", "")
     scenario_name = state.get("active_scenario_name", "N/A")
-    log_node_execution("Scenario_NLU", f"scenario={scenario_name}, input='{user_input[:20]}...'")
-    user_input = state.get("stt_result", "")
+    # user_input이 None인 경우 처리
+    input_preview = user_input[:20] if user_input else ""
+    log_node_execution("Scenario_NLU", f"scenario={scenario_name}, input='{input_preview}...'")
     active_scenario_data = get_active_scenario_data(state)
     if not active_scenario_data or not user_input:
         return {**state, "scenario_agent_output": cast(ScenarioAgentOutput, {"intent": "error_missing_data", "is_scenario_related": False})}
@@ -768,173 +549,14 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         "action_plan_struct": updated_struct
     }
 
-async def synthesize_response_node(state: AgentState) -> dict:
-    has_factual = bool(state.get("factual_response"))
-    has_contextual = bool(state.get("current_product_type"))
-    has_direct = bool(state.get("main_agent_direct_response"))
-    log_node_execution("Synthesizer", f"factual={has_factual}, contextual={has_contextual}, direct={has_direct}")
-    
-    # 1. 이미 final_response_text_for_tts가 설정되어 있으면 그것을 우선 사용
-    existing_response = state.get("final_response_text_for_tts")
-    if existing_response:
-        print(f"이미 설정된 응답 사용: {existing_response}")
-        updated_messages = list(state['messages']) + [AIMessage(content=existing_response)]
-        return {"final_response_text_for_tts": existing_response, "messages": updated_messages, "is_final_turn_response": True}
-    
-    # 2. main_agent_direct_response가 있으면 우선 사용 (business_guidance에서 생성된 응답)
-    direct_response = state.get("main_agent_direct_response")
-    if direct_response:
-        print(f"Main agent direct response 사용: {direct_response[:50]}...")
-        updated_messages = list(state['messages']) + [AIMessage(content=direct_response)]
-        return {"final_response_text_for_tts": direct_response, "messages": updated_messages, "is_final_turn_response": True}
-    
-    user_question = state["messages"][-1].content
-    factual_answer = state.get("factual_response", "")
-    
-    contextual_response = ""
-    active_scenario_data = get_active_scenario_data(state)
-    if active_scenario_data:
-        current_stage_id = state.get("current_scenario_stage_id")
-        if current_stage_id and not str(current_stage_id).startswith("END_"):
-             current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
-             contextual_response = current_stage_info.get("prompt", "")
-             if "%{" in contextual_response:
-                import re
-                if "end_scenario_message" in contextual_response:
-                    contextual_response = re.sub(r'%\{end_scenario_message\}%', 
-                        active_scenario_data.get("end_scenario_message", "상담이 완료되었습니다. 이용해주셔서 감사합니다."), 
-                        contextual_response)
-                else:
-                    contextual_response = re.sub(r'%\{([^}]+)\}%', 
-                        lambda m: str(state.get("collected_product_info", {}).get(m.group(1), f"")), 
-                        contextual_response)
-    
-    if not factual_answer or "Could not find" in factual_answer:
-        final_answer = contextual_response or "죄송합니다, 도움을 드리지 못했습니다."
-    elif not contextual_response:
-        final_answer = factual_answer
-    else:
-        try:
-            response = await synthesizer_chain.ainvoke({
-                "chat_history": state['messages'][:-1],
-                "user_question": user_question,
-                "contextual_response": f"After answering, you need to continue the conversation with this prompt: '{contextual_response}'",
-                "factual_response": factual_answer,
-            })
-            final_answer = response.content.strip()
-        except Exception as e:
-            print(f"Synthesizer Error: {e}")
-            final_answer = f"{factual_answer}\n\n{contextual_response}"
+# synthesize_response_node is now imported from .nodes.control.synthesize
 
-    # final_answer가 None이 되지 않도록 보장
-    if not final_answer:
-        final_answer = "죄송합니다, 응답을 생성하는데 문제가 발생했습니다."
+# end_conversation_node is now imported from .nodes.control.end_conversation
 
-    log_node_execution("Synthesizer", output_info=f"response='{final_answer[:40]}...'")
-    updated_messages = list(state['messages']) + [AIMessage(content=final_answer)]
-    
-    return {"final_response_text_for_tts": final_answer, "messages": updated_messages, "is_final_turn_response": True}
-
-async def end_conversation_node(state: AgentState) -> AgentState:
-    log_node_execution("End_Conversation", "terminating session")
-    response_text = "상담을 종료합니다. 이용해주셔서 감사합니다."
-    
-    updated_messages = list(state.get("messages", [])) + [AIMessage(content=response_text)]
-    return {
-        **state, 
-        "final_response_text_for_tts": response_text, 
-        "messages": updated_messages, 
-        "is_final_turn_response": True
-    }
-
-async def set_product_type_node(state: AgentState) -> AgentState:
-    action_plan_struct = state.get("action_plan_struct", [])
-    if action_plan_struct:
-        product_id = action_plan_struct[0].get("tool_input", {}).get("product_id", "N/A")
-        log_node_execution("Set_Product", f"product={product_id}")
-    else:
-        log_node_execution("Set_Product", "ERROR: no action plan")
-    
-    action_plan_struct = state.get("action_plan_struct", [])
-    if not action_plan_struct:
-        err_msg = "Action plan is empty in set_product_type_node"
-        print(f"ERROR: {err_msg}")
-        return {**state, "error_message": err_msg, "is_final_turn_response": True}
-    
-    # 현재 액션에 맞는 구조 찾기
-    current_action_model = ActionModel.model_validate(action_plan_struct[0])
-    
-    new_product_type = current_action_model.tool_input.get("product_id")
-    
-    if not new_product_type:
-        err_msg = f"product_id not found in action: {current_action_model.dict()}"
-        print(f"ERROR: {err_msg}")
-        return {**state, "error_message": err_msg, "is_final_turn_response": True}
-
-    active_scenario = ALL_SCENARIOS_DATA.get(new_product_type)
-    
-    if not active_scenario:
-        err_msg = f"Failed to load scenario for product type: {new_product_type}"
-        print(f"ERROR: {err_msg}")
-        return {**state, "error_message": err_msg, "is_final_turn_response": True}
-        
-    print(f"Successfully loaded scenario: {active_scenario.get('scenario_name')}")
-
-    initial_stage_id = active_scenario.get("initial_stage_id")
-    response_text = active_scenario.get("stages", {}).get(str(initial_stage_id), {}).get("prompt", "How can I help?")
-
-    print(f"Generated response text: '{response_text[:70]}...'")
-
-    updated_messages = list(state.get("messages", [])) + [AIMessage(content=response_text)]
-    
-    # Default 값 초기화
-    from ..api.V1.chat_utils import initialize_default_values
-    temp_state = {
-        **state, 
-        "current_product_type": new_product_type, 
-        "active_scenario_data": active_scenario
-    }
-    initialized_info = initialize_default_values(temp_state)
-    print(f"Initialized default values: {initialized_info}")
-    
-    # 시나리오 연속성을 위한 상태 설정
-    print(f"🔄 시나리오 연속성 준비: {active_scenario.get('scenario_name')}")
-    
-    return {
-        **state, "current_product_type": new_product_type, "active_scenario_data": active_scenario,
-        "active_scenario_name": active_scenario.get("scenario_name"), "current_scenario_stage_id": initial_stage_id,
-        "collected_product_info": initialized_info, "final_response_text_for_tts": response_text,
-        "messages": updated_messages, "is_final_turn_response": True,
-        # 시나리오 연속성 관리
-        "scenario_ready_for_continuation": True,
-        "scenario_awaiting_user_response": True
-    }
+# set_product_type_node is now imported from .nodes.control.set_product
     
 
-def route_after_scenario_logic(state: AgentState) -> str:
-    return "synthesize_response_node"
-
-def execute_plan_router(state: AgentState) -> str:
-    """간소화된 라우터 - Worker 중심 라우팅"""
-    plan = state.get("action_plan", [])
-    if not plan:
-        log_node_execution("Router", "plan_complete → synthesizer")
-        return "synthesize_response_node"
-
-    next_action = plan[0] 
-    target_node = None
-    
-    # Worker 중심 라우팅 맵
-    worker_routing_map = {
-        "invoke_scenario_agent": "scenario_worker",
-        "invoke_qa_agent": "rag_worker", 
-        "invoke_web_search": "web_worker",
-        "set_product_type": "set_product_type_node",
-        "end_conversation": "end_conversation_node"
-    }
-    target_node = worker_routing_map.get(next_action, "synthesize_response_node")
-    log_node_execution("Router", f"{next_action} → {target_node.replace('_node', '').replace('_worker', '')}")
-    return target_node
+# route_after_scenario_logic and execute_plan_router are now imported from .router
 
 # --- Orchestration-Worker Graph Build ---
 workflow = StateGraph(AgentState)
@@ -984,6 +606,20 @@ workflow.add_edge("end_conversation_node", END)
 
 app_graph = workflow.compile()
 print("--- LangGraph compiled successfully (Orchestration-Worker Architecture). ---")
+
+# --- Backward Compatibility Exports ---
+# 테스트와의 호환성을 위해 임시로 노드 함수들을 re-export
+__all__ = [
+    'entry_point_node', 
+    'main_agent_router_node', 
+    'synthesize_response_node',
+    'set_product_type_node',
+    'end_conversation_node',
+    'execute_plan_router',
+    'route_after_scenario_logic',
+    'app_graph', 
+    'run_agent_streaming'
+]
 
 async def run_agent_streaming(
     user_input_text: Optional[str] = None,

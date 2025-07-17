@@ -10,7 +10,6 @@ from app.graph.agent import (
     process_scenario_logic_node,
     set_product_type_node,
     synthesize_response_node,
-    prepare_direct_response_node,
     web_search_node,
     execute_plan_router
 )
@@ -45,9 +44,9 @@ class TestEntryPointNode:
         state["current_product_type"] = "didimdol"
         state["user_input_text"] = "금리가 궁금해요"
         
-        with patch('app.graph.agent.ALL_SCENARIOS_DATA', {"didimdol": sample_scenario_data}), \
-             patch('app.graph.agent.ALL_PROMPTS', {"main_agent": {"test": "prompt"}}), \
-             patch('app.graph.agent.get_active_scenario_data', return_value=sample_scenario_data):
+        with patch('app.graph.utils.ALL_SCENARIOS_DATA', {"didimdol": sample_scenario_data}), \
+             patch('app.graph.utils.ALL_PROMPTS', {"main_agent": {"test": "prompt"}}), \
+             patch('app.graph.utils.get_active_scenario_data', return_value=sample_scenario_data):
             
             result = await entry_point_node(state)
             
@@ -61,8 +60,8 @@ class TestEntryPointNode:
         """Test entry_point_node when services are not initialized."""
         state = sample_agent_state.copy()
         
-        with patch('app.graph.agent.ALL_SCENARIOS_DATA', None), \
-             patch('app.graph.agent.ALL_PROMPTS', None):
+        with patch('app.graph.nodes.orchestrator.entry_point.ALL_SCENARIOS_DATA', None), \
+             patch('app.graph.nodes.orchestrator.entry_point.ALL_PROMPTS', None):
             
             result = await entry_point_node(state)
             
@@ -89,9 +88,9 @@ class TestMainAgentRouterNode:
             actions=[ActionModel(tool="set_product_type", tool_input={"product_id": "didimdol"})]
         )
         
-        with patch('app.graph.agent.ALL_PROMPTS', mock_prompts), \
-             patch('app.graph.agent.json_llm', mock_llm), \
-             patch('app.graph.agent.initial_task_decision_parser') as mock_parser:
+        with patch('app.graph.nodes.orchestrator.main_router.ALL_PROMPTS', mock_prompts), \
+             patch('app.graph.nodes.orchestrator.main_router.json_llm', mock_llm), \
+             patch('app.graph.nodes.orchestrator.main_router.initial_task_decision_parser') as mock_parser:
             
             mock_parser.parse.return_value = mock_decision
             mock_parser.get_format_instructions.return_value = "format instructions"
@@ -119,11 +118,11 @@ class TestMainAgentRouterNode:
             actions=[ActionModel(tool="invoke_qa_agent", tool_input={"query": "금리"})]
         )
         
-        with patch('app.graph.agent.ALL_PROMPTS', mock_prompts), \
-             patch('app.graph.agent.json_llm', mock_llm), \
-             patch('app.graph.agent.main_router_decision_parser') as mock_parser, \
-             patch('app.graph.agent.get_active_scenario_data', return_value=sample_scenario_data), \
-             patch('app.graph.agent.ALL_SCENARIOS_DATA', {"didimdol": sample_scenario_data}):
+        with patch('app.graph.nodes.orchestrator.main_router.ALL_PROMPTS', mock_prompts), \
+             patch('app.graph.nodes.orchestrator.main_router.json_llm', mock_llm), \
+             patch('app.graph.nodes.orchestrator.main_router.main_router_decision_parser') as mock_parser, \
+             patch('app.graph.nodes.orchestrator.main_router.get_active_scenario_data', return_value=sample_scenario_data), \
+             patch('app.graph.nodes.orchestrator.main_router.ALL_SCENARIOS_DATA', {"didimdol": sample_scenario_data}):
             
             mock_parser.parse.return_value = mock_decision
             mock_parser.get_format_instructions.return_value = "format instructions"
@@ -142,8 +141,8 @@ class TestMainAgentRouterNode:
         mock_llm = AsyncMock()
         mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM Error"))
         
-        with patch('app.graph.agent.ALL_PROMPTS', mock_prompts), \
-             patch('app.graph.agent.json_llm', mock_llm):
+        with patch('app.graph.nodes.orchestrator.main_router.ALL_PROMPTS', mock_prompts), \
+             patch('app.graph.nodes.orchestrator.main_router.json_llm', mock_llm):
             
             result = await main_agent_router_node(state)
             
@@ -227,10 +226,17 @@ class TestWebSearchNode:
         mock_llm = AsyncMock()
         mock_response = Mock()
         mock_response.content = "최신 금리 정보에 대한 웹 검색 결과입니다."
-        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
+        
+        # synthesis_chain의 ainvoke를 모킹
+        mock_chain = AsyncMock()
+        mock_chain.ainvoke = AsyncMock(return_value=mock_response)
         
         with patch('app.graph.agent.web_search_service', mock_web_search_service), \
-             patch('app.graph.agent.generative_llm', mock_llm):
+             patch('app.graph.agent.generative_llm', mock_llm), \
+             patch('app.graph.agent.ChatPromptTemplate') as mock_prompt:
+            
+            # ChatPromptTemplate의 체인 동작 모킹
+            mock_prompt.from_messages.return_value.__or__.return_value = mock_chain
             
             result = await web_search_node(state)
             
@@ -314,10 +320,17 @@ class TestScenarioNodes:
         state["action_plan"] = ["invoke_scenario_agent", "synthesize_response"]
         state["action_plan_struct"] = [{"tool": "invoke_scenario_agent"}]
         
+        # 엔티티 검증용 mock
+        mock_verification_response = Mock()
+        mock_verification_response.content = '{"is_confirmed": true}'
+        
+        # 다음 스테이지 결정용 mock
+        mock_stage_response = Mock()
+        mock_stage_response.content = '{"chosen_next_stage_id": "interest_rate"}'
+        
         mock_llm = AsyncMock()
-        mock_response = Mock()
-        mock_response.content = '{"chosen_next_stage_id": "interest_rate"}'
-        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
+        # 첫 번째 호출은 엔티티 검증, 두 번째 호출은 다음 스테이지 결정
+        mock_llm.ainvoke = AsyncMock(side_effect=[mock_verification_response, mock_stage_response])
         
         mock_decision = NextStageDecisionModel(chosen_next_stage_id="interest_rate")
         
@@ -344,7 +357,8 @@ class TestUtilityNodes:
         state = sample_agent_state.copy()
         state["action_plan_struct"] = [{"tool": "set_product_type", "tool_input": {"product_id": "didimdol"}}]
         
-        with patch('app.graph.agent.ALL_SCENARIOS_DATA', {"didimdol": sample_scenario_data}):
+        with patch('app.graph.nodes.control.set_product.ALL_SCENARIOS_DATA', {"didimdol": sample_scenario_data}), \
+             patch('app.api.V1.chat_utils.initialize_default_values', return_value={}):
             result = await set_product_type_node(state)
             
             assert result["current_product_type"] == "didimdol"
@@ -359,42 +373,44 @@ class TestUtilityNodes:
         state = sample_agent_state.copy()
         state["action_plan_struct"] = [{"tool": "set_product_type", "tool_input": {"product_id": "invalid"}}]
         
-        with patch('app.graph.agent.ALL_SCENARIOS_DATA', {}):
+        with patch('app.graph.nodes.control.set_product.ALL_SCENARIOS_DATA', {}):
             result = await set_product_type_node(state)
             
             assert result["error_message"] is not None
             assert "Failed to load scenario" in result["error_message"]
             assert result["is_final_turn_response"] is True
 
-    @pytest.mark.asyncio
-    async def test_prepare_direct_response_node(self, sample_agent_state):
-        """Test prepare_direct_response_node function."""
-        state = sample_agent_state.copy()
-        state["main_agent_direct_response"] = "직접 응답입니다."
-        
-        result = await prepare_direct_response_node(state)
-        
-        assert result["final_response_text_for_tts"] == "직접 응답입니다."
-        assert result["is_final_turn_response"] is True
-        assert len(result["messages"]) == 2
+    # NOTE: prepare_direct_response_node was removed in refactoring
+    # @pytest.mark.asyncio
+    # async def test_prepare_direct_response_node(self, sample_agent_state):
+    #     """Test prepare_direct_response_node function."""
+    #     state = sample_agent_state.copy()
+    #     state["main_agent_direct_response"] = "직접 응답입니다."
+    #     
+    #     result = await prepare_direct_response_node(state)
+    #     
+    #     assert result["final_response_text_for_tts"] == "직접 응답입니다."
+    #     assert result["is_final_turn_response"] is True
+    #     assert len(result["messages"]) == 2
 
-    @pytest.mark.asyncio
-    async def test_prepare_direct_response_node_chitchat(self, sample_agent_state, mock_prompts):
-        """Test prepare_direct_response_node for chitchat."""
-        state = sample_agent_state.copy()
-        state["stt_result"] = "안녕하세요"
-        
-        mock_llm = AsyncMock()
-        mock_response = Mock()
-        mock_response.content = "안녕하세요! 무엇을 도와드릴까요?"
-        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
-        
-        with patch('app.graph.agent.ALL_PROMPTS', mock_prompts), \
-             patch('app.graph.agent.generative_llm', mock_llm):
-            
-            result = await prepare_direct_response_node(state)
-            
-            assert result["final_response_text_for_tts"] == "안녕하세요! 무엇을 도와드릴까요?"
+    # NOTE: prepare_direct_response_node was removed in refactoring
+    # @pytest.mark.asyncio
+    # async def test_prepare_direct_response_node_chitchat(self, sample_agent_state, mock_prompts):
+    #     """Test prepare_direct_response_node for chitchat."""
+    #     state = sample_agent_state.copy()
+    #     state["stt_result"] = "안녕하세요"
+    #     
+    #     mock_llm = AsyncMock()
+    #     mock_response = Mock()
+    #     mock_response.content = "안녕하세요! 무엇을 도와드릴까요?"
+    #     mock_llm.ainvoke = AsyncMock(return_value=mock_response)
+    #     
+    #     with patch('app.graph.agent.ALL_PROMPTS', mock_prompts), \
+    #          patch('app.graph.agent.generative_llm', mock_llm):
+    #         
+    #         result = await prepare_direct_response_node(state)
+    #         
+    #         assert result["final_response_text_for_tts"] == "안녕하세요! 무엇을 도와드릴까요?"
 
     @pytest.mark.asyncio
     async def test_synthesize_response_node(self, sample_agent_state, sample_scenario_data):
@@ -409,8 +425,8 @@ class TestUtilityNodes:
         mock_response.content = "종합된 응답입니다."
         mock_llm.ainvoke = AsyncMock(return_value=mock_response)
         
-        with patch('app.graph.agent.get_active_scenario_data', return_value=sample_scenario_data), \
-             patch('app.graph.agent.synthesizer_chain', mock_llm):
+        with patch('app.graph.nodes.control.synthesize.get_active_scenario_data', return_value=sample_scenario_data), \
+             patch('app.graph.nodes.control.synthesize.synthesizer_chain', mock_llm):
             
             result = await synthesize_response_node(state)
             
@@ -434,12 +450,12 @@ class TestRoutingFunctions:
     def test_execute_plan_router_with_actions(self, sample_agent_state):
         """Test execute_plan_router with various actions."""
         test_cases = [
-            ("invoke_scenario_agent", "call_scenario_agent_node"),
-            ("invoke_qa_agent", "factual_answer_node"),
+            ("invoke_scenario_agent", "scenario_worker"),
+            ("invoke_qa_agent", "rag_worker"),
             ("set_product_type", "set_product_type_node"),
-            ("invoke_web_search", "web_search_node"),
+            ("invoke_web_search", "web_worker"),
             ("end_conversation", "end_conversation_node"),
-            ("unknown_action", "prepare_direct_response_node")
+            ("unknown_action", "synthesize_response_node")
         ]
         
         for action, expected_node in test_cases:

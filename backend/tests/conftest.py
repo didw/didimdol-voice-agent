@@ -68,9 +68,9 @@ def sample_scenario_data():
                 "expected_info_key": "inquiry_type",
                 "choices": ["금리 문의", "한도 문의", "신청 방법"],
                 "transitions": [
-                    {"condition": "inquiry_type == '금리 문의'", "next_stage": "interest_rate"},
-                    {"condition": "inquiry_type == '한도 문의'", "next_stage": "loan_limit"},
-                    {"condition": "inquiry_type == '신청 방법'", "next_stage": "application_method"}
+                    {"condition": "inquiry_type == '금리 문의'", "next_stage_id": "interest_rate"},
+                    {"condition": "inquiry_type == '한도 문의'", "next_stage_id": "loan_limit"},
+                    {"condition": "inquiry_type == '신청 방법'", "next_stage_id": "application_method"}
                 ],
                 "default_next_stage_id": "general_info"
             },
@@ -165,6 +165,18 @@ def mock_prompts():
             "initial_task_selection_prompt": """
 사용자 입력: {user_input}
 사용 가능한 상품: {available_product_types_list}
+
+{format_instructions}
+""",
+            "business_guidance_prompt": """
+사용자 입력: {user_input}
+서비스 설명: {service_descriptions}
+
+{format_instructions}
+""",
+            "task_management_prompt": """
+사용자 입력: {user_input}
+현재 시나리오: {active_scenario_name}
 
 {format_instructions}
 """,
