@@ -4,7 +4,8 @@ RAG Worker 노드 - 지식 기반 정보 검색 및 답변 생성
 """
 from langchain_core.prompts import ChatPromptTemplate
 
-from ...state import AgentState
+from ...state import AgentState, AgentStateModel
+from ...state_utils import ensure_pydantic_state, ensure_dict_state
 from ....services.rag_service import rag_service
 from ...utils import ALL_PROMPTS, format_messages_for_prompt
 from ...chains import json_llm
@@ -13,23 +14,27 @@ from ...logger import node_log as log_node_execution, log_execution_time
 
 
 @log_execution_time
-async def factual_answer_node(state: AgentState) -> dict:
+async def factual_answer_node(state: AgentState) -> AgentState:
     """
-    사실 기반 답변 생성 노드
+    사실 기반 답변 생성 노드 - Pydantic 버전
     - 질문 확장 (Query Expansion)
     - RAG 파이프라인 실행
     - 에러 처리 및 폴백
     """
-    original_question = state.get("stt_result", "")
+    # Convert to Pydantic for internal processing
+    pydantic_state = ensure_pydantic_state(state)
+    
+    original_question = pydantic_state.stt_result or ""
     log_node_execution("RAG_Worker", f"query='{original_question[:30]}...'")
     
-    messages = state.get("messages", [])
-    chat_history = format_messages_for_prompt(messages[:-1]) if len(messages) > 1 else "No previous conversation."
-    scenario_name = state.get("active_scenario_name", "General Financial Advice")
+    messages = pydantic_state.messages
+    chat_history = format_messages_for_prompt(list(messages)[:-1]) if len(messages) > 1 else "No previous conversation."
+    scenario_name = pydantic_state.active_scenario_name or "General Financial Advice"
 
     if not rag_service.is_ready():
         log_node_execution("RAG_Worker", "WARNING: RAG service not ready")
-        return {"factual_response": "죄송합니다, 현재 정보 검색 기능에 문제가 발생하여 답변을 드릴 수 없습니다. 잠시 후 다시 시도해 주세요."}
+        state_updates = {"factual_response": "죄송합니다, 현재 정보 검색 기능에 문제가 발생하여 답변을 드릴 수 없습니다. 잠시 후 다시 시도해 주세요."}
+        return ensure_dict_state(pydantic_state.merge_update(state_updates))
 
     all_queries = [original_question]
     try:
@@ -67,13 +72,21 @@ async def factual_answer_node(state: AgentState) -> dict:
         factual_response = "정보를 검색하는 중 오류가 발생했습니다."
 
     # 다음 액션을 위해 plan과 struct에서 현재 액션 제거
-    updated_plan = state.get("action_plan", []).copy()
+    updated_plan = pydantic_state.action_plan.copy()
     if updated_plan:
         updated_plan.pop(0)
     
-    updated_struct = state.get("action_plan_struct", []).copy()
+    updated_struct = pydantic_state.action_plan_struct.copy()
     if updated_struct:
         updated_struct.pop(0)
 
     log_node_execution("RAG_Worker", output_info=f"response='{factual_response[:40]}...'")
-    return {"factual_response": factual_response, "action_plan": updated_plan, "action_plan_struct": updated_struct}
+    
+    state_updates = {
+        "factual_response": factual_response,
+        "action_plan": updated_plan,
+        "action_plan_struct": updated_struct
+    }
+    
+    updated_state = pydantic_state.merge_update(state_updates)
+    return ensure_dict_state(updated_state)

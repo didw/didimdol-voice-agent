@@ -434,11 +434,15 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
 
 
 async def process_scenario_logic_node(state: AgentState) -> AgentState:
-    """시나리오 로직 처리를 위한 메인 함수"""
+    """시나리오 로직 처리를 위한 메인 함수 - Pydantic 버전"""
     print("--- Node: Process Scenario Logic ---")
     
-    active_scenario_data = get_active_scenario_data(state)
-    current_stage_id = state.get("current_scenario_stage_id")
+    # Convert to Pydantic for internal processing
+    from .state_utils import ensure_pydantic_state, ensure_dict_state
+    pydantic_state = ensure_pydantic_state(state)
+    
+    active_scenario_data = get_active_scenario_data(pydantic_state.to_dict())
+    current_stage_id = pydantic_state.current_scenario_stage_id
     
     # 스테이지 ID가 없는 경우 초기 스테이지로 설정
     if not current_stage_id:
@@ -447,15 +451,17 @@ async def process_scenario_logic_node(state: AgentState) -> AgentState:
     
     current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
     print(f"현재 스테이지: {current_stage_id}, 스테이지 정보: {current_stage_info.keys()}")
-    collected_info = state.get("collected_product_info", {}).copy()
-    scenario_output = state.get("scenario_agent_output")
-    user_input = state.get("stt_result", "")
+    collected_info = pydantic_state.collected_product_info.copy()
+    scenario_output = pydantic_state.scenario_agent_output
+    user_input = pydantic_state.stt_result or ""
     
     # 개선된 다중 정보 수집 처리
     print(f"스테이지 정보 확인 - collect_multiple_info: {current_stage_info.get('collect_multiple_info')}")
     if current_stage_info.get("collect_multiple_info"):
         print("--- 다중 정보 수집 모드 ---")
-        return await process_multiple_info_collection(state, active_scenario_data, current_stage_id, current_stage_info, collected_info, user_input)
+        result = await process_multiple_info_collection(pydantic_state.to_dict(), active_scenario_data, current_stage_id, current_stage_info, collected_info, user_input)
+        return result
     
     # 기존 단일 정보 수집 처리
-    return await process_single_info_collection(state, active_scenario_data, current_stage_id, current_stage_info, collected_info, scenario_output, user_input)
+    result = await process_single_info_collection(pydantic_state.to_dict(), active_scenario_data, current_stage_id, current_stage_info, collected_info, scenario_output, user_input)
+    return result

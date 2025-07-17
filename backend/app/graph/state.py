@@ -142,6 +142,8 @@ class AgentStateModel(BaseModel):
     def to_dict(self) -> AgentState:
         """Convert to TypedDict format for LangGraph compatibility"""
         data = self.model_dump(exclude={'created_at', 'updated_at'})
+        # Preserve BaseMessage objects as-is
+        data['messages'] = list(self.messages)
         return cast(AgentState, data)
     
     @classmethod
