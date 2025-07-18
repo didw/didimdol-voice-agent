@@ -40,6 +40,25 @@ phone_number:
     - input: "01011112222"
       output: "01011112222"
 
+confirm_personal_info:
+  prompt: |
+    사용자가 개인정보 확인에 동의했는지 판단하세요.
+    
+    판단 기준:
+    - 긍정: 네, 예, 맞아요, 맞습니다, 확인했어요, 동의합니다
+    - 부정: 아니요, 아니에요, 틀려요, 수정할게요, 안 맞아요
+    
+    사용자 발화: "{user_input}"
+    
+    동의 여부 (true/false):
+  examples:
+    - input: "네, 맞습니다"
+      output: true
+    - input: "아니요, 틀려요"
+      output: false
+    - input: "네"
+      output: true
+
 use_lifelong_account:
   prompt: |
     사용자가 평생계좌 서비스 사용 의사를 표현했는지 판단하세요.

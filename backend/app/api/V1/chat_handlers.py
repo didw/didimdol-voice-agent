@@ -90,7 +90,7 @@ async def handle_slot_filling_update(
     current_scenario_stage = current_state.get("current_scenario_stage_id", "")
     
     # 업데이트 필요 조건 확인
-    info_changed = previous_state.get("collected_info") != current_collected_info
+    info_changed = previous_state.get("collected_product_info", {}) != current_collected_info
     scenario_changed = previous_state.get("scenario_data") != current_state.get("active_scenario_data")
     product_type_changed = previous_state.get("product_type") != current_state.get("current_product_type")
     scenario_active = current_state.get("active_scenario_data") is not None
