@@ -74,10 +74,8 @@ if synthesizer_prompt_template_str and generative_llm:
     synthesizer_prompt_template = ChatPromptTemplate.from_template(synthesizer_prompt_template_str)
     synthesizer_chain = (
         {
-            "chat_history": lambda x: format_messages_for_prompt(x["chat_history"]),
             "user_question": lambda x: x["user_question"],
-            "contextual_response": lambda x: x["contextual_response"],
-            "factual_response": lambda x: x["factual_response"],
+            "analysis_context": lambda x: x["analysis_context"],
         }
         | synthesizer_prompt_template
         | generative_llm
