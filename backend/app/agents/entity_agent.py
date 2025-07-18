@@ -127,7 +127,6 @@ class EntityRecognitionAgent:
             return result
             
         except Exception as e:
-            print(f"[EntityAgent] Extraction error: {e}")
             return {
                 "extracted_entities": {},
                 "confidence": 0.0,
@@ -157,7 +156,6 @@ class EntityRecognitionAgent:
             return result
             
         except Exception as e:
-            print(f"[EntityAgent] Validation error: {e}")
             return {
                 "valid_entities": {},
                 "invalid_entities": {k: f"검증 오류: {str(e)}" for k in extracted_entities.keys()},
@@ -205,9 +203,6 @@ class EntityRecognitionAgent:
     ) -> Dict[str, Any]:
         """종합적인 Slot Filling 처리"""
         
-        print(f"[EntityAgent] Processing slot filling for input: '{user_input}'")
-        print(f"[EntityAgent] Required fields: {[f['key'] for f in required_fields]}")
-        
         # 1단계: LLM 기반 엔티티 추출
         extraction_result = await self.extract_entities(user_input, required_fields)
         extracted_entities = extraction_result.get("extracted_entities", {})
@@ -219,7 +214,6 @@ class EntityRecognitionAgent:
                 pattern_result = self.extract_with_patterns(user_input, field_key)
                 if pattern_result:
                     extracted_entities[field_key] = pattern_result
-                    print(f"[EntityAgent] Pattern extraction: {field_key} = {pattern_result}")
         
         # 3단계: 검증
         if extracted_entities:

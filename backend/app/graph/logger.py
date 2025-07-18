@@ -18,10 +18,12 @@ from functools import wraps
 # 임시 로거 (개발 중)
 class DevelopmentLogger:
     def info(self, msg: str, *args):
-        if args:
-            print(msg % args)
-        else:
-            print(msg)
+        # 필수 로그만 출력 (노드 이동, 주요 이벤트)
+        if "🔄" in msg or "⏱️" in msg or "❌" in msg:
+            if args:
+                print(msg % args)
+            else:
+                print(msg)
     
     def error(self, msg: str, *args):
         if args:
@@ -30,10 +32,8 @@ class DevelopmentLogger:
             print(f"ERROR: {msg}")
     
     def warning(self, msg: str, *args):
-        if args:
-            print(f"WARNING: {msg % args}")
-        else:
-            print(f"WARNING: {msg}")
+        # 경고는 필수가 아니므로 무시
+        pass
 
 log = DevelopmentLogger()
 
@@ -47,14 +47,18 @@ def node_log(node_name: str, input_info: str = "", output_info: str = "") -> Non
         input_info: 입력 정보 요약 (선택적)
         output_info: 출력 정보 요약 (선택적)
     """
-    if input_info and output_info:
-        log.info("🔄 [%s] %s → %s", node_name, input_info, output_info)
-    elif input_info:
-        log.info("🔄 [%s] %s", node_name, input_info)
-    elif output_info:
-        log.info("🔄 [%s] → %s", node_name, output_info)
-    else:
-        log.info("🔄 [%s]", node_name)
+    # 필수 노드만 로깅
+    essential_nodes = ['Session', 'Scenario_NLU', 'Scenario_Flow', 'Entity_Extract', 'Stage_Change']
+    
+    if node_name in essential_nodes:
+        if input_info and output_info:
+            log.info("🔄 [%s] %s → %s", node_name, input_info, output_info)
+        elif input_info:
+            log.info("🔄 [%s] %s", node_name, input_info)
+        elif output_info:
+            log.info("🔄 [%s] → %s", node_name, output_info)
+        else:
+            log.info("🔄 [%s]", node_name)
 
 
 def log_execution_time(func: Callable) -> Callable:

@@ -37,14 +37,10 @@ def get_next_missing_info_group_stage(collected_info: Dict, required_fields: Lis
     group2_fields = ["has_home", "annual_income"] 
     group3_fields = ["target_home_price"]
     
-    print(f"현재 수집된 정보: {collected_info}")
-    
     # 각 그룹에서 누락된 정보가 있는지 확인
     group1_missing = any(field not in collected_info for field in group1_fields)
     group2_missing = any(field not in collected_info for field in group2_fields)
     group3_missing = any(field not in collected_info for field in group3_fields)
-    
-    print(f"그룹별 누락 상태 - Group1: {group1_missing}, Group2: {group2_missing}, Group3: {group3_missing}")
     
     if group1_missing:
         return "ask_missing_info_group1"
@@ -58,7 +54,6 @@ def get_next_missing_info_group_stage(collected_info: Dict, required_fields: Lis
 
 def generate_group_specific_prompt(stage_id: str, collected_info: Dict) -> str:
     """그룹별로 이미 수집된 정보를 제외하고 맞춤형 질문 생성"""
-    print(f"질문 생성 - stage_id: {stage_id}, collected_info: {collected_info}")
     
     if stage_id == "ask_missing_info_group1":
         missing = []
@@ -69,8 +64,6 @@ def generate_group_specific_prompt(stage_id: str, collected_info: Dict) -> str:
             missing.append("대출 목적(주택 구입용인지)")
         if not has_marital_status:
             missing.append("혼인 상태")
-        
-        print(f"Group1 누락 정보: {missing}")
         
         if len(missing) == 2:
             return "몇 가지 더 확인해볼게요. 대출 목적과 혼인 상태는 어떻게 되시나요?"

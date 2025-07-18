@@ -52,7 +52,6 @@
       "required": false,
       "type": "choice",
       "choices": ["보안카드", "신한 OTP", "타행 OTP"],
-      "default": "신한 OTP",
       "description": "인터넷뱅킹 보안매체 선택",
       "show_when": "use_internet_banking == true",
       "parent_field": "use_internet_banking"
@@ -132,7 +131,6 @@
       "display_name": "출금계좌 추가",
       "required": false,
       "type": "boolean",
-      "default": false,
       "description": "출금계좌 추가 여부",
       "show_when": "use_internet_banking == true",
       "parent_field": "use_internet_banking"
@@ -191,7 +189,6 @@
       "display_name": "결제일",
       "required": false,
       "type": "number",
-      "default": 15,
       "description": "결제일 (1~30일)",
       "show_when": "use_check_card == true",
       "parent_field": "use_check_card"
@@ -212,7 +209,6 @@
       "display_name": "계좌비밀번호 동일 사용",
       "required": false,
       "type": "boolean",
-      "default": true,
       "description": "계좌비밀번호와 동일한 비밀번호 사용 여부",
       "show_when": "use_check_card == true",
       "parent_field": "use_check_card"

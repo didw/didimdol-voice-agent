@@ -175,4 +175,4 @@ npm run test:unit
 - [README.md](README.md) - 프로젝트 개요 및 설명
 - [CHANGELOG.md](CHANGELOG.md) - 버전별 변경사항 및 업데이트 기록
 
-**참고**: 개발 시 진행사항은 CHANGELOG.md에, 프로젝트 정보는 README.md에 작성하세요.
+**참고**: 개발 시 진행사항은 CHANGELOG.md에, 프로젝트 정보는 README.md에 작성하세요. 개발 후에는 관련 문서를 반드시 업데이트해주세요.

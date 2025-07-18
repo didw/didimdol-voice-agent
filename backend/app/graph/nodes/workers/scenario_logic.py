@@ -31,18 +31,14 @@ async def process_scenario_logic_node(state: AgentState) -> AgentState:
     # 스테이지 ID가 없는 경우 초기 스테이지로 설정
     if not current_stage_id:
         current_stage_id = active_scenario_data.get("initial_stage_id", "greeting")
-        print(f"스테이지 ID가 없어서 초기 스테이지로 설정: {current_stage_id}")
     
     current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
-    print(f"현재 스테이지: {current_stage_id}, 스테이지 정보: {current_stage_info.keys()}")
     collected_info = state.collected_product_info.copy()
     scenario_output = state.scenario_agent_output
     user_input = state.stt_result or ""
     
     # 개선된 다중 정보 수집 처리
-    print(f"스테이지 정보 확인 - collect_multiple_info: {current_stage_info.get('collect_multiple_info')}")
     if current_stage_info.get("collect_multiple_info"):
-        print("--- 다중 정보 수집 모드 ---")
         result = await process_multiple_info_collection(state, active_scenario_data, current_stage_id, current_stage_info, collected_info, user_input)
         return result
     
@@ -56,7 +52,6 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
     required_fields = active_scenario_data.get("required_info_fields", [])
     
     # 현재 스테이지가 정보 수집 단계인지 확인
-    print(f"현재 스테이지 ID: {current_stage_id}")
     if current_stage_id in ["info_collection_guidance", "process_collected_info", "ask_missing_info_group1", "ask_missing_info_group2", "ask_missing_info_group3", "eligibility_assessment"]:
         
         # Entity Agent를 사용한 정보 추출
@@ -68,8 +63,8 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             
             # 추출된 정보 업데이트
             collected_info = extraction_result["collected_info"]
-            print(f"Entity Agent 추출 결과: {extraction_result['extracted_entities']}")
-            print(f"최종 업데이트된 수집 정보: {collected_info}")
+            if extraction_result['extracted_entities']:
+                log_node_execution("Entity_Extract", output_info=f"entities={list(extraction_result['extracted_entities'].keys())}")
         
         # 정보 수집 완료 여부 확인
         is_complete, missing_field_names = check_required_info_completion(collected_info, required_fields)
@@ -86,7 +81,6 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                     response_text = "네, 모든 정보를 확인했습니다! 말씀해주신 조건으로 디딤돌 대출 신청이 가능해 보입니다. 이제 신청에 필요한 서류와 절차를 안내해드릴게요."
                 else:
                     response_text = f"네, 말씀해주신 정보 확인했습니다! {generate_group_specific_prompt(next_stage_id, collected_info)}"
-                print(f"info_collection_guidance -> {next_stage_id}, 응답: {response_text}")
                 
         elif current_stage_id == "process_collected_info":
             # 수집된 정보를 바탕으로 다음 그룹 결정
@@ -96,7 +90,6 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             else:
                 next_stage_id = get_next_missing_info_group_stage(collected_info, required_fields)
                 response_text = generate_group_specific_prompt(next_stage_id, collected_info)
-                print(f"다음 단계로 이동: {next_stage_id}, 질문: {response_text}")
                 
         elif current_stage_id.startswith("ask_missing_info_group"):
             # 그룹별 질문 처리 후 다음 단계 결정
@@ -117,7 +110,6 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             # 자격 검토 완료 후 서류 안내로 자동 진행
             next_stage_id = "application_documents_guidance"
             response_text = active_scenario_data.get("stages", {}).get("application_documents_guidance", {}).get("prompt", "서류 안내를 진행하겠습니다.")
-            print(f"자격 검토 완료 -> 서류 안내 단계로 이동")
             
         else:
             next_stage_id = current_stage_info.get("default_next_stage_id", "eligibility_assessment")
@@ -136,6 +128,10 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
         if updated_struct:
             updated_struct.pop(0)
             
+        # 스테이지 변경 시 로그
+        if next_stage_id != current_stage_id:
+            log_node_execution("Stage_Change", f"{current_stage_id} → {next_stage_id}")
+        
         return state.merge_update({
             "current_scenario_stage_id": next_stage_id,
             "collected_product_info": collected_info,
@@ -156,10 +152,8 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
         entities = scenario_output.get("entities", {})
         intent = scenario_output.get("intent", "")
         
-        print(f"Single info collection - intent: {intent}, entities: {entities}")
         
         if entities and user_input:
-            print(f"--- Verifying extracted entities: {entities} ---")
             verification_prompt_template = """
 You are an exceptionally discerning assistant tasked with interpreting a user's intent. Your goal is to determine if the user has made a definitive choice or is simply asking a question about an option.
 
@@ -190,17 +184,13 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
                 is_confirmed = decision.get("is_confirmed", False)
                 
                 if is_confirmed:
-                    print(f"--- Entity verification PASSED. Updating collected info. ---")
                     collected_info.update({k: v for k, v in entities.items() if v is not None})
-                else:
-                    print(f"--- Entity verification FAILED. Not updating collected info. ---")
             except Exception as e:
-                print(f"Error during entity verification: {e}. Assuming not confirmed.")
+                pass
 
         elif entities:
              collected_info.update({k: v for k, v in entities.items() if v is not None})
 
-        print(f"Updated Info: {collected_info}")
     
     # 스테이지 전환 로직 결정
     transitions = current_stage_info.get("transitions", [])
@@ -213,19 +203,15 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         if expected_info_key and expected_info_key not in collected_info:
             # 필요한 정보가 아직 수집되지 않았으면 현재 스테이지 유지
             next_stage_id = current_stage_id
-            print(f"--- 자동 진행 차단: '{expected_info_key}' 정보 미수집 ---")
         elif len(transitions) == 1:
             # 단일 전환 경로가 있으면 자동 진행
             next_stage_id = transitions[0].get("next_stage_id", default_next)
-            print(f"--- 자동 진행: 단일 경로 '{current_stage_id}' → '{next_stage_id}' ---")
         else:
             # transitions이 없으면 default로 진행
             next_stage_id = default_next
-            print(f"--- 자동 진행: 기본 경로 '{current_stage_id}' → '{next_stage_id}' ---")
     
     # Case 2: 분기가 있는 경우 (transitions가 2개 이상) - LLM 판단
     else:
-        print(f"--- LLM 판단 필요: {len(transitions)}개 분기 존재 ---")
         prompt_template = ALL_PROMPTS.get('main_agent', {}).get('determine_next_scenario_stage', '')
         llm_prompt = prompt_template.format(
             active_scenario_name=active_scenario_data.get("scenario_name"),
@@ -254,7 +240,6 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             break
         
         # `prompt`가 없는 로직 전용 스테이지인 경우, 자동으로 다음 단계 진행
-        print(f"--- Logic Stage Detected: '{next_stage_id}'. Resolving next step automatically. ---")
         
         current_stage_id_for_prompt = str(next_stage_id)
         
@@ -278,6 +263,10 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
 
     # 최종적으로 결정된 '말하는' 스테이지 ID
     determined_next_stage_id = next_stage_id
+    
+    # 스테이지 변경 시 로그
+    if determined_next_stage_id != current_stage_id:
+        log_node_execution("Stage_Change", f"{current_stage_id} → {determined_next_stage_id}")
     
     updated_plan = state.get("action_plan", []).copy()
     if updated_plan:

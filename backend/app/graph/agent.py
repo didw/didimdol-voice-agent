@@ -88,7 +88,6 @@ workflow.add_edge("set_product_type_node", END)
 workflow.add_edge("end_conversation_node", END)
 
 app_graph = workflow.compile()
-print("--- LangGraph compiled successfully (Orchestration-Worker Architecture). ---")
 
 # --- Backward Compatibility Exports ---
 # 테스트와의 호환성을 위해 임시로 노드 함수들을 re-export
@@ -133,8 +132,7 @@ async def run_agent_streaming(
         "scenario_awaiting_user_response": current_state_dict.get("scenario_awaiting_user_response", False) if current_state_dict else False,
     })
 
-    print(f"\n🚀 ===== AGENT FLOW START [{session_id}] =====")
-    log_node_execution("Session", f"product={initial_state['current_product_type']}, input='{user_input_text[:30]}...'")
+    log_node_execution("Session", f"product={initial_state['current_product_type']}, stage={initial_state.get('current_scenario_stage_id', 'N/A')}")
 
     final_state: Optional[AgentState] = None
     streamed_text = ""
@@ -173,4 +171,3 @@ async def run_agent_streaming(
             final_state["error_message"] = "Agent execution failed critically, no final state produced."
             final_state["is_final_turn_response"] = True
             yield {"type": "final_state", "data": final_state}
-        print(f"🏁 ===== AGENT FLOW END [{session_id}] =====")
