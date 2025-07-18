@@ -11,10 +11,17 @@ from ...utils import get_active_scenario_data, ALL_PROMPTS, format_transitions_f
 from ...chains import json_llm
 from ...models import next_stage_decision_parser
 from ...logger import log_node_execution
+from ...simple_scenario_engine import SimpleScenarioEngine
+from ....agents.entity_agent import entity_agent
 from .scenario_helpers import (
     check_required_info_completion,
     get_next_missing_info_group_stage,
-    generate_group_specific_prompt
+    generate_group_specific_prompt,
+    check_internet_banking_completion,
+    generate_internet_banking_prompt,
+    check_check_card_completion,
+    generate_check_card_prompt,
+    replace_template_variables
 )
 
 
@@ -56,20 +63,43 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
     required_fields = active_scenario_data.get("required_info_fields", [])
     
     # 현재 스테이지가 정보 수집 단계인지 확인
-    print(f"현재 스테이지 ID: {current_stage_id}")
-    if current_stage_id in ["info_collection_guidance", "process_collected_info", "ask_missing_info_group1", "ask_missing_info_group2", "ask_missing_info_group3", "eligibility_assessment"]:
+    print(f"[DEBUG] Multiple info collection - 현재 스테이지 ID: {current_stage_id}")
+    
+    # 인터넷뱅킹 정보 수집 스테이지 추가
+    info_collection_stages = [
+        "info_collection_guidance", "process_collected_info", 
+        "ask_missing_info_group1", "ask_missing_info_group2", "ask_missing_info_group3", 
+        "eligibility_assessment", "collect_internet_banking_info", "ask_remaining_ib_info",
+        "collect_check_card_info", "ask_remaining_card_info"
+    ]
+    
+    if current_stage_id in info_collection_stages:
         
         # Entity Agent를 사용한 정보 추출
+        extraction_result = {"extracted_entities": {}, "collected_info": collected_info}
+        
         if user_input:
-            from ....agents.entity_agent import entity_agent
-            
-            # Entity Agent로 정보 추출
-            extraction_result = await entity_agent.process_slot_filling(user_input, required_fields, collected_info)
+            try:
+                # Entity Agent로 정보 추출
+                print(f"[DEBUG] Calling entity_agent.process_slot_filling with user_input: '{user_input}'")
+                extraction_result = await entity_agent.process_slot_filling(user_input, required_fields, collected_info)
+            except Exception as e:
+                print(f"[ERROR] Entity agent process_slot_filling failed: {type(e).__name__}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                # 에러 발생 시 빈 결과 반환
+                extraction_result = {
+                    "collected_info": collected_info,
+                    "extracted_entities": {},
+                    "message": f"정보 추출 중 오류가 발생했습니다: {str(e)}"
+                }
             
             # 추출된 정보 업데이트
             collected_info = extraction_result["collected_info"]
-            print(f"Entity Agent 추출 결과: {extraction_result['extracted_entities']}")
-            print(f"최종 업데이트된 수집 정보: {collected_info}")
+            print(f"[DEBUG] Entity Agent extraction result - extracted_entities: {extraction_result['extracted_entities']}")
+            print(f"[DEBUG] Entity Agent extraction result - valid_entities: {extraction_result.get('valid_entities', {})}")
+            print(f"[DEBUG] Entity Agent extraction result - invalid_entities: {extraction_result.get('invalid_entities', {})}")
+            print(f"[DEBUG] Final updated collected_info: {collected_info}")
         
         # 정보 수집 완료 여부 확인
         is_complete, missing_field_names = check_required_info_completion(collected_info, required_fields)
@@ -113,6 +143,80 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                     # 다음 그룹으로 넘어가는 경우
                     response_text = generate_group_specific_prompt(next_stage_id, collected_info)
                     
+        elif current_stage_id == "collect_internet_banking_info":
+            # 인터넷뱅킹 정보 수집 처리
+            is_ib_complete, missing_ib_fields = check_internet_banking_completion(collected_info, required_fields)
+            
+            if is_ib_complete:
+                next_stage_id = "ask_check_card"
+                # 다음 스테이지의 프롬프트를 가져와서 함께 표시
+                next_stage_prompt = active_scenario_data.get("stages", {}).get("ask_check_card", {}).get("prompt", "체크카드를 신청하시겠어요?")
+                response_text = f"인터넷뱅킹 설정이 완료되었습니다. {next_stage_prompt}"
+            else:
+                # 첫 응답에서는 현재 스테이지에 머물면서 추가 정보 요청
+                if extraction_result.get("extracted_entities"):
+                    # 사용자가 일부 정보를 제공한 경우
+                    next_stage_id = "collect_internet_banking_info"  # 같은 스테이지 유지
+                    response_text = f"네, 알겠습니다. {generate_internet_banking_prompt(missing_ib_fields)}"
+                else:
+                    # 사용자가 정보를 제공하지 않은 경우
+                    next_stage_id = "ask_remaining_ib_info"
+                    response_text = generate_internet_banking_prompt(missing_ib_fields)
+            
+            print(f"[DEBUG] Internet banking - Complete: {is_ib_complete}, Missing: {missing_ib_fields}")
+            print(f"[DEBUG] Next stage: {next_stage_id}")
+            
+        elif current_stage_id == "ask_remaining_ib_info":
+            # 부족한 인터넷뱅킹 정보 재요청
+            is_ib_complete, missing_ib_fields = check_internet_banking_completion(collected_info, required_fields)
+            
+            if is_ib_complete:
+                next_stage_id = "ask_check_card"
+                # 다음 스테이지의 프롬프트를 가져와서 함께 표시
+                next_stage_prompt = active_scenario_data.get("stages", {}).get("ask_check_card", {}).get("prompt", "체크카드를 신청하시겠어요?")
+                response_text = f"인터넷뱅킹 설정이 완료되었습니다. {next_stage_prompt}"
+            else:
+                next_stage_id = "ask_remaining_ib_info"
+                response_text = generate_internet_banking_prompt(missing_ib_fields)
+            
+        elif current_stage_id == "collect_check_card_info":
+            # 체크카드 정보 수집 처리
+            is_cc_complete, missing_cc_fields = check_check_card_completion(collected_info, required_fields)
+            
+            if is_cc_complete:
+                next_stage_id = "final_summary"
+                # final_summary 프롬프트를 가져와서 변수들을 치환
+                summary_prompt = active_scenario_data.get("stages", {}).get("final_summary", {}).get("prompt", "")
+                summary_prompt = replace_template_variables(summary_prompt, collected_info)
+                response_text = f"체크카드 설정이 완료되었습니다.\n\n{summary_prompt}"
+            else:
+                # 첫 응답에서는 현재 스테이지에 머물면서 추가 정보 요청
+                if extraction_result.get("extracted_entities"):
+                    # 사용자가 일부 정보를 제공한 경우
+                    next_stage_id = "collect_check_card_info"  # 같은 스테이지 유지
+                    response_text = f"네, 알겠습니다. {generate_check_card_prompt(missing_cc_fields)}"
+                else:
+                    # 사용자가 정보를 제공하지 않은 경우
+                    next_stage_id = "ask_remaining_card_info"
+                    response_text = generate_check_card_prompt(missing_cc_fields)
+            
+            print(f"[DEBUG] Check card - Complete: {is_cc_complete}, Missing: {missing_cc_fields}")
+            print(f"[DEBUG] Next stage: {next_stage_id}")
+            
+        elif current_stage_id == "ask_remaining_card_info":
+            # 부족한 체크카드 정보 재요청
+            is_cc_complete, missing_cc_fields = check_check_card_completion(collected_info, required_fields)
+            
+            if is_cc_complete:
+                next_stage_id = "final_summary"
+                # final_summary 프롬프트를 가져와서 변수들을 치환
+                summary_prompt = active_scenario_data.get("stages", {}).get("final_summary", {}).get("prompt", "")
+                summary_prompt = replace_template_variables(summary_prompt, collected_info)
+                response_text = f"체크카드 설정이 완료되었습니다.\n\n{summary_prompt}"
+            else:
+                next_stage_id = "ask_remaining_card_info"
+                response_text = generate_check_card_prompt(missing_cc_fields)
+            
         elif current_stage_id == "eligibility_assessment":
             # 자격 검토 완료 후 서류 안내로 자동 진행
             next_stage_id = "application_documents_guidance"
@@ -146,6 +250,7 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
         })
     
     # 일반 스테이지는 기존 로직으로 처리
+    print(f"[DEBUG] Stage '{current_stage_id}' not in info_collection_stages, processing as single info collection")
     return await process_single_info_collection(state, active_scenario_data, current_stage_id, current_stage_info, collected_info, state.get("scenario_agent_output"), user_input)
 
 
@@ -156,7 +261,8 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
         entities = scenario_output.get("entities", {})
         intent = scenario_output.get("intent", "")
         
-        print(f"Single info collection - intent: {intent}, entities: {entities}")
+        print(f"[DEBUG] Single info collection - Stage: {current_stage_id}, Expected key: {current_stage_info.get('expected_info_key')}")
+        print(f"[DEBUG] Intent: {intent}, Entities: {entities}")
         
         if entities and user_input:
             print(f"--- Verifying extracted entities: {entities} ---")
@@ -190,17 +296,70 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
                 is_confirmed = decision.get("is_confirmed", False)
                 
                 if is_confirmed:
-                    print(f"--- Entity verification PASSED. Updating collected info. ---")
-                    collected_info.update({k: v for k, v in entities.items() if v is not None})
+                    print(f"--- Entity verification PASSED. Validating against field choices. ---")
+                    # Validate entities against field choices
+                    engine = SimpleScenarioEngine(active_scenario_data)
+                    
+                    validation_errors = []
+                    for key, value in entities.items():
+                        if value is not None:
+                            is_valid, error_msg = engine.validate_field_value(key, value)
+                            if is_valid:
+                                collected_info[key] = value
+                                print(f"[DEBUG] Field '{key}' validated successfully, added to collected_info")
+                            else:
+                                validation_errors.append(f"{key}: {error_msg}")
+                                print(f"[DEBUG] Field '{key}' validation failed: {error_msg}")
+                    
+                    # If there are validation errors, provide guidance
+                    if validation_errors:
+                        error_response = "죄송합니다, 말씀하신 내용 중 일부를 다시 확인해주세요:\n"
+                        error_response += "\n".join(validation_errors)
+                        
+                        # Stay on current stage and provide guidance
+                        return state.merge_update({
+                            "current_scenario_stage_id": current_stage_id,
+                            "collected_product_info": collected_info,
+                            "final_response_text_for_tts": error_response,
+                            "is_final_turn_response": True,
+                            "action_plan": state.get("action_plan", []),
+                            "action_plan_struct": state.get("action_plan_struct", [])
+                        })
                 else:
                     print(f"--- Entity verification FAILED. Not updating collected info. ---")
             except Exception as e:
                 print(f"Error during entity verification: {e}. Assuming not confirmed.")
 
         elif entities:
-             collected_info.update({k: v for k, v in entities.items() if v is not None})
+            # Validate entities against field choices
+            engine = SimpleScenarioEngine(active_scenario_data)
+            
+            validation_errors = []
+            for key, value in entities.items():
+                if value is not None:
+                    is_valid, error_msg = engine.validate_field_value(key, value)
+                    if is_valid:
+                        collected_info[key] = value
+                    else:
+                        validation_errors.append(f"{key}: {error_msg}")
+            
+            # If there are validation errors, provide guidance
+            if validation_errors:
+                error_response = "죄송합니다, 말씀하신 내용 중 일부를 다시 확인해주세요:\n"
+                error_response += "\n".join(validation_errors)
+                
+                # Stay on current stage and provide guidance
+                return state.merge_update({
+                    "current_scenario_stage_id": current_stage_id,
+                    "collected_product_info": collected_info,
+                    "final_response_text_for_tts": error_response,
+                    "is_final_turn_response": True,
+                    "action_plan": state.get("action_plan", []),
+                    "action_plan_struct": state.get("action_plan_struct", [])
+                })
 
         print(f"Updated Info: {collected_info}")
+        print(f"Current stage expected_info_key: {current_stage_info.get('expected_info_key')}")
     
     # 스테이지 전환 로직 결정
     transitions = current_stage_info.get("transitions", [])
@@ -286,6 +445,15 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
     updated_struct = state.get("action_plan_struct", []).copy()
     if updated_struct:
         updated_struct.pop(0)
+    
+    # END_SCENARIO에 도달한 경우 end_conversation을 action_plan에 추가
+    if str(next_stage_id).startswith("END_SCENARIO"):
+        print(f"🔚 [ScenarioLogic] END_SCENARIO detected. Adding end_conversation to action plan.")
+        updated_plan.append("end_conversation")
+        updated_struct.append({
+            "action": "end_conversation",
+            "reasoning": "시나리오가 완료되어 상담을 종료합니다."
+        })
 
     return state.merge_update({
         "collected_product_info": collected_info, 

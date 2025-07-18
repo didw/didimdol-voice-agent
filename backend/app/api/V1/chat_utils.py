@@ -148,14 +148,16 @@ def apply_conditional_defaults(scenario_data: Dict, collected_info: Dict) -> Dic
         # show_when 조건 확인
         show_when = field.get("show_when")
         if show_when:
-            # 조건이 만족되고 default 값이 있으면 설정
+            # 조건이 만족되어도 default 값 자동 설정 비활성화
             if evaluate_show_when(show_when, enhanced_info) and "default" in field:
-                enhanced_info[field_key] = field["default"]
-                print(f"Applied conditional default: {field_key} = {field['default']}")
+                # enhanced_info[field_key] = field["default"]
+                # print(f"Applied conditional default: {field_key} = {field['default']}")
+                pass
         elif "default" in field:
-            # 조건이 없는 필드의 default 값
-            enhanced_info[field_key] = field["default"]
-            print(f"Applied default: {field_key} = {field['default']}")
+            # 조건이 없는 필드의 default 값도 비활성화
+            # enhanced_info[field_key] = field["default"]
+            # print(f"Applied default: {field_key} = {field['default']}")
+            pass
     
     return enhanced_info
 
@@ -168,13 +170,13 @@ def update_slot_filling_with_hierarchy(scenario_data: Dict, collected_info: Dict
     # 표시 가능한 필드들 가져오기
     visible_fields = get_visible_fields_with_hierarchy(scenario_data, collected_info)
     
-    # Default 값이 있는 필드를 collected_info에 자동으로 추가
+    # Default 값 자동 추가 비활성화 - 고객 응답을 기다림
     enhanced_collected_info = collected_info.copy()
-    for field in visible_fields:
-        field_key = field["key"]
-        if field_key not in enhanced_collected_info and "default" in field and field["default"] is not None:
-            enhanced_collected_info[field_key] = field["default"]
-            print(f"Auto-collected default value: {field_key} = {field['default']}")
+    # for field in visible_fields:
+    #     field_key = field["key"]
+    #     if field_key not in enhanced_collected_info and "default" in field and field["default"] is not None:
+    #         enhanced_collected_info[field_key] = field["default"]
+    #         print(f"Auto-collected default value: {field_key} = {field['default']}")
     
     # 필드 그룹 정보
     field_groups = scenario_data.get("field_groups", [])
@@ -605,20 +607,17 @@ def initialize_default_values(state: Dict[str, Any]) -> Dict[str, Any]:
     if not scenario_data:
         return collected_info
     
+    # 기본정보(customer_name, customer_phone)만 default 값 설정
     for field in scenario_data.get("required_info_fields", []):
         field_key = field["key"]
+        
+        # 기본정보 필드만 처리
+        if field_key not in ["customer_name", "customer_phone"]:
+            continue
         
         # 이미 값이 있으면 skip
         if field_key in collected_info:
             continue
-        
-        # show_when 조건이 있는 경우 조건 확인
-        show_when = field.get("show_when")
-        if show_when:
-            # 조건부 필드는 조건이 만족될 때만 default 값 설정
-            if not evaluate_show_when(show_when, collected_info):
-                print(f"Skipped default value for {field_key}: condition '{show_when}' not met")
-                continue
             
         # default 값이 있으면 설정
         if "default" in field:

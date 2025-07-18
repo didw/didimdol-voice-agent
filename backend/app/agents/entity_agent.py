@@ -34,7 +34,7 @@ class EntityRecognitionAgent:
 **필드 타입별 추출 방법:**
 - text: 고객이 말한 그대로 텍스트로 추출
 - choice: 제공된 선택지 중에서만 선택 (정확히 일치해야 함)
-- number: 숫자만 추출 (단위 제거)
+- number: 숫자만 추출 (단위 제거, 예: "5천만원" → 5000, "1억" → 10000)
 - boolean: true/false로 변환
 
 **출력 형식:**
@@ -121,13 +121,45 @@ class EntityRecognitionAgent:
             # JSON 형식 요청을 프롬프트에 명시적으로 추가
             prompt += "\n\n반드시 JSON 형식으로 응답해주세요."
             response = await json_llm.ainvoke([HumanMessage(content=prompt)])
-            result = json.loads(response.content)
             
+            # JSON 파싱 개선
+            content = response.content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+            
+            result = json.loads(content)
+            
+            # 숫자 필드 후처리
+            extracted_entities = result.get("extracted_entities", {})
+            for field in required_fields:
+                if field["type"] == "number" and field["key"] in extracted_entities:
+                    value = extracted_entities[field["key"]]
+                    if isinstance(value, str):
+                        # 한국어 숫자 변환 시도
+                        converted = convert_korean_number(value)
+                        if converted is not None:
+                            extracted_entities[field["key"]] = converted
+            
+            result["extracted_entities"] = extracted_entities
             print(f"[EntityAgent] Extraction result: {result}")
             return result
             
+        except json.JSONDecodeError as e:
+            print(f"[EntityAgent] JSON parsing error: {e}")
+            print(f"[EntityAgent] Raw response: {response.content if 'response' in locals() else 'No response'}")
+            return {
+                "extracted_entities": {},
+                "confidence": 0.0,
+                "unclear_fields": [field['key'] for field in required_fields],
+                "reasoning": f"JSON 파싱 오류: {str(e)}"
+            }
         except Exception as e:
-            print(f"[EntityAgent] Extraction error: {e}")
+            print(f"[EntityAgent] Extraction error: {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return {
                 "extracted_entities": {},
                 "confidence": 0.0,
@@ -269,6 +301,48 @@ class EntityRecognitionAgent:
         else:
             field_names = [f['display_name'] for f in missing_fields]
             return f"다음 정보를 알려주세요: {', '.join(field_names)}"
+
+
+def convert_korean_number(text: str) -> Optional[int]:
+    """한국어 숫자 표현을 숫자로 변환 (만원 단위)"""
+    try:
+        # 기본 텍스트 정리
+        text = text.strip().replace(",", "").replace(" ", "")
+        
+        # 만원 단위 제거
+        text = text.replace("만원", "").replace("만", "")
+        
+        # 억, 천만, 백만 등 처리
+        if "억" in text:
+            parts = text.split("억")
+            result = int(parts[0]) * 10000
+            if len(parts) > 1 and parts[1]:
+                result += int(parts[1])
+            return result
+        elif "천" in text:
+            # "5천", "3천5백" 등 처리
+            parts = text.split("천")
+            result = int(parts[0]) * 1000
+            if len(parts) > 1 and parts[1]:
+                if "백" in parts[1]:
+                    hundred_parts = parts[1].split("백")
+                    result += int(hundred_parts[0]) * 100
+                    if len(hundred_parts) > 1 and hundred_parts[1]:
+                        result += int(hundred_parts[1])
+                else:
+                    result += int(parts[1])
+            return result
+        elif "백" in text:
+            parts = text.split("백")
+            result = int(parts[0]) * 100
+            if len(parts) > 1 and parts[1]:
+                result += int(parts[1])
+            return result
+        else:
+            # 일반 숫자
+            return int(text)
+    except:
+        return None
 
 
 # 전역 인스턴스

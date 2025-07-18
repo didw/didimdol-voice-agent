@@ -10,8 +10,13 @@ from pathlib import Path
 class SimpleScenarioEngine:
     """간소화된 시나리오 처리 엔진"""
     
-    def __init__(self):
-        self.scenario_data = self._load_scenario()
+    def __init__(self, scenario_data: Dict[str, Any] = None):
+        if scenario_data:
+            self.scenario_data = scenario_data
+            print(f"[DEBUG] SimpleScenarioEngine initialized with provided scenario data")
+        else:
+            self.scenario_data = self._load_scenario()
+            print(f"[DEBUG] SimpleScenarioEngine initialized with default scenario")
         self.manual = self.scenario_data.get("manual", {})
     
     def _load_scenario(self) -> Dict[str, Any]:
@@ -175,7 +180,8 @@ class SimpleScenarioEngine:
     
     def get_field_display_info(self, field_key: str) -> Dict[str, Any]:
         """필드의 표시 정보 조회"""
-        all_fields = self.scenario_data.get("slot_fields", [])
+        # Try both possible field names
+        all_fields = self.scenario_data.get("required_info_fields", []) or self.scenario_data.get("slot_fields", [])
         for field in all_fields:
             if field["key"] == field_key:
                 return field
@@ -183,16 +189,20 @@ class SimpleScenarioEngine:
     
     def get_all_collected_fields(self) -> List[Dict[str, Any]]:
         """모든 수집 가능한 필드 정보 반환"""
-        return self.scenario_data.get("slot_fields", [])
+        return self.scenario_data.get("required_info_fields", []) or self.scenario_data.get("slot_fields", [])
     
     def validate_field_value(self, field_key: str, value: Any) -> Tuple[bool, str]:
         """필드 값 유효성 검증"""
         field_info = self.get_field_display_info(field_key)
         
+        print(f"[DEBUG] validate_field_value - key: {field_key}, value: {value}, type: {type(value)}")
+        
         if not field_info:
+            print(f"[DEBUG] Field {field_key} not found in scenario")
             return False, "알 수 없는 필드입니다."
         
         field_type = field_info.get("type", "text")
+        print(f"[DEBUG] Field {field_key} type: {field_type}")
         
         if field_type == "choice":
             choices = field_info.get("choices", [])
@@ -206,7 +216,7 @@ class SimpleScenarioEngine:
                 return False, "숫자로 입력해주세요."
         
         elif field_type == "boolean":
-            if value not in [True, False, "true", "false", "True", "False"]:
+            if value not in [True, False, "true", "false", "True", "False", 1, 0, "1", "0"]:
                 return False, "예/아니요로 답변해주세요."
         
         return True, ""

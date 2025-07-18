@@ -37,23 +37,25 @@
       "display_name": "평생계좌 등록",
       "required": true,
       "type": "boolean",
-      "description": "평생계좌번호 등록 여부"
+      "description": "평생계좌번호 등록 여부",
+      "extraction_prompt": "고객이 평생계좌번호 등록에 대해 '네', '좋아요', '등록할게요', '하겠어요' 등을 말하면 true로 추출하세요. '아니요', '안할게요', '필요없어요' 등을 말하면 false로 추출하세요."
     },
     {
       "key": "use_internet_banking",
       "display_name": "인터넷뱅킹 가입",
       "required": true,
       "type": "boolean",
-      "description": "인터넷뱅킹 가입 여부"
+      "description": "인터넷뱅킹 가입 여부",
+      "extraction_prompt": "고객이 인터넷뱅킹 가입에 대해 '네', '가입할게요', '하겠어요', '필요해요' 등을 말하면 true로 추출하세요. '아니요', '안할게요', '필요없어요' 등을 말하면 false로 추출하세요."
     },
     {
       "key": "security_medium",
       "display_name": "보안매체",
-      "required": false,
+      "required": true,
       "type": "choice",
       "choices": ["보안카드", "신한 OTP", "타행 OTP"],
-      "default": "신한 OTP",
       "description": "인터넷뱅킹 보안매체 선택",
+      "extraction_prompt": "고객이 보안매체에 대해 언급하면 정확한 선택지를 추출하세요. '보안카드' → '보안카드', 'OTP' 또는 '신한OTP' → '신한 OTP', '타행OTP' 또는 '다른은행OTP' → '타행 OTP'",
       "show_when": "use_internet_banking == true",
       "parent_field": "use_internet_banking"
     },
@@ -78,61 +80,41 @@
     {
       "key": "transfer_limit_per_time",
       "display_name": "1회 이체한도",
-      "required": false,
+      "required": true,
       "type": "number",
       "unit": "만원",
-      "default": 500,
       "description": "1회 이체한도 (최대 5000만원)",
+      "extraction_prompt": "고객이 1회 이체한도를 언급하면 숫자로 추출하세요. '1회 5천' → 5000, '회당 3천만원' → 3000, '한번에 천만원' → 1000",
       "show_when": "use_internet_banking == true",
       "parent_field": "use_internet_banking"
     },
     {
       "key": "transfer_limit_per_day",
       "display_name": "1일 이체한도",
-      "required": false,
+      "required": true,
       "type": "number",
       "unit": "만원",
-      "default": 1000,
       "description": "1일 이체한도 (최대 1억원)",
+      "extraction_prompt": "고객이 1일 이체한도를 언급하면 숫자로 추출하세요. '하루 1억' → 10000, '일일 5천만원' → 5000, '1일 3천' → 3000",
       "show_when": "use_internet_banking == true",
       "parent_field": "use_internet_banking"
     },
     {
-      "key": "important_transaction_alert",
-      "display_name": "중요거래통보",
-      "required": false,
-      "type": "boolean",
-      "default": true,
-      "description": "중요거래통보 신청 여부",
-      "show_when": "use_internet_banking == true",
-      "parent_field": "use_internet_banking"
-    },
-    {
-      "key": "withdrawal_alert",
-      "display_name": "출금내역통보",
-      "required": false,
-      "type": "boolean",
-      "default": true,
-      "description": "출금내역통보 신청 여부",
-      "show_when": "use_internet_banking == true",
-      "parent_field": "use_internet_banking"
-    },
-    {
-      "key": "overseas_ip_restriction",
-      "display_name": "해외IP이체 제한",
-      "required": false,
-      "type": "boolean",
-      "default": true,
-      "description": "해외IP이체 제한 신청 여부",
+      "key": "alert",
+      "display_name": "알림 설정",
+      "required": true,
+      "type": "choice",
+      "choices": ["중요거래통보", "출금내역통보", "해외IP이체 제한"],
+      "description": "알림 설정",
+      "extraction_prompt": "고객이 알림 설정에 대해 '중요거래', '출금내역', '해외IP' 등을 언급하면 해당하는 선택지를 추출하세요. 예: '출금내역만' → '출금내역통보', '중요거래만' → '중요거래통보', '해외IP 차단' → '해외IP이체 제한'",
       "show_when": "use_internet_banking == true",
       "parent_field": "use_internet_banking"
     },
     {
       "key": "additional_withdrawal_account",
       "display_name": "출금계좌 추가",
-      "required": false,
+      "required": true,
       "type": "boolean",
-      "default": false,
       "description": "출금계좌 추가 여부",
       "show_when": "use_internet_banking == true",
       "parent_field": "use_internet_banking"
@@ -142,7 +124,8 @@
       "display_name": "체크카드 신청",
       "required": true,
       "type": "boolean",
-      "description": "체크카드 신청 여부"
+      "description": "체크카드 신청 여부",
+      "extraction_prompt": "고객이 체크카드 신청에 대해 '네', '신청할게요', '만들어주세요', '필요해요' 등을 말하면 true로 추출하세요. '아니요', '안할게요', '필요없어요' 등을 말하면 false로 추출하세요."
     },
     {
       "key": "card_receive_method",
@@ -152,18 +135,20 @@
       "choices": ["즉시발급", "배송"],
       "default": "즉시발급",
       "description": "카드 수령 방법",
+      "extraction_prompt": "고객이 카드 수령 방법에 대해 '즉시발급', '바로발급', '즉시', '배송', '집으로', '우편' 등을 언급하면 해당하는 선택지를 추출하세요.",
       "show_when": "use_check_card == true",
       "parent_field": "use_check_card"
     },
     {
       "key": "card_delivery_location",
       "display_name": "배송 장소",
-      "required": false,
+      "required": true,
       "type": "choice",
       "choices": ["자택", "직장", "지점"],
       "description": "카드 배송 장소",
       "show_when": "card_receive_method == '배송'",
-      "parent_field": "card_receive_method"
+      "parent_field": "card_receive_method",
+      "extraction_prompt": "고객이 배송 장소에 대해 '집', '자택', '회사', '직장', '지점', '영업점' 등을 언급하면 해당하는 선택지를 추출하세요."
     },
     {
       "key": "card_type",
@@ -173,6 +158,7 @@
       "choices": ["S-line", "딥드림(Deep Dream)"],
       "default": "S-line",
       "description": "체크카드 종류",
+      "extraction_prompt": "고객이 카드 종류에 대해 'S라인', 'S-line', '에스라인', '딥드림', 'Deep Dream' 등을 언급하면 해당하는 선택지를 추출하세요.",
       "show_when": "use_check_card == true",
       "parent_field": "use_check_card"
     },
@@ -181,8 +167,8 @@
       "display_name": "후불교통기능",
       "required": false,
       "type": "boolean",
-      "default": false,
       "description": "후불교통기능 신청 여부",
+      "extraction_prompt": "고객이 후불교통기능에 대해 '신청', '할게요', '네' 등을 말하면 true, '안해요', '필요없어요', '아니요' 등을 말하면 false로 추출하세요.",
       "show_when": "use_check_card == true",
       "parent_field": "use_check_card"
     },
@@ -193,6 +179,7 @@
       "type": "number",
       "default": 15,
       "description": "결제일 (1~30일)",
+      "extraction_prompt": "고객이 결제일을 언급하면 1~30 사이의 숫자로 추출하세요. 예: '15일' → 15, '매달 20일' → 20",
       "show_when": "use_check_card == true",
       "parent_field": "use_check_card"
     },
@@ -204,6 +191,7 @@
       "choices": ["휴대폰", "이메일", "홈페이지"],
       "default": "휴대폰",
       "description": "명세서 수령 방법",
+      "extraction_prompt": "고객이 명세서 수령 방법에 대해 '휴대폰', '문자', '이메일', '메일', '홈페이지', '인터넷' 등을 언급하면 해당하는 선택지를 추출하세요.",
       "show_when": "use_check_card == true",
       "parent_field": "use_check_card"
     },
@@ -212,8 +200,8 @@
       "display_name": "계좌비밀번호 동일 사용",
       "required": false,
       "type": "boolean",
-      "default": true,
       "description": "계좌비밀번호와 동일한 비밀번호 사용 여부",
+      "extraction_prompt": "고객이 비밀번호에 대해 '동일', '같게', '똑같이' 등을 말하면 true, '다르게', '별도로', '새로' 등을 말하면 false로 추출하세요.",
       "show_when": "use_check_card == true",
       "parent_field": "use_check_card"
     },
@@ -225,6 +213,7 @@
       "choices": ["5만원 이상 무료", "모든내역 200원", "선택안함"],
       "default": "5만원 이상 무료",
       "description": "카드사용알림 문자서비스",
+      "extraction_prompt": "고객이 카드 사용 알림에 대해 '5만원 이상', '무료', '모든 내역', '200원', '선택안함', '안해요' 등을 언급하면 해당하는 선택지를 추출하세요.",
       "show_when": "use_check_card == true",
       "parent_field": "use_check_card"
     }
@@ -243,7 +232,7 @@
     {
       "id": "internet_banking",
       "name": "인터넷뱅킹",
-      "fields": ["use_internet_banking", "security_medium", "other_otp_manufacturer", "other_otp_serial", "transfer_limit_per_time", "transfer_limit_per_day", "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction", "additional_withdrawal_account"]
+      "fields": ["use_internet_banking", "security_medium", "other_otp_manufacturer", "other_otp_serial", "transfer_limit_per_time", "transfer_limit_per_day", "alert", "additional_withdrawal_account"]
     },
     {
       "id": "check_card",
@@ -349,12 +338,12 @@
     },
     "ask_remaining_ib_info": {
       "id": "ask_remaining_ib_info",
-      "prompt": "추가로 필요한 정보를 알려주세요.",
+      "prompt": "인터넷뱅킹 설정을 위해 추가 정보가 필요합니다.",
       "is_question": true,
       "input_type": "text",
       "collect_multiple_info": true,
       "visible_groups": ["internet_banking"],
-      "default_next_stage_id": "process_internet_banking_info"
+      "default_next_stage_id": "ask_check_card"
     },
     "ask_check_card": {
       "id": "ask_check_card",
@@ -379,7 +368,7 @@
     },
     "collect_check_card_info": {
       "id": "collect_check_card_info",
-      "prompt": "체크카드 설정을 도와드리겠습니다. 다음 정보들을 알려주세요:\n\n1. 카드 수령 방법 (즉시발급/배송)\n2. 배송 선택시 배송지 (자택/직장/지점)\n3. 카드 종류 (S-line/딥드림)\n4. 후불교통기능 (신청/미신청)\n5. 결제일 (1~30일)\n6. 명세서 수령 방법 (휴대폰/이메일/홈페이지)\n7. 계좌비밀번호와 동일 사용 여부\n8. 카드사용알림 (5만원이상 무료/모든내역 200원/선택안함)\n\n편하신 순서대로 말씀해 주세요.",
+      "prompt": "체크카드 설정을 도와드리겠습니다. 다음 정보들을 알려주세요:\n\n1. 카드 수령 방법 (즉시발급/배송)\n2. 배송 선택시 배송지 (자택/직장/지점)\n3. 후불교통기능 (신청/미신청)\n4. 카드 종류 (S-line/딥드림)\n5. 결제일 (1~30일)\n6. 명세서 수령 방법 (휴대폰/이메일/홈페이지)\n7. 계좌비밀번호와 동일 사용 여부\n8. 카드사용알림 (5만원이상 무료/모든내역 200원/선택안함)\n\n편하신 순서대로 말씀해 주세요.",
       "is_question": true,
       "input_type": "text",
       "collect_multiple_info": true,
@@ -413,7 +402,7 @@
     },
     "final_summary": {
       "id": "final_summary",
-      "prompt": "고객님께서 신청하신 내용을 확인해 드리겠습니다:\n\n[기본정보]\n- 성함: %{customer_name}%\n- 연락처: %{customer_phone}%\n- 평생계좌: %{use_lifelong_account}%\n\n[인터넷뱅킹]\n- 가입여부: %{use_internet_banking}%\n%{security_medium}%\n%{transfer_limit_per_time}%\n%{transfer_limit_per_day}%\n\n[체크카드]\n- 신청여부: %{use_check_card}%\n%{card_type}%\n%{card_receive_method}%\n\n수정하고 싶은 내용이 있으신가요?",
+      "prompt": "고객님께서 신청하신 내용을 확인해 드리겠습니다:\n\n[기본정보]\n- 성함: %{customer_name}%\n- 연락처: %{customer_phone}%\n- 평생계좌 등록: %{use_lifelong_account}%\n\n[인터넷뱅킹]\n- 가입여부: %{use_internet_banking}%\n- 보안매체: %{security_medium}%\n- 1회 이체한도: %{transfer_limit_per_time}%만원\n- 1일 이체한도: %{transfer_limit_per_day}%만원\n- 알림 설정: %{alert}%\n- 출금계좌 추가: %{additional_withdrawal_account}%\n\n[체크카드]\n- 신청여부: %{use_check_card}%\n- 카드 종류: %{card_type}%\n- 수령 방법: %{card_receive_method}%\n- 후불교통기능: %{postpaid_transport}%\n- 카드사용알림: %{card_usage_alert}%\n\n수정하고 싶은 내용이 있으신가요?",
       "is_question": true,
       "input_type": "text",
       "visible_groups": ["basic_info", "account_settings", "internet_banking", "check_card"],

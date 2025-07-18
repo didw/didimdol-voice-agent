@@ -186,6 +186,17 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
       console.log('[SlotFilling] Visible fields updated:', visibleFields.value.length)
       console.log('[SlotFilling] Fields by depth:', fieldsByDepth.value)
       console.log('[SlotFilling] Sample visible fields:', visibleFields.value.slice(0, 5))
+      
+      // 체크카드 관련 필드 디버깅
+      const checkCardFields = visibleFields.value.filter(f => 
+        f.key.includes('card') || f.key.includes('check')
+      )
+      console.log('[SlotFilling] Check card related fields:', checkCardFields)
+      
+      // card_delivery_location 필드 확인
+      const deliveryLocationField = visibleFields.value.find(f => f.key === 'card_delivery_location')
+      console.log('[SlotFilling] card_delivery_location field:', deliveryLocationField)
+      console.log('[SlotFilling] card_receive_method value:', collectedInfo.value.card_receive_method)
       console.log('[SlotFilling] Collected info keys:', Object.keys(collectedInfo.value))
       console.log('[SlotFilling] Boolean fields status:', {
         use_internet_banking: collectedInfo.value.use_internet_banking,

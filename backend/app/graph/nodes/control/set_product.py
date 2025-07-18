@@ -66,7 +66,7 @@ async def set_product_type_node(state: AgentState) -> AgentState:
 
     updated_messages = list(state.messages) + [AIMessage(content=response_text)]
     
-    # Default 값 초기화
+    # Default 값 초기화 - 기본정보만 설정
     from ....api.V1.chat_utils import initialize_default_values
     temp_state = {
         **state.to_dict(),
@@ -84,7 +84,7 @@ async def set_product_type_node(state: AgentState) -> AgentState:
         "active_scenario_data": active_scenario,
         "active_scenario_name": active_scenario.get("scenario_name"),
         "current_scenario_stage_id": initial_stage_id,
-        "collected_product_info": initialized_info,
+        "collected_product_info": initialized_info,  # 빈 dict로 시작
         "final_response_text_for_tts": response_text,
         "messages": updated_messages,
         "is_final_turn_response": True,
