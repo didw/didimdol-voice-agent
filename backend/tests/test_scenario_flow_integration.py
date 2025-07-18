@@ -16,6 +16,11 @@ class TestScenarioFlowIntegration:
         입출금통장 시나리오 플로우 테스트:
         1. '통장만들려고요' 발화 -> 제품 선택 및 개인정보 확인 단계
         2. '네' 발화 -> 다음 단계(평생계좌 문의)로 이동
+        
+        PRD 요구사항 검증:
+        - 기본값 자동 적용 (고객명, 연락처)
+        - 단계별 정보 수집
+        - 상태 전환 추적
         """
         
         # Mock 설정
@@ -28,10 +33,8 @@ class TestScenarioFlowIntegration:
         # 첫 번째 단계: "통장만들려고요" 발화
         session_id = "test_session_001"
         
-        with patch('app.graph.agent.rag_service', mock_rag_service), \
-             patch('app.graph.agent.web_search_service', mock_web_search_service), \
-             patch('app.graph.nodes.workers.rag_worker.rag_service', mock_rag_service), \
-             patch('app.graph.nodes.workers.web_worker.web_search_service', mock_web_search_service):
+        with patch('app.services.rag_service.rag_service', mock_rag_service), \
+             patch('app.services.web_search_service.web_search_service', mock_web_search_service):
             
             # 1단계: 통장 신규 의도 인식
             result_stream = []
@@ -88,6 +91,10 @@ class TestScenarioFlowIntegration:
             collected_info = final_state_2.get("collected_product_info", {})
             assert collected_info.get("confirm_personal_info") is True
             
+            # PRD 요구사항: 기본값이 유지되어야 함
+            assert collected_info.get("customer_name") == "홍길동"
+            assert collected_info.get("customer_phone") == "010-1234-5678"
+            
             print(f"✅ 2단계 완료: {final_state_2['current_scenario_stage_id']}")
             print(f"응답: {response_text_2[:100]}...")
             print(f"수집된 정보: {collected_info}")
@@ -127,9 +134,7 @@ class TestScenarioFlowIntegration:
             mock_stage_response
         ])
         
-        with patch('app.graph.agent.json_llm', mock_llm), \
-             patch('app.graph.nodes.orchestrator.main_router.json_llm', mock_llm), \
-             patch('app.graph.chains.json_llm', mock_llm):
+        with patch('app.graph.chains.json_llm', mock_llm):
             
             # 테스트 실행
             result_stream = []
@@ -197,14 +202,19 @@ class TestScenarioFlowIntegration:
             
             assert final_state is not None
             
-            # Entity Agent가 호출되었는지 확인
-            mock_entity_agent.process_slot_filling.assert_called_once()
+            # 현재 구현에서는 greeting 단계에서 Scenario Agent가 직접 엔티티 추출
+            # Entity Agent는 collect_multiple_info 단계에서만 호출됨
             
             # 정보가 수집되었는지 확인
             collected_info = final_state.get("collected_product_info", {})
             assert "confirm_personal_info" in collected_info
+            assert collected_info["confirm_personal_info"] is True
             
-            print(f"✅ Entity 추출 테스트 완료: {collected_info}")
+            # 다음 단계로 진행되었는지 확인
+            assert final_state["current_scenario_stage_id"] == "ask_lifelong_account"
+            
+            print(f"✅ 정보 추출 및 단계 진행 테스트 완료: {collected_info}")
+            print(f"다음 단계: {final_state['current_scenario_stage_id']}")
 
     @pytest.mark.asyncio
     async def test_scenario_error_handling(self):
@@ -216,7 +226,7 @@ class TestScenarioFlowIntegration:
         mock_llm = AsyncMock()
         mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM Error"))
         
-        with patch('app.graph.agent.json_llm', mock_llm):
+        with patch('app.graph.chains.json_llm', mock_llm):
             
             result_stream = []
             async for item in run_agent_streaming(
