@@ -1,5 +1,14 @@
 # 백엔드 (Python FastAPI & LangGraph)
 
+## 실행 방법
+```bash
+# 로컬 개발
+uvicorn app.main:app --reload --port 8001
+
+# 프로덕션 (외부 접속)
+uvicorn app.main:app --reload --port 8000
+```
+
 ⏺ 백엔드 에이전트 플로우 분석 결과
 
   1. 아키텍처 개요
