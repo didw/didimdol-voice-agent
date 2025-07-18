@@ -16,6 +16,11 @@ class TestScenarioFlowIntegration:
         입출금통장 시나리오 플로우 테스트:
         1. '통장만들려고요' 발화 -> 제품 선택 및 개인정보 확인 단계
         2. '네' 발화 -> 다음 단계(평생계좌 문의)로 이동
+        
+        PRD 요구사항 검증:
+        - 기본값 자동 적용 (고객명, 연락처)
+        - 단계별 정보 수집
+        - 상태 전환 추적
         """
         
         # Mock 설정
@@ -87,6 +92,10 @@ class TestScenarioFlowIntegration:
             # 개인정보 확인이 수집되어야 함
             collected_info = final_state_2.get("collected_product_info", {})
             assert collected_info.get("confirm_personal_info") is True
+            
+            # PRD 요구사항: 기본값이 유지되어야 함
+            assert collected_info.get("customer_name") == "홍길동"
+            assert collected_info.get("customer_phone") == "010-1234-5678"
             
             print(f"✅ 2단계 완료: {final_state_2['current_scenario_stage_id']}")
             print(f"응답: {response_text_2[:100]}...")
