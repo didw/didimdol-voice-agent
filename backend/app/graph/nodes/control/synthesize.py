@@ -52,7 +52,7 @@ async def synthesize_response_node(state: AgentState) -> AgentState:
     try:
         # Synthesizer chain 호출
         response = await synthesizer_chain.ainvoke({
-            "user_question": state.stt_result or "",
+            "chat_history": list(state.messages),
             "analysis_context": analysis_context
         })
         
@@ -74,21 +74,50 @@ async def synthesize_response_node(state: AgentState) -> AgentState:
 def format_analysis_context(state: AgentState) -> str:
     """
     Synthesizer를 위한 분석 컨텍스트 생성
-    - Direct message 여부와 관계없이 모든 정보 포함
+    - 시나리오 정보를 체계적으로 정리
     """
     context_parts = []
     
-    # 1. 현재 상황
+    # 1. 시나리오 진행 상황
     if state.current_scenario_stage_id:
-        context_parts.append(f"## 시나리오 진행 상황")
-        context_parts.append(f"- 현재 시나리오: {state.active_scenario_name}")
+        active_scenario_data = get_active_scenario_data(state.to_dict())
+        
+        context_parts.append("## 1. 시나리오 개요")
+        context_parts.append(f"### 현재 시나리오: {state.active_scenario_name}")
+        if active_scenario_data:
+            context_parts.append(f"- 목적: {active_scenario_data.get('system_prompt', '금융 상담 진행')}")
+        
+        # 2. 진행 단계 정보
+        context_parts.append("\n## 2. 진행 단계")
+        stage_info = get_current_stage_info(state)
+        
+        # 전체 단계 수 계산 (간단히 stages 키 개수로)
+        total_stages = len(active_scenario_data.get("stages", {})) if active_scenario_data else 0
+        context_parts.append(f"- 전체 단계: 약 {total_stages}개")
         context_parts.append(f"- 현재 단계: {state.current_scenario_stage_id}")
         
-        stage_info = get_current_stage_info(state)
-        if stage_info and stage_info.get("expected_info_key"):
-            info_key = stage_info["expected_info_key"]
-            collected = state.collected_product_info.get(info_key) is not None
-            context_parts.append(f"- 필요한 정보: {info_key} (수집 여부: {'완료' if collected else '미완료'})")
+        if stage_info:
+            current_prompt = stage_info.get("prompt", "")
+            if current_prompt:
+                # 변수가 치환된 프롬프트 보여주기
+                processed_prompt = process_prompt_variables(current_prompt, state.collected_product_info, state)
+                context_parts.append(f"- 현재 질문/안내: {processed_prompt}")
+        
+        # 3. 필드 수집 상황
+        context_parts.append("\n## 3. 정보 수집 현황")
+        field_status = analyze_field_status(state, active_scenario_data)
+        
+        context_parts.append(f"### 전체 필드 상태")
+        context_parts.append(f"- 총 필수 필드: {field_status['total_required']}")
+        context_parts.append(f"- 수집 완료: {field_status['collected']}")
+        context_parts.append(f"- 수집 필요: {field_status['remaining']}")
+        
+        if field_status['current_stage_fields']:
+            context_parts.append(f"\n### 현재 단계 관련 필드")
+            for field in field_status['current_stage_fields']:
+                status = "✅ 수집됨" if field['collected'] else "⏳ 대기중"
+                value = f" = {field['value']}" if field['collected'] else ""
+                context_parts.append(f"- {field['key']} ({field['display_name']}): {status}{value}")
     else:
         context_parts.append("## 가능한 서비스")
         context_parts.append("- 디딤돌 대출 상담")
@@ -100,8 +129,8 @@ def format_analysis_context(state: AgentState) -> str:
         context_parts.append("\n## Orchestrator 제안")
         context_parts.append(state.main_agent_direct_response)
     
-    # 3. Worker 분석 결과
-    context_parts.append("\n## Worker 분석 결과")
+    # 4. Worker 분석 결과 (이번 턴에 실행된 경우만)
+    context_parts.append("\n## 4. Worker 분석 결과")
     
     worker_count = 0
     
@@ -109,16 +138,25 @@ def format_analysis_context(state: AgentState) -> str:
     if state.scenario_agent_output:
         worker_count += 1
         context_parts.append(f"\n### {worker_count}. 시나리오 분석")
-        context_parts.append(f"- 의도: {state.scenario_agent_output.intent}")
+        context_parts.append(f"- 사용자 의도: {state.scenario_agent_output.intent}")
+        
         if state.scenario_agent_output.entities:
-            context_parts.append(f"- 추출된 정보: {json.dumps(state.scenario_agent_output.entities, ensure_ascii=False)}")
-        context_parts.append(f"- 시나리오 관련성: {'관련됨' if state.scenario_agent_output.is_scenario_related else '관련없음'}")
+            context_parts.append(f"- 추출된 정보:")
+            # stage_info가 이미 위에서 정의됨
+            expected_key = stage_info.get("expected_info_key") if stage_info else None
+            for key, value in state.scenario_agent_output.entities.items():
+                # 현재 단계에서 기대하는 필드인지 표시
+                is_expected = "✅" if key == expected_key else "ℹ️"
+                context_parts.append(f"  {is_expected} {key}: {value}")
+        
+        context_parts.append(f"- 시나리오 진행 관련: {'예 - 계속 진행' if state.scenario_agent_output.is_scenario_related else '아니오 - 다른 주제'}")
     
     # RAG Worker 응답
     if state.factual_response:
         worker_count += 1
-        context_parts.append(f"\n### {worker_count}. 지식 기반 검색 결과")
-        context_parts.append(state.factual_response)
+        context_parts.append(f"\n### {worker_count}. 지식 기반 검색 (QA)")
+        context_parts.append(f"- 답변: {state.factual_response}")
+        context_parts.append("- 처리 방법: 간단히 답변 후 시나리오로 복귀")
     
     # Web Worker 응답 (있다면)
     if hasattr(state, 'web_search_response') and state.web_search_response:
@@ -128,7 +166,7 @@ def format_analysis_context(state: AgentState) -> str:
     
     # Worker가 하나도 없는 경우
     if worker_count == 0:
-        context_parts.append("(Worker 호출 없음)")
+        context_parts.append("- Worker 호출 없음 (직접 응답 가능)")
     
     # 4. 수집된 정보 요약
     if state.current_scenario_stage_id and state.collected_product_info:
@@ -180,6 +218,75 @@ def process_prompt_variables(prompt: str, collected_info: Dict[str, Any], state:
             )
     
     return prompt
+
+
+def analyze_field_status(state: AgentState, scenario_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """시나리오 필드 수집 상태 분석"""
+    if not scenario_data:
+        return {
+            'total_required': 0,
+            'collected': 0,
+            'remaining': 0,
+            'current_stage_fields': []
+        }
+    
+    required_fields = scenario_data.get("required_info_fields", [])
+    collected_info = state.collected_product_info
+    
+    # 전체 필수 필드 상태
+    total_required = sum(1 for f in required_fields if f.get("required", False))
+    collected = sum(1 for f in required_fields if f.get("required", False) and collected_info.get(f["key"]) is not None)
+    
+    # 현재 단계와 관련된 필드들
+    current_stage_fields = []
+    stage_info = get_current_stage_info(state)
+    
+    if stage_info:
+        # 현재 단계에서 수집하는 필드
+        expected_key = stage_info.get("expected_info_key")
+        if expected_key:
+            for field in required_fields:
+                if field["key"] == expected_key:
+                    current_stage_fields.append({
+                        'key': field["key"],
+                        'display_name': field.get("display_name", field["key"]),
+                        'collected': collected_info.get(field["key"]) is not None,
+                        'value': collected_info.get(field["key"])
+                    })
+        
+        # collect_multiple_info인 경우 관련된 모든 필드
+        if stage_info.get("collect_multiple_info"):
+            # visible_groups에 속한 필드들 찾기
+            visible_groups = stage_info.get("visible_groups", [])
+            for field in required_fields:
+                field_group = field.get("group")  # 필드에 group 속성이 있다고 가정
+                if field_group in visible_groups or not visible_groups:
+                    # 부모 필드 조건 확인
+                    parent_field = field.get("parent_field")
+                    if parent_field:
+                        parent_value = collected_info.get(parent_field)
+                        show_when = field.get("show_when", "")
+                        # 간단한 조건 평가 (예: "use_internet_banking == true")
+                        if "==" in show_when:
+                            parent_key, expected_val = show_when.split("==")
+                            parent_key = parent_key.strip()
+                            expected_val = expected_val.strip().strip("'\"")
+                            if str(parent_value) != expected_val:
+                                continue
+                    
+                    current_stage_fields.append({
+                        'key': field["key"],
+                        'display_name': field.get("display_name", field["key"]),
+                        'collected': collected_info.get(field["key"]) is not None,
+                        'value': collected_info.get(field["key"])
+                    })
+    
+    return {
+        'total_required': total_required,
+        'collected': collected,
+        'remaining': total_required - collected,
+        'current_stage_fields': current_stage_fields
+    }
 
 
 def generate_fallback_response(state: AgentState) -> str:
