@@ -76,7 +76,7 @@ async def initialize_session(websocket: WebSocket) -> Optional[str]:
     print(f"New session initialized: {session_id}")
     
     # 초기 인사 메시지
-    greeting = "안녕하세요! 신한은행 AI 금융 상담 서비스입니다. 어떤 도움이 필요하신가요?"
+    greeting = "안녕하세요. 신한은행 AI 금융 상담 서비스입니다. 통장을 새로 만드실꺼면 '통장 만들고싶어요' 와 같이 말씀해주세요"
     await manager.send_json_to_client(session_id, {
         "type": "session_initialized",
         "message": greeting

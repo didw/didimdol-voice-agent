@@ -364,18 +364,11 @@ watch(userInputText, (newValue) => {
         전송
       </button>
       <button
-        @click="toggleMicrophone"
-        :class="{
-          'mic-button': true,
-          'mic-active': isVoiceModeActive,
-          'mic-recording': isRecording,
-        }"
-        :disabled="!isWebSocketConnected"
-        :title="isVoiceModeActive ? (isRecording ? '녹음 중지' : '음성 활성화 중...') : '음성 시작'"
+        class="mic-button"
+        :disabled="true"
+        title="음성 기능 일시 중단"
       >
-        <span v-if="isVoiceModeActive && isRecording">🔴 중지</span>
-        <span v-else-if="isVoiceModeActive && !isRecording">🎙️ 활성...</span>
-        <span v-else>🎙️ 음성</span>
+        <span>🎙️ 일시중단</span>
       </button>
     </div>
   </div>
