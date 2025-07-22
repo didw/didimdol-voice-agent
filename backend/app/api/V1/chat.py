@@ -41,10 +41,15 @@ async def websocket_chat_endpoint(websocket: WebSocket):
         print(f"WebSocket disconnected: {session_id}")
     except Exception as e:
         print(f"WebSocket error for {session_id}: {e}")
-        await manager.send_json_to_client(session_id, {
-            "type": "error", 
-            "message": f"Server error: {str(e)}"
-        })
+        # WebSocket이 이미 닫혔을 수 있으므로 에러 메시지 전송을 시도하지 않음
+        try:
+            if session_id in manager.active_connections:
+                await manager.send_json_to_client(session_id, {
+                    "type": "error", 
+                    "message": f"Server error: {str(e)}"
+                })
+        except:
+            pass  # 에러 메시지 전송 실패는 무시
     finally:
         await cleanup_session(session_id, stt_service, tts_service)
 
@@ -71,6 +76,8 @@ async def initialize_session(websocket: WebSocket) -> Optional[str]:
         "error_message": None,
         "is_final_turn_response": False,
         "tts_cancelled": False,
+        "router_call_count": 0,
+        "correction_mode": False,
     }
     
     print(f"New session initialized: {session_id}")
@@ -357,10 +364,15 @@ async def process_input_through_agent(
         
     except Exception as e:
         print(f"[{session_id}] Agent processing error: {e}")
-        await manager.send_json_to_client(session_id, {
-            "type": "error", 
-            "message": f"처리 중 오류: {str(e)}"
-        })
+        # WebSocket이 이미 닫혔을 수 있으므로 에러 메시지 전송을 시도하지 않음
+        try:
+            if session_id in manager.active_connections:
+                await manager.send_json_to_client(session_id, {
+                    "type": "error", 
+                    "message": f"처리 중 오류: {str(e)}"
+                })
+        except:
+            pass  # 에러 메시지 전송 실패는 무시
 
 
 async def cleanup_session(
@@ -369,16 +381,29 @@ async def cleanup_session(
     tts_service: Optional[StreamTTSService]
 ) -> None:
     """세션 정리"""
-    if stt_service:
-        await stt_service.stop_stream()
-    if tts_service:
-        await tts_service.stop_tts_stream()
-    
-    manager.disconnect(session_id)
-    
-    if session_id in SESSION_STATES:
-        del SESSION_STATES[session_id]
-        print(f"Session cleaned up: {session_id}")
+    try:
+        # Google 서비스 정리
+        if stt_service:
+            try:
+                await stt_service.stop_stream()
+            except Exception as e:
+                print(f"Error stopping STT service for {session_id}: {e}")
+        
+        if tts_service:
+            try:
+                await tts_service.stop_tts_stream()
+            except Exception as e:
+                print(f"Error stopping TTS service for {session_id}: {e}")
+        
+        # WebSocket 연결 해제
+        manager.disconnect(session_id)
+        
+        # 세션 상태 삭제
+        if session_id in SESSION_STATES:
+            del SESSION_STATES[session_id]
+            print(f"Session cleaned up: {session_id}")
+    except Exception as e:
+        print(f"Error during cleanup for session {session_id}: {e}")
 
 
 @router.websocket("/ws/{session_id}")

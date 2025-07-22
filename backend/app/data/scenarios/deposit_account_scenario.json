@@ -247,6 +247,7 @@
       "input_type": "yes_no",
       "expected_info_key": "confirm_personal_info",
       "visible_groups": ["basic_info"],
+      "collect_multiple_info": true,
       "transitions": [
         {
           "next_stage_id": "ask_lifelong_account",
