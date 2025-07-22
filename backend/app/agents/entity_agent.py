@@ -99,100 +99,128 @@ class EntityRecognitionAgent:
         user_input: str, 
         required_fields: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        """사용자 입력에서 엔티티 추출 - YAML 프롬프트 우선 사용"""
+        """사용자 입력에서 엔티티 추출 - 최적화된 단일 LLM 호출"""
         
-        # 각 필드별로 개별 추출 수행
-        all_extracted_entities = {}
-        extraction_details = []
-        
-        for field in required_fields:
-            field_key = field['key']
+        # 짧은 입력이나 간단한 응답인 경우 패턴 매칭만 수행
+        if len(user_input.strip()) < 10:
+            pattern_results = {}
+            for field in required_fields:
+                field_key = field['key']
+                pattern_result = self.extract_with_patterns(user_input, field_key)
+                if pattern_result:
+                    pattern_results[field_key] = pattern_result
             
-            # YAML에서 해당 필드의 프롬프트 가져오기
-            if field_key in self.entity_prompts:
-                entity_config = self.entity_prompts[field_key]
-                prompt_template = entity_config.get('prompt', '')
-                
-                # 프롬프트에 user_input 삽입
-                specific_prompt = prompt_template.format(user_input=user_input)
-                
-                # 예시 추가 (있는 경우)
-                if 'examples' in entity_config:
-                    specific_prompt += "\n\n예시:"
-                    for example in entity_config['examples']:
-                        specific_prompt += f"\n입력: {example['input']} → 출력: {example['output']}"
-                
-                print(f"[EntityAgent] Using YAML prompt for {field_key}")
-            else:
-                # YAML에 없으면 scenario JSON의 extraction_prompt 사용
-                if field.get('extraction_prompt'):
-                    specific_prompt = f"사용자 발화: \"{user_input}\"\n\n{field['extraction_prompt']}"
-                    print(f"[EntityAgent] Using scenario extraction_prompt for {field_key}")
-                else:
-                    # 둘 다 없으면 기본 프롬프트 사용
-                    specific_prompt = f"""사용자 발화에서 {field['display_name']}을(를) 추출하세요.
-필드 타입: {field['type']}
-{"선택지: " + ", ".join(field['choices']) if field.get('choices') else ""}
+            if pattern_results:
+                print(f"[EntityAgent] Quick pattern match for short input: {pattern_results}")
+                return {
+                    "extracted_entities": pattern_results,
+                    "confidence": 0.9,
+                    "unclear_fields": [],
+                    "reasoning": "패턴 매칭으로 빠른 추출"
+                }
+        
+        # 복잡한 입력인 경우 단일 LLM 호출로 모든 필드 추출
+        # 필드 정보를 구조화
+        field_descriptions = []
+        for field in required_fields:
+            desc = {
+                "key": field['key'],
+                "display_name": field.get('display_name', field['key']),
+                "type": field['type'],
+                "required": field.get('required', False)
+            }
+            if field.get('choices'):
+                desc['choices'] = field['choices']
+            field_descriptions.append(desc)
+        
+        # 통합 추출 프롬프트
+        unified_prompt = f"""사용자 발화에서 명시적으로 언급된 정보만 추출하세요. 절대 추론하거나 기본값을 넣지 마세요.
 
 사용자 발화: "{user_input}"
 
-추출된 값 (없으면 null):"""
-                    print(f"[EntityAgent] Using fallback prompt for {field_key}")
+추출 가능한 필드들:
+{json.dumps(field_descriptions, ensure_ascii=False, indent=2)}
+
+추출 규칙:
+1. 사용자가 직접 말한 내용만 추출 (추론 금지)
+2. 언급하지 않은 필드는 절대 추출하지 말 것
+3. boolean 타입: 명시적 언급만 (네/예 → true, 아니요 → false)
+4. number 타입: 한국어 숫자 정확히 변환
+   - "오백만원" → 500 (만원 단위)
+   - "일일" 또는 "1일" → 1일 이체한도
+   - "일회" 또는 "1회" → 1회 이체한도
+5. choice 타입: 제공된 선택지 중에서만 선택
+
+중요: 
+- 1회/1일 이체한도는 반드시 구분할 것
+- 사용자가 말하지 않은 정보는 빈 값으로 둘 것
+- "일일 오백만원"이라고 하면 transfer_limit_per_day: 500만 추출
+
+응답 형식 (JSON):
+{{
+  "extracted_fields": {{
+    "field_key": "value"  // 실제로 언급된 것만
+  }},
+  "confidence": 0.0-1.0
+}}"""
+
+        try:
+            print(f"[EntityAgent] Unified extraction for input: '{user_input}'")
+            response = await json_llm.ainvoke([HumanMessage(content=unified_prompt)])
             
-            try:
-                # 개별 필드 추출 수행 (일반 LLM 사용)
-                response = await generative_llm.ainvoke([HumanMessage(content=specific_prompt)])
-                content = response.content.strip()
-                
-                # JSON이 아닌 단순 텍스트 응답 처리
-                if content and content != "null" and content != "None":
-                    # 따옴표 제거
-                    if content.startswith('"') and content.endswith('"'):
-                        content = content[1:-1]
-                    
-                    # 타입별 변환
-                    if field['type'] == 'boolean':
-                        if content.lower() in ['true', '네', '예', '맞습니다', '동의합니다']:
-                            all_extracted_entities[field_key] = True
-                        elif content.lower() in ['false', '아니요', '아니에요', '동의하지 않습니다']:
-                            all_extracted_entities[field_key] = False
-                    elif field['type'] == 'number':
-                        try:
-                            # 숫자 변환 시도
-                            if isinstance(content, str):
-                                converted = convert_korean_number(content)
-                                if converted is not None:
-                                    all_extracted_entities[field_key] = converted
-                                else:
-                                    all_extracted_entities[field_key] = int(content)
-                            else:
-                                all_extracted_entities[field_key] = int(content)
-                        except:
-                            pass
-                    elif field['type'] == 'choice':
-                        # 선택지 확인
-                        if content in field.get('choices', []):
-                            all_extracted_entities[field_key] = content
+            # JSON 파싱
+            content = response.content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+            
+            result = json.loads(content)
+            extracted_fields = result.get("extracted_fields", {})
+            
+            # 타입별 후처리
+            processed_entities = {}
+            for field_key, value in extracted_fields.items():
+                field_def = next((f for f in required_fields if f['key'] == field_key), None)
+                if field_def:
+                    if field_def['type'] == 'number' and isinstance(value, str):
+                        converted = convert_korean_number(value)
+                        if converted is not None:
+                            processed_entities[field_key] = converted
+                        else:
+                            try:
+                                processed_entities[field_key] = int(value)
+                            except:
+                                pass
                     else:
-                        # text 타입
-                        all_extracted_entities[field_key] = content
-                    
-                    extraction_details.append(f"{field_key}: {content} (YAML prompt used)")
-                
-            except Exception as e:
-                print(f"[EntityAgent] Error extracting {field_key}: {e}")
-                extraction_details.append(f"{field_key}: extraction failed - {str(e)}")
-        
-        # 전체 결과 구성
-        result = {
-            "extracted_entities": all_extracted_entities,
-            "confidence": 0.8 if all_extracted_entities else 0.0,
-            "unclear_fields": [f['key'] for f in required_fields if f['key'] not in all_extracted_entities],
-            "reasoning": "YAML 프롬프트 기반 개별 필드 추출\n" + "\n".join(extraction_details)
-        }
-        
-        print(f"[EntityAgent] Extraction result: {result}")
-        return result
+                        processed_entities[field_key] = value
+            
+            print(f"[EntityAgent] Unified extraction result: {processed_entities}")
+            
+            return {
+                "extracted_entities": processed_entities,
+                "confidence": result.get("confidence", 0.8),
+                "unclear_fields": [],
+                "reasoning": f"통합 LLM 추출 - {len(processed_entities)}개 필드 발견"
+            }
+            
+        except Exception as e:
+            print(f"[EntityAgent] Unified extraction error: {e}")
+            # 폴백: 패턴 매칭 시도
+            pattern_results = {}
+            for field in required_fields:
+                field_key = field['key']
+                pattern_result = self.extract_with_patterns(user_input, field_key)
+                if pattern_result:
+                    pattern_results[field_key] = pattern_result
+            
+            return {
+                "extracted_entities": pattern_results,
+                "confidence": 0.5,
+                "unclear_fields": [f['key'] for f in required_fields if f['key'] not in pattern_results],
+                "reasoning": f"LLM 오류로 패턴 매칭 사용: {str(e)}"
+            }
     
     async def validate_entities(
         self, 
@@ -260,8 +288,30 @@ class EntityRecognitionAgent:
             ],
             "card_delivery_location": [
                 r"([\w가-힣\s\-\.]+(?:구|시|동|로|길)[\w가-힣\s\-\.]*)"
+            ],
+            "payment_date": [
+                r"(\d{1,2})일",
+                r"매월\s*(\d{1,2})",
+                r"(\d{1,2})일날",
+                r"월\s*(\d{1,2})"
             ]
         }
+        
+        # Boolean 필드를 위한 간단한 패턴
+        positive_patterns = ["네", "예", "응", "맞아", "맞습니다", "확인", "동의", "ok", "okay", "ㅇㅇ", "ㅇㅋ"]
+        negative_patterns = ["아니", "아뇨", "아니요", "아니에요", "안", "싫", "no", "ㄴㄴ"]
+        
+        # Boolean 타입 필드 처리
+        if field_key in ["confirm_personal_info", "use_lifelong_account", "use_internet_banking", 
+                         "additional_withdrawal_account", "use_check_card", "postpaid_transport",
+                         "same_password_as_account", "card_usage_alert"]:
+            user_lower = user_input.lower().strip()
+            for pattern in positive_patterns:
+                if pattern in user_lower:
+                    return "true"
+            for pattern in negative_patterns:
+                if pattern in user_lower:
+                    return "false"
         
         if field_key not in patterns:
             return None
@@ -364,39 +414,114 @@ def convert_korean_number(text: str) -> Optional[int]:
         # 기본 텍스트 정리
         text = text.strip().replace(",", "").replace(" ", "")
         
+        # 한글 숫자를 아라비아 숫자로 변환
+        korean_nums = {
+            "일": "1", "이": "2", "삼": "3", "사": "4", "오": "5",
+            "육": "6", "칠": "7", "팔": "8", "구": "9", "십": "10",
+            "백": "100", "천": "1000", "만": "10000", "억": "100000000"
+        }
+        
+        # 특수 케이스 처리 (일억, 일천만 등)
+        text = text.replace("일억", "1억").replace("일천", "1천").replace("일백", "1백")
+        
+        # 단순 한글 숫자 케이스 (오백만원, 삼천만원 등)
+        simple_patterns = {
+            "오백만원": 500, "오백만": 500,
+            "삼백만원": 300, "삼백만": 300,
+            "이백만원": 200, "이백만": 200,
+            "백만원": 100, "백만": 100,
+            "오천만원": 5000, "오천만": 5000,
+            "삼천만원": 3000, "삼천만": 3000,
+            "이천만원": 2000, "이천만": 2000,
+            "천만원": 1000, "천만": 1000,
+            "구십만원": 90, "구십만": 90,
+            "팔십만원": 80, "팔십만": 80,
+            "칠십만원": 70, "칠십만": 70,
+            "육십만원": 60, "육십만": 60,
+            "오십만원": 50, "오십만": 50,
+            "사십만원": 40, "사십만": 40,
+            "삼십만원": 30, "삼십만": 30,
+            "이십만원": 20, "이십만": 20,
+            "십만원": 10, "십만": 10
+        }
+        
+        # 정확한 매칭 우선
+        for pattern, value in simple_patterns.items():
+            if text == pattern:
+                return value
+        
         # 만원 단위 제거
         text = text.replace("만원", "").replace("만", "")
         
-        # 억, 천만, 백만 등 처리
+        # 복잡한 케이스 처리
         if "억" in text:
             parts = text.split("억")
-            result = int(parts[0]) * 10000
+            try:
+                # 숫자로 변환 시도
+                if parts[0].isdigit():
+                    result = int(parts[0]) * 10000
+                else:
+                    # 한글 숫자인 경우
+                    result = 10000  # 기본값 1억
+            except:
+                result = 10000
+            
             if len(parts) > 1 and parts[1]:
-                result += int(parts[1])
+                if parts[1].isdigit():
+                    result += int(parts[1])
+                elif "천" in parts[1]:
+                    sub_parts = parts[1].split("천")
+                    if sub_parts[0].isdigit():
+                        result += int(sub_parts[0]) * 1000
+                    else:
+                        result += 1000
             return result
+            
         elif "천" in text:
-            # "5천", "3천5백" 등 처리
             parts = text.split("천")
-            result = int(parts[0]) * 1000
+            if parts[0].isdigit():
+                result = int(parts[0]) * 1000
+            else:
+                # "오천" -> 5000
+                num_map = {"일": 1, "이": 2, "삼": 3, "사": 4, "오": 5, 
+                          "육": 6, "칠": 7, "팔": 8, "구": 9}
+                result = num_map.get(parts[0], 1) * 1000
+                
             if len(parts) > 1 and parts[1]:
                 if "백" in parts[1]:
                     hundred_parts = parts[1].split("백")
-                    result += int(hundred_parts[0]) * 100
-                    if len(hundred_parts) > 1 and hundred_parts[1]:
-                        result += int(hundred_parts[1])
-                else:
+                    if hundred_parts[0].isdigit():
+                        result += int(hundred_parts[0]) * 100
+                    else:
+                        result += num_map.get(hundred_parts[0], 1) * 100
+                elif parts[1].isdigit():
                     result += int(parts[1])
             return result
+            
         elif "백" in text:
             parts = text.split("백")
-            result = int(parts[0]) * 100
+            if parts[0].isdigit():
+                result = int(parts[0]) * 100
+            else:
+                num_map = {"일": 1, "이": 2, "삼": 3, "사": 4, "오": 5, 
+                          "육": 6, "칠": 7, "팔": 8, "구": 9}
+                result = num_map.get(parts[0], 1) * 100
+                
             if len(parts) > 1 and parts[1]:
-                result += int(parts[1])
+                if parts[1].isdigit():
+                    result += int(parts[1])
             return result
         else:
             # 일반 숫자
-            return int(text)
-    except:
+            if text.isdigit():
+                return int(text)
+            else:
+                # 한글 숫자 단독 (오, 십 등)
+                num_map = {"일": 1, "이": 2, "삼": 3, "사": 4, "오": 5, 
+                          "육": 6, "칠": 7, "팔": 8, "구": 9, "십": 10}
+                return num_map.get(text, None)
+    except Exception as e:
+        print(f"[convert_korean_number] Error converting '{text}': {e}")
         return None
 
 

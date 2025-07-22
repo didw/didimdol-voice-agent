@@ -14,6 +14,7 @@ from ...logger import log_node_execution
 from ...simple_scenario_engine import SimpleScenarioEngine
 from ....agents.entity_agent import entity_agent
 from ....agents.internet_banking_agent import internet_banking_agent
+from ....agents.check_card_agent import check_card_agent
 from .scenario_helpers import (
     check_required_info_completion,
     get_next_missing_info_group_stage,
@@ -94,9 +95,22 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
         # Entity Agent를 사용한 정보 추출
         extraction_result = {"extracted_entities": {}, "collected_info": collected_info}
         
-        if user_input:
+        # ScenarioAgent가 이미 entities를 추출한 경우 Entity Agent 호출 생략
+        if scenario_output and hasattr(scenario_output, 'entities') and scenario_output.entities:
+            print(f"[DEBUG] Using entities from ScenarioAgent: {scenario_output.entities}")
+            extraction_result = {
+                "extracted_entities": scenario_output.entities,
+                "collected_info": {**collected_info, **scenario_output.entities},
+                "valid_entities": scenario_output.entities,
+                "invalid_entities": {},
+                "missing_fields": [],
+                "extraction_confidence": 0.9,
+                "is_complete": False
+            }
+            collected_info = extraction_result["collected_info"]
+        elif user_input and len(user_input.strip()) > 0:
             try:
-                # Entity Agent로 정보 추출
+                # Entity Agent로 정보 추출 (ScenarioAgent가 추출하지 못한 경우에만)
                 print(f"[DEBUG] Calling entity_agent.process_slot_filling with user_input: '{user_input}'")
                 extraction_result = await entity_agent.process_slot_filling(user_input, required_fields, collected_info)
             except Exception as e:
@@ -292,7 +306,27 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                     response_text = generate_internet_banking_prompt(missing_ib_fields)
             
         elif current_stage_id == "collect_check_card_info":
-            # 체크카드 정보 수집 처리
+            # 체크카드 정보 수집 처리 - 전용 Agent 사용
+            print(f"[DEBUG] Check Card Stage - Using specialized agent for: '{user_input}'")
+            
+            # CheckCardAgent로 정보 분석 및 추출
+            cc_analysis_result = {}
+            if user_input:
+                try:
+                    cc_analysis_result = await check_card_agent.analyze_check_card_info(
+                        user_input, collected_info, required_fields
+                    )
+                    
+                    # 추출된 정보를 collected_info에 통합
+                    if cc_analysis_result.get("extracted_info"):
+                        for field_key, value in cc_analysis_result["extracted_info"].items():
+                            collected_info[field_key] = value
+                            print(f"[DEBUG] Check Card Agent extracted: {field_key} = {value}")
+                    
+                except Exception as e:
+                    print(f"[DEBUG] Check Card Agent error: {e}")
+            
+            # 완료 여부 재확인
             is_cc_complete, missing_cc_fields = check_check_card_completion(collected_info, required_fields)
             
             if is_cc_complete:
@@ -302,21 +336,43 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                 summary_prompt = replace_template_variables(summary_prompt, collected_info)
                 response_text = f"체크카드 설정이 완료되었습니다.\n\n{summary_prompt}"
             else:
-                # 첫 응답에서는 현재 스테이지에 머물면서 추가 정보 요청
-                if extraction_result.get("extracted_entities"):
-                    # 사용자가 일부 정보를 제공한 경우
-                    next_stage_id = "collect_check_card_info"  # 같은 스테이지 유지
-                    response_text = f"네, 알겠습니다. {generate_check_card_prompt(missing_cc_fields)}"
+                # 분석 결과에 안내 메시지가 있으면 사용, 없으면 기본 메시지
+                if cc_analysis_result.get("guidance_message"):
+                    response_text = cc_analysis_result["guidance_message"]
                 else:
-                    # 사용자가 정보를 제공하지 않은 경우
-                    next_stage_id = "ask_remaining_card_info"
                     response_text = generate_check_card_prompt(missing_cc_fields)
+                
+                # 사용자가 일부 정보를 제공한 경우 같은 스테이지 유지
+                if cc_analysis_result.get("extracted_info"):
+                    next_stage_id = "collect_check_card_info"
+                else:
+                    next_stage_id = "ask_remaining_card_info"
             
             print(f"[DEBUG] Check card - Complete: {is_cc_complete}, Missing: {missing_cc_fields}")
             print(f"[DEBUG] Next stage: {next_stage_id}")
             
         elif current_stage_id == "ask_remaining_card_info":
-            # 부족한 체크카드 정보 재요청
+            # 부족한 체크카드 정보 재요청 - 전용 Agent 사용
+            print(f"[DEBUG] Remaining Card Info Stage - Using specialized agent for: '{user_input}'")
+            
+            # CheckCardAgent로 정보 분석 및 추출
+            cc_analysis_result = {}
+            if user_input:
+                try:
+                    cc_analysis_result = await check_card_agent.analyze_check_card_info(
+                        user_input, collected_info, required_fields
+                    )
+                    
+                    # 추출된 정보를 collected_info에 통합
+                    if cc_analysis_result.get("extracted_info"):
+                        for field_key, value in cc_analysis_result["extracted_info"].items():
+                            collected_info[field_key] = value
+                            print(f"[DEBUG] Check Card Agent extracted: {field_key} = {value}")
+                    
+                except Exception as e:
+                    print(f"[DEBUG] Check Card Agent error: {e}")
+            
+            # 완료 여부 재확인
             is_cc_complete, missing_cc_fields = check_check_card_completion(collected_info, required_fields)
             
             if is_cc_complete:
@@ -327,7 +383,12 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                 response_text = f"체크카드 설정이 완료되었습니다.\n\n{summary_prompt}"
             else:
                 next_stage_id = "ask_remaining_card_info"
-                response_text = generate_check_card_prompt(missing_cc_fields)
+                
+                # 분석 결과에 안내 메시지가 있으면 사용, 없으면 기본 메시지
+                if cc_analysis_result.get("guidance_message"):
+                    response_text = cc_analysis_result["guidance_message"]
+                else:
+                    response_text = generate_check_card_prompt(missing_cc_fields)
             
         elif current_stage_id == "eligibility_assessment":
             # 자격 검토 완료 후 서류 안내로 자동 진행

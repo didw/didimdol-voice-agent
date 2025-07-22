@@ -96,6 +96,10 @@ def format_analysis_context(state: AgentState) -> str:
         context_parts.append(f"- 전체 단계: 약 {total_stages}개")
         context_parts.append(f"- 현재 단계: {state.current_scenario_stage_id}")
         
+        # END_SCENARIO 또는 complete_application 같은 종료 단계 표시
+        if state.current_scenario_stage_id in ["complete_application", "END_SCENARIO", "info_correction_end"]:
+            context_parts.append("- **[종료 단계]** 이 단계는 시나리오의 마지막 단계입니다. 다음 단계 안내를 추가하지 마세요.")
+        
         if stage_info:
             current_prompt = stage_info.get("prompt", "")
             if current_prompt:
