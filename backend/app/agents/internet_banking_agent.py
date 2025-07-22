@@ -20,23 +20,21 @@ class InternetBankingAgent:
     """
     
     def __init__(self):
-        # 금액 표현 패턴 (만원 단위로 변환)
+        # 금액 표현 패턴 (만원 단위로 변환) - 우선순위 순서
         self.amount_patterns = [
-            # 명시적 금액 표현
-            (r"(\d+)\s*억\s*(\d+)?\s*천?\s*만?\s*원?", self._parse_억_천만),
-            (r"(\d+)\s*억\s*원?", lambda m: int(m.group(1)) * 10000),
-            (r"(\d+)\s*천\s*(\d+)?\s*백?\s*만?\s*원?", self._parse_천만),
-            (r"(\d+)\s*천\s*만?\s*원?", lambda m: int(m.group(1)) * 1000),
-            (r"(\d+)\s*백\s*만?\s*원?", lambda m: int(m.group(1)) * 100),
-            (r"(\d+)\s*만\s*원?", lambda m: int(m.group(1))),
-            
-            # 한글 숫자 표현
-            (r"일억", lambda m: 10000),
+            # 한글 숫자 표현 (먼저 매칭)
+            (r"일억원?", lambda m: 10000),
             (r"오천만원?", lambda m: 5000),
+            (r"사천만원?", lambda m: 4000),
             (r"삼천만원?", lambda m: 3000),
             (r"이천만원?", lambda m: 2000),
             (r"천만원?", lambda m: 1000),
+            (r"구백만원?", lambda m: 900),
+            (r"팔백만원?", lambda m: 800),
+            (r"칠백만원?", lambda m: 700),
+            (r"육백만원?", lambda m: 600),
             (r"오백만원?", lambda m: 500),
+            (r"사백만원?", lambda m: 400),
             (r"삼백만원?", lambda m: 300),
             (r"이백만원?", lambda m: 200),
             (r"백만원?", lambda m: 100),
@@ -45,6 +43,18 @@ class InternetBankingAgent:
             (r"칠십만원?", lambda m: 70),
             (r"육십만원?", lambda m: 60),
             (r"오십만원?", lambda m: 50),
+            (r"사십만원?", lambda m: 40),
+            (r"삼십만원?", lambda m: 30),
+            (r"이십만원?", lambda m: 20),
+            (r"십만원?", lambda m: 10),
+            
+            # 명시적 금액 표현 (숫자)
+            (r"(\d+)\s*억\s*(\d+)?\s*천?\s*만?\s*원?", self._parse_억_천만),
+            (r"(\d+)\s*억\s*원?", lambda m: int(m.group(1)) * 10000),
+            (r"(\d+)\s*천\s*(\d+)?\s*백?\s*만?\s*원?", self._parse_천만),
+            (r"(\d+)\s*천\s*만?\s*원?", lambda m: int(m.group(1)) * 1000),
+            (r"(\d+)\s*백\s*만?\s*원?", lambda m: int(m.group(1)) * 100),
+            (r"(\d+)\s*만\s*원?", lambda m: int(m.group(1))),
         ]
         
         # 이체한도 관련 키워드 (더 정확한 구분)
@@ -177,12 +187,14 @@ class InternetBankingAgent:
                         keyword_pos = user_lower.find(keyword)
                         if abs(match.start() - keyword_pos) < 50:
                             try:
-                                amount = parser(match) if callable(parser) else parser
-                                if amount <= 5000:  # 1회 최대 5천만원
+                                amount = parser(match) if callable(parser) else parser(match)
+                                if amount and amount <= 5000:  # 1회 최대 5천만원
                                     limits["transfer_limit_per_time"] = amount
                                     per_time_match = match
+                                    print(f"[IBAgent] Found per_time limit: {amount} from '{match.group()}'")
                                     break
-                            except:
+                            except Exception as e:
+                                print(f"[IBAgent] Error parsing per_time amount: {e}")
                                 continue
                 if "transfer_limit_per_time" in limits:
                     break
@@ -202,12 +214,14 @@ class InternetBankingAgent:
                         keyword_pos = user_lower.find(keyword)
                         if abs(match.start() - keyword_pos) < 50:
                             try:
-                                amount = parser(match) if callable(parser) else parser
-                                if amount <= 10000:  # 1일 최대 1억원
+                                amount = parser(match) if callable(parser) else parser(match)
+                                if amount and amount <= 10000:  # 1일 최대 1억원
                                     limits["transfer_limit_per_day"] = amount
                                     per_day_match = match
+                                    print(f"[IBAgent] Found per_day limit: {amount} from '{match.group()}'")
                                     break
-                            except:
+                            except Exception as e:
+                                print(f"[IBAgent] Error parsing per_day amount: {e}")
                                 continue
                 if "transfer_limit_per_day" in limits:
                     break
@@ -290,24 +304,30 @@ class InternetBankingAgent:
 고객 발화: "{user_input}"
 
 분석 규칙:
-1. 금액 표현 (만원 단위로 변환):
-   - "삼백만원", "300만원" → 300
-   - "하루 최대 일억", "1일 1억" → 10000 (1일 이체한도)
-   - "1회 5천", "한번에 오천만원" → 5000 (1회 이체한도)
+1. 금액 표현 (만원 단위로 변환) - 정확한 구분 필수:
+   - "일일 오백만원" → transfer_limit_per_day: 500 (1일 이체한도)
+   - "하루 최대 일억", "1일 1억" → transfer_limit_per_day: 10000
+   - "1회 5천", "한번에 오천만원" → transfer_limit_per_time: 5000
+   - 중요: 언급하지 않은 한도는 추출하지 말 것!
 
-2. 보안매체:
+2. 보안매체 (명시적 언급만):
    - "보안카드", "카드" → "보안카드"
    - "OTP", "신한OTP" → "신한 OTP"  
    - "타행OTP", "기존OTP" → "타행 OTP"
 
-3. 알림 설정:
+3. 알림 설정 (명시적 언급만):
    - "중요거래", "고액거래" → "중요거래통보"
    - "출금내역", "빠져나가는거" → "출금내역통보"
    - "해외IP", "해외차단" → "해외IP이체 제한"
 
-4. 출금계좌 추가:
+4. 출금계좌 추가 (명시적 언급만):
    - "추가", "더", "여러 계좌" → true
    - "추가 안", "하나만" → false
+
+중요 원칙:
+- 사용자가 말하지 않은 정보는 절대 추출하지 말 것
+- 기본값이나 추론값을 넣지 말 것
+- 1회/1일 한도는 반드시 구분해서 추출
 
 답변 형식 (JSON):
 {{
