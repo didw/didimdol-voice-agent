@@ -85,6 +85,7 @@ class AgentState(BaseModel):
     router_call_count: int = 0
     correction_mode: bool = False
     modification_reasoning: Optional[str] = None
+    pending_modifications: Optional[Dict[str, Any]] = None
     
     # --- Scenario Continuation Management ---
     scenario_ready_for_continuation: Optional[bool] = None

@@ -78,6 +78,7 @@ async def initialize_session(websocket: WebSocket) -> Optional[str]:
         "tts_cancelled": False,
         "router_call_count": 0,
         "correction_mode": False,
+        "pending_modifications": None,
     }
     
     print(f"New session initialized: {session_id}")

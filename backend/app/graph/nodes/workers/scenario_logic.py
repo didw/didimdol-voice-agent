@@ -133,27 +133,13 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             if extraction_result['extracted_entities']:
                 log_node_execution("Entity_Extract", output_info=f"entities={list(extraction_result['extracted_entities'].keys())}")
 
-        # greeting 단계에서 개인정보 확인 처리
-        if current_stage_id == "greeting":
+        # customer_info_check 단계에서 개인정보 확인 처리
+        if current_stage_id == "customer_info_check":
             # correction_mode가 활성화된 경우 InfoModificationAgent로 라우팅
             if state.correction_mode:
                 print(f"[DEBUG] Correction mode active - routing to personal_info_correction_node")
-                
-                # 수정 완료 확인 처리
-                if user_input and ("확인" in user_input or "완료" in user_input or "끝" in user_input):
-                    # 수정 완료 의사 표시 - 다음 단계로 진행
-                    next_stage_id = "ask_lifelong_account"
-                    next_stage_prompt = active_scenario_data.get("stages", {}).get("ask_lifelong_account", {}).get("prompt", "평생계좌번호로 등록하시겠어요?")
-                    
-                    return state.merge_update({
-                        "current_scenario_stage_id": next_stage_id,
-                        "final_response_text_for_tts": f"네, 기본정보 수정이 완료되었습니다. {next_stage_prompt}",
-                        "is_final_turn_response": True,
-                        "action_plan": [],
-                        "action_plan_struct": [],
-                        "router_call_count": 0,
-                        "correction_mode": False  # 수정 모드 해제
-                    })
+                print(f"[DEBUG] Current collected_info: {collected_info}")
+                print(f"[DEBUG] Pending modifications: {state.pending_modifications}")
                 
                 # 그 외의 경우 personal_info_correction_node로 라우팅
                 return state.merge_update({
@@ -163,15 +149,35 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                     "is_final_turn_response": False
                 })
             
-            # confirm_personal_info가 true인 경우 평생계좌 단계로 이동
-            elif collected_info.get("confirm_personal_info") == True:
-                print(f"[DEBUG] Personal info confirmed, moving to lifelong account stage")
+            # 자연스러운 정보 수정 감지 (correction_mode가 아닌 상태에서도)
+            elif not state.correction_mode and _is_info_modification_request(user_input, collected_info):
+                print(f"[DEBUG] Natural modification detected in customer_info_check: '{user_input}' - activating correction mode")
+                
+                return state.merge_update({
+                    "correction_mode": True,
+                    "action_plan": ["personal_info_correction"],
+                    "action_plan_struct": [{"action": "personal_info_correction", "reason": "Natural modification detected"}],
+                    "router_call_count": 0,
+                    "is_final_turn_response": False
+                })
+            
+            # 이름과 전화번호가 이미 있고, 사용자가 긍정적으로 응답한 경우 바로 다음 단계로
+            elif (collected_info.get("customer_name") and 
+                  collected_info.get("customer_phone") and
+                  (collected_info.get("confirm_personal_info") == True or
+                   (user_input and any(word in user_input for word in ["네", "예", "맞아", "맞습니다", "확인"])))):
+                
+                print(f"[DEBUG] Name and phone confirmed, moving to lifelong account stage")
+                
+                # confirm_personal_info도 True로 설정
+                collected_info["confirm_personal_info"] = True
                 
                 next_stage_id = "ask_lifelong_account"
                 next_stage_prompt = active_scenario_data.get("stages", {}).get("ask_lifelong_account", {}).get("prompt", "평생계좌번호로 등록하시겠어요?")
                 
                 return state.merge_update({
                     "current_scenario_stage_id": next_stage_id,
+                    "collected_product_info": collected_info,
                     "final_response_text_for_tts": next_stage_prompt,
                     "is_final_turn_response": True,
                     "action_plan": [],
@@ -537,6 +543,45 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         print(f"Updated Info: {collected_info}")
         print(f"Current stage expected_info_key: {current_stage_info.get('expected_info_key')}")
     
+    # customer_info_check 단계에서 수정 요청 특별 처리
+    if current_stage_id == "customer_info_check":
+        intent = scenario_output.get("intent", "") if scenario_output else ""
+        entities = scenario_output.get("entities", {}) if scenario_output else {}
+        
+        # 1. 명시적 부정 응답
+        is_negative_response = (
+            intent == "확인_부정" or 
+            entities.get("confirm_personal_info") == False or
+            (user_input and any(word in user_input for word in ["아니", "틀렸", "다르", "수정", "변경"]))
+        )
+        
+        # 2. 직접적인 정보 제공 (자연스러운 수정 요청)
+        is_direct_info_provision = _is_info_modification_request(user_input, collected_info)
+        
+        # 3. 새로운 정보가 entities에 포함된 경우
+        has_new_info = False
+        if entities:
+            # customer_name이나 customer_phone이 entities에 있고 기존 정보와 다른 경우
+            for field in ["customer_name", "customer_phone"]:
+                if field in entities and entities[field] != collected_info.get(field):
+                    has_new_info = True
+                    print(f"[DEBUG] New {field} detected in entities: {entities[field]} (current: {collected_info.get(field)})")
+        
+        # 위 조건 중 하나라도 해당하면 correction mode로 진입
+        if is_negative_response or is_direct_info_provision or has_new_info:
+            print(f"[DEBUG] customer_info_check - modification request detected")
+            print(f"  - Negative response: {is_negative_response}")
+            print(f"  - Direct info provision: {is_direct_info_provision}")
+            print(f"  - Has new info: {has_new_info}")
+            
+            return state.merge_update({
+                "correction_mode": True,
+                "action_plan": ["personal_info_correction"],
+                "action_plan_struct": [{"action": "personal_info_correction", "reason": "Customer wants to modify info"}],
+                "router_call_count": 0,
+                "is_final_turn_response": False
+            })
+    
     # 스테이지 전환 로직 결정
     transitions = current_stage_info.get("transitions", [])
     default_next = current_stage_info.get("default_next_stage_id", "None")
@@ -630,9 +675,127 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             "reasoning": "시나리오가 완료되어 상담을 종료합니다."
         })
 
+    # 다음 스테이지의 프롬프트 가져오기
+    next_stage_prompt = ""
+    if determined_next_stage_id and not str(determined_next_stage_id).startswith("END"):
+        next_stage_info = active_scenario_data.get("stages", {}).get(str(determined_next_stage_id), {})
+        next_stage_prompt = next_stage_info.get("prompt", "")
+        
+        # final_summary 단계인 경우 템플릿 변수 치환
+        if determined_next_stage_id == "final_summary":
+            next_stage_prompt = replace_template_variables(next_stage_prompt, collected_info)
+    
     return state.merge_update({
         "collected_product_info": collected_info, 
         "current_scenario_stage_id": determined_next_stage_id,
+        "final_response_text_for_tts": next_stage_prompt,
+        "is_final_turn_response": True,
         "action_plan": updated_plan,
         "action_plan_struct": updated_struct
     })
+
+
+def _is_info_modification_request(user_input: str, collected_info: Dict[str, Any]) -> bool:
+    """
+    자연스러운 정보 수정 요청인지 감지하는 헬퍼 함수
+    """
+    if not user_input:
+        return False
+    
+    # 간단한 패턴 기반 수정 요청 감지
+    import re
+    
+    # 전화번호 관련 패턴
+    phone_patterns = [
+        r"뒷번호\s*[\d가-힣]+",
+        r"뒤\s*\d{4}",
+        r"마지막\s*\d{4}",
+        r"끝번호\s*\d{4}",
+        r"010[-\s]*\d{3,4}[-\s]*\d{4}",
+        r"\d{3}[-\s]*\d{4}[-\s]*\d{4}",
+        r"전화번호.*\d{4}",
+        r"번호.*\d{4}",
+        r"내\s*번호",
+        r"제\s*번호"
+    ]
+    
+    # 이름 관련 패턴
+    name_patterns = [
+        r"이름\s*[가-힣]{2,4}",
+        r"성함\s*[가-힣]{2,4}",
+        r"제\s*이름",
+        r"내\s*이름",
+        r"[가-힣]{2,4}\s*(입니다|이에요|예요|라고|야|이야)"
+    ]
+    
+    # 직접적인 정보 제공 패턴 (수정 키워드 없이)
+    direct_info_patterns = [
+        r"^[가-힣]{2,4}(입니다|이에요|예요|야|이야)$",  # "홍길동이야"
+        r"^010[-\s]*\d{3,4}[-\s]*\d{4}$",  # "010-1234-5678"
+        r"^\d{4}(이야|예요|이에요)?$",  # "5678이야"
+        r"^(내|제)\s*(번호|전화번호|연락처|이름|성함)",  # "내 번호는..."
+    ]
+    
+    # 대조 표현 패턴 (예: "오육칠팔이 아니라 이이오구야")
+    contrast_patterns = [
+        r"[\d가-힣]+\s*(이|가)?\s*아니라\s*[\d가-힣]+",  # "5678이 아니라 2259"
+        r"[\d가-힣]+\s*(이|가)?\s*아니고\s*[\d가-힣]+",  # "5678이 아니고 2259"
+        r"[\d가-힣]+\s*(이|가)?\s*아니야\s*[\d가-힣]+",  # "5678이 아니야 2259"
+        r"[\d가-힣]+\s*말고\s*[\d가-힣]+",  # "5678 말고 2259"
+    ]
+    
+    # 일반적인 수정 키워드
+    modification_keywords = [
+        "아니", "틀렸", "다릅", "바꾸", "수정", "변경", "잘못",
+        "다시", "아니야"
+    ]
+    
+    user_lower = user_input.lower()
+    
+    # 대조 표현 패턴 확인 (최우선순위 - "~가 아니라 ~야" 형태)
+    for pattern in contrast_patterns:
+        if re.search(pattern, user_input, re.IGNORECASE):
+            print(f"[DEBUG] Contrast expression pattern match: {pattern}")
+            return True
+    
+    # 직접적인 정보 제공 패턴 확인 (두번째 우선순위)
+    for pattern in direct_info_patterns:
+        if re.search(pattern, user_input, re.IGNORECASE):
+            print(f"[DEBUG] Direct info provision pattern match: {pattern}")
+            return True
+    
+    # 전화번호/이름 패턴 매칭 확인
+    for pattern in phone_patterns + name_patterns:
+        if re.search(pattern, user_input, re.IGNORECASE):
+            print(f"[DEBUG] Pattern match for modification: {pattern}")
+            return True
+    
+    # 수정 키워드 확인
+    for keyword in modification_keywords:
+        if keyword in user_input:
+            print(f"[DEBUG] Modification keyword detected: {keyword}")
+            return True
+    
+    # 이미 수집된 정보와 다른 새로운 정보가 포함된 경우
+    # 예: 기존 전화번호 "010-1234-5678"인데 사용자가 "0987" 같은 새로운 번호 언급
+    if collected_info.get("customer_phone"):
+        # 한국어 숫자를 변환한 버전도 확인
+        from ....agents.info_modification_agent import convert_korean_to_digits
+        converted = convert_korean_to_digits(user_input)
+        phone_digits = re.findall(r'\d{4}', converted)
+        if phone_digits and all(digit not in collected_info["customer_phone"] for digit in phone_digits):
+            print(f"[DEBUG] New phone number detected that differs from existing: {phone_digits}")
+            return True
+    
+    if collected_info.get("customer_name"):
+        # 2글자 이상의 한글 이름 패턴
+        names = re.findall(r'[가-힣]{2,4}', user_input)
+        for name in names:
+            # 일반적인 단어가 아닌 이름일 가능성이 높은 경우
+            if (len(name) >= 2 and 
+                name != collected_info["customer_name"] and 
+                name not in ["이름", "성함", "번호", "전화", "연락처", "정보", "수정", "변경"]):
+                print(f"[DEBUG] New name detected that differs from existing: {name}")
+                return True
+    
+    return False

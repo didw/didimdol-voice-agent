@@ -8,6 +8,29 @@ from typing import Dict, Any, Optional, List, Tuple
 from ..graph.chains import generative_llm
 
 
+def convert_korean_to_digits(text: str) -> str:
+    """한국어 숫자 표현을 아라비아 숫자로 변환"""
+    korean_numbers = {
+        '영': '0', '공': '0',
+        '일': '1', '하나': '1',
+        '이': '2', '둘': '2',
+        '삼': '3', '셋': '3',
+        '사': '4', '넷': '4',
+        '오': '5', '다섯': '5',
+        '육': '6', '여섯': '6',
+        '칠': '7', '일곱': '7',
+        '팔': '8', '여덟': '8',
+        '구': '9', '아홉': '9'
+    }
+    
+    # 한국어 숫자를 아라비아 숫자로 변환
+    result = text
+    for korean, digit in korean_numbers.items():
+        result = result.replace(korean, digit)
+    
+    return result
+
+
 class InfoModificationAgent:
     """
     고객의 자연스러운 수정 요청을 파악하고 적절한 필드를 수정하는 Agent
@@ -78,6 +101,7 @@ class InfoModificationAgent:
             }
         """
         print(f"[InfoModAgent] Analyzing: '{user_input}'")
+        print(f"[InfoModAgent] Converted: '{convert_korean_to_digits(user_input)}'")
         print(f"[InfoModAgent] Current info: {current_info}")
         
         # 1. 패턴 기반 매칭
@@ -104,21 +128,67 @@ class InfoModificationAgent:
         """패턴 기반 정보 추출"""
         matches = {}
         
-        for field_key, patterns in self.field_patterns.items():
-            for pattern in patterns:
-                match = re.search(pattern, user_input, re.IGNORECASE)
+        # 한국어 숫자를 아라비아 숫자로 변환한 버전도 생성
+        converted_input = convert_korean_to_digits(user_input)
+        
+        # 대조 표현 패턴 처리 (예: "오육칠팔이 아니라 이이오구야")
+        contrast_patterns = [
+            r"([\d가-힣]+)\s*(이|가)?\s*아니라\s*([\d가-힣]+)",  # "5678이 아니라 2259"
+            r"([\d가-힣]+)\s*(이|가)?\s*아니고\s*([\d가-힣]+)",  # "5678이 아니고 2259"
+            r"([\d가-힣]+)\s*말고\s*([\d가-힣]+)",  # "5678 말고 2259"
+        ]
+        
+        # 대조 표현 확인
+        for pattern in contrast_patterns:
+            # 먼저 원본 입력에서 확인
+            for test_input in [user_input, converted_input]:
+                match = re.search(pattern, test_input, re.IGNORECASE)
                 if match:
-                    if field_key == "customer_phone":
-                        # 전화번호 특별 처리
-                        phone_value = self._process_phone_match(match, user_input)
-                        if phone_value:
-                            matches[field_key] = phone_value
-                    elif field_key == "customer_name":
-                        # 이름 추출
-                        name_value = match.group(1).strip()
-                        if len(name_value) >= 2:
-                            matches[field_key] = name_value
+                    # 대조 표현이 있으면 뒤의 값만 추출
+                    old_value = match.group(1)
+                    new_value = match.group(len(match.groups()))  # 마지막 그룹
+                    
+                    # 한국어 숫자를 아라비아 숫자로 변환
+                    old_value_digits = convert_korean_to_digits(old_value)
+                    new_value_digits = convert_korean_to_digits(new_value)
+                    
+                    # 숫자만 추출 (끝의 조사 제거)
+                    old_digits_match = re.search(r'(\d+)', old_value_digits)
+                    new_digits_match = re.search(r'(\d+)', new_value_digits)
+                    
+                    if old_digits_match and new_digits_match:
+                        old_digits = old_digits_match.group(1)
+                        new_digits = new_digits_match.group(1)
+                        
+                        print(f"[InfoModAgent] Contrast pattern detected: '{old_value}' ({old_digits}) → '{new_value}' ({new_digits})")
+                        
+                        # 4자리 숫자인 경우 전화번호 뒷자리로 간주
+                        if re.match(r'^\d{4}$', new_digits):
+                            matches["customer_phone"] = f"010-xxxx-{new_digits}"
+                            print(f"[InfoModAgent] Phone number tail change: xxxx-{old_digits} → xxxx-{new_digits}")
+                        
+                        # 대조 표현을 찾았으면 결과 반환
+                        if matches:
+                            return {"extracted": matches, "method": "contrast_pattern"}
                     break
+        
+        # 원본과 변환된 버전 모두에서 패턴 매칭 시도
+        for test_input in [user_input, converted_input]:
+            for field_key, patterns in self.field_patterns.items():
+                for pattern in patterns:
+                    match = re.search(pattern, test_input, re.IGNORECASE)
+                    if match:
+                        if field_key == "customer_phone":
+                            # 전화번호 특별 처리
+                            phone_value = self._process_phone_match(match, test_input)
+                            if phone_value:
+                                matches[field_key] = phone_value
+                        elif field_key == "customer_name":
+                            # 이름 추출
+                            name_value = match.group(1).strip()
+                            if len(name_value) >= 2:
+                                matches[field_key] = name_value
+                        break
         
         return {"extracted": matches, "method": "pattern"}
     
@@ -189,9 +259,18 @@ class InfoModificationAgent:
 
 고객 발화: "{user_input}"
 
+중요: 한국어 숫자 표현을 정확히 인식해주세요:
+- 영/공 → 0, 일 → 1, 이 → 2, 삼 → 3, 사 → 4, 오 → 5, 육 → 6, 칠 → 7, 팔 → 8, 구 → 9
+- 예: "이이칠구" → "2279", "오육칠팔" → "5678"
+
+특히 주의할 점:
+- "~가 아니라 ~야" 형태는 대조/수정을 의미합니다
+- "오육칠팔이 아니라 이이오구야" → 기존 5678을 2259로 수정
+- 현재 정보와 다른 부분만 수정하면 됩니다
+
 분석해야 할 사항:
 1. 고객이 어떤 정보를 수정하려고 하는지
-2. 새로운 값이 무엇인지
+2. 새로운 값이 무엇인지 (한국어 숫자는 아라비아 숫자로 변환)
 3. 추론의 근거
 
 답변 형식 (JSON):
@@ -205,6 +284,8 @@ class InfoModificationAgent:
 예시:
 - "뒷번호 0987이야" → {{"target_field": "customer_phone", "new_value": "010-xxxx-0987", "confidence": 0.9, "reasoning": "뒷번호 4자리는 전화번호의 마지막 부분"}}
 - "이름은 김철수야" → {{"target_field": "customer_name", "new_value": "김철수", "confidence": 0.95, "reasoning": "명시적으로 이름을 제공"}}
+- "이이칠구야" → {{"target_field": "customer_phone", "new_value": "010-xxxx-2279", "confidence": 0.9, "reasoning": "한국어 숫자 표현으로 뒷번호 4자리 제공"}}
+- "오육칠팔이 아니라 이이오구야" → {{"target_field": "customer_phone", "new_value": "010-xxxx-2259", "confidence": 0.95, "reasoning": "기존 뒷번호 5678을 2259로 수정 요청"}}
 """
 
         try:
@@ -291,9 +372,9 @@ class InfoModificationAgent:
             old_value = current_info.get(field, "없음")
             
             if field == "customer_phone":
-                suggestions.append(f"연락처를 '{old_value}'에서 '{new_value}'로 변경하시겠어요?")
+                suggestions.append(f"연락처를 {old_value}에서 {new_value}(으)로 변경하시겠어요?")
             elif field == "customer_name":
-                suggestions.append(f"성함을 '{old_value}'에서 '{new_value}'로 변경하시겠어요?")
+                suggestions.append(f"성함을 {old_value}에서 {new_value}(으)로 변경하시겠어요?")
             else:
                 display_name = self._get_field_display_name(field)
                 suggestions.append(f"{display_name}을(를) '{old_value}'에서 '{new_value}'로 변경하시겠어요?")
