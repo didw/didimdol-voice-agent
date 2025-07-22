@@ -47,10 +47,10 @@ class InternetBankingAgent:
             (r"오십만원?", lambda m: 50),
         ]
         
-        # 이체한도 관련 키워드
+        # 이체한도 관련 키워드 (더 정확한 구분)
         self.transfer_limit_keywords = {
-            "per_time": ["1회", "회당", "한번에", "한 번에", "건당", "회차당", "번에"],
-            "per_day": ["1일", "하루", "일일", "하루에", "하루당", "날마다", "매일", "데일리"]
+            "per_time": ["1회", "일회", "회당", "한번에", "한 번에", "건당", "회차당", "번에", "한번", "1번"],
+            "per_day": ["1일", "일일", "하루", "하루에", "하루당", "날마다", "매일", "데일리", "일간", "일당"]
         }
         
         # 보안매체 매칭
@@ -158,42 +158,70 @@ class InternetBankingAgent:
         return result
     
     def _extract_transfer_limits(self, user_input: str) -> Dict[str, int]:
-        """이체한도 추출"""
+        """이체한도 추출 - 개선된 1회/1일 구분"""
         limits = {}
+        user_lower = user_input.lower()
         
-        # 각 금액 패턴으로 시도
-        for pattern, parser in self.amount_patterns:
-            matches = list(re.finditer(pattern, user_input, re.IGNORECASE))
-            
-            for match in matches:
-                try:
-                    amount = parser(match) if callable(parser) else parser(match)
-                    
-                    # 앞뒤 문맥으로 1회/1일 구분
-                    context_before = user_input[:match.start()].lower()
-                    context_after = user_input[match.end():].lower()
-                    full_context = context_before + " " + context_after
-                    
-                    # 1회 이체한도 키워드 체크
-                    if any(keyword in full_context for keyword in self.transfer_limit_keywords["per_time"]):
-                        if amount <= 5000:  # 1회 최대 5천만원
-                            limits["transfer_limit_per_time"] = amount
-                    
-                    # 1일 이체한도 키워드 체크
-                    elif any(keyword in full_context for keyword in self.transfer_limit_keywords["per_day"]):
-                        if amount <= 10000:  # 1일 최대 1억원
-                            limits["transfer_limit_per_day"] = amount
-                    
-                    # 키워드가 없는 경우 금액 크기로 추론
-                    else:
-                        if amount <= 5000 and "transfer_limit_per_time" not in limits:
-                            limits["transfer_limit_per_time"] = amount
-                        elif amount > 5000 and amount <= 10000 and "transfer_limit_per_day" not in limits:
-                            limits["transfer_limit_per_day"] = amount
-                            
-                except (ValueError, AttributeError):
-                    continue
+        # 명시적인 1회/1일 표현 먼저 찾기
+        per_time_match = None
+        per_day_match = None
         
+        # 1회 한도 패턴
+        for keyword in self.transfer_limit_keywords["per_time"]:
+            if keyword in user_lower:
+                # 키워드 주변의 금액 찾기
+                for pattern, parser in self.amount_patterns:
+                    matches = list(re.finditer(pattern, user_input, re.IGNORECASE))
+                    for match in matches:
+                        # 키워드와 금액의 거리 확인 (50자 이내)
+                        keyword_pos = user_lower.find(keyword)
+                        if abs(match.start() - keyword_pos) < 50:
+                            try:
+                                amount = parser(match) if callable(parser) else parser
+                                if amount <= 5000:  # 1회 최대 5천만원
+                                    limits["transfer_limit_per_time"] = amount
+                                    per_time_match = match
+                                    break
+                            except:
+                                continue
+                if "transfer_limit_per_time" in limits:
+                    break
+        
+        # 1일 한도 패턴
+        for keyword in self.transfer_limit_keywords["per_day"]:
+            if keyword in user_lower:
+                # 키워드 주변의 금액 찾기
+                for pattern, parser in self.amount_patterns:
+                    matches = list(re.finditer(pattern, user_input, re.IGNORECASE))
+                    for match in matches:
+                        # 이미 1회 한도로 매칭된 금액은 제외
+                        if per_time_match and match == per_time_match:
+                            continue
+                        
+                        # 키워드와 금액의 거리 확인 (50자 이내)
+                        keyword_pos = user_lower.find(keyword)
+                        if abs(match.start() - keyword_pos) < 50:
+                            try:
+                                amount = parser(match) if callable(parser) else parser
+                                if amount <= 10000:  # 1일 최대 1억원
+                                    limits["transfer_limit_per_day"] = amount
+                                    per_day_match = match
+                                    break
+                            except:
+                                continue
+                if "transfer_limit_per_day" in limits:
+                    break
+        
+        # 논리적 검증: 1회 한도가 1일 한도보다 크면 안됨
+        if "transfer_limit_per_time" in limits and "transfer_limit_per_day" in limits:
+            if limits["transfer_limit_per_time"] > limits["transfer_limit_per_day"]:
+                # 잘못된 매칭일 가능성 - 큰 값을 1일로, 작은 값을 1회로 재할당
+                per_time_val = limits["transfer_limit_per_time"]
+                per_day_val = limits["transfer_limit_per_day"]
+                limits["transfer_limit_per_time"] = min(per_time_val, per_day_val)
+                limits["transfer_limit_per_day"] = max(per_time_val, per_day_val)
+        
+        print(f"[IBAgent] Extracted limits: {limits}")
         return limits
     
     def _extract_security_medium(self, user_input: str) -> Optional[str]:
@@ -361,7 +389,7 @@ class InternetBankingAgent:
                     confirmations.append(f"출금계좌 추가: {'예' if value else '아니오'}")
             
             if confirmations:
-                messages.append(f"네, {', '.join(confirmations)}로 설정하겠습니다.")
+                messages.append(f"네, {', '.join(confirmations)}로 확인했습니다.")
         
         # 누락된 정보 요청
         if missing_info:
