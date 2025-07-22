@@ -94,9 +94,22 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
         # Entity Agent를 사용한 정보 추출
         extraction_result = {"extracted_entities": {}, "collected_info": collected_info}
         
-        if user_input:
+        # ScenarioAgent가 이미 entities를 추출한 경우 Entity Agent 호출 생략
+        if scenario_output and hasattr(scenario_output, 'entities') and scenario_output.entities:
+            print(f"[DEBUG] Using entities from ScenarioAgent: {scenario_output.entities}")
+            extraction_result = {
+                "extracted_entities": scenario_output.entities,
+                "collected_info": {**collected_info, **scenario_output.entities},
+                "valid_entities": scenario_output.entities,
+                "invalid_entities": {},
+                "missing_fields": [],
+                "extraction_confidence": 0.9,
+                "is_complete": False
+            }
+            collected_info = extraction_result["collected_info"]
+        elif user_input and len(user_input.strip()) > 0:
             try:
-                # Entity Agent로 정보 추출
+                # Entity Agent로 정보 추출 (ScenarioAgent가 추출하지 못한 경우에만)
                 print(f"[DEBUG] Calling entity_agent.process_slot_filling with user_input: '{user_input}'")
                 extraction_result = await entity_agent.process_slot_filling(user_input, required_fields, collected_info)
             except Exception as e:
