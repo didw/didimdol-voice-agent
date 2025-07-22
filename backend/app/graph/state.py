@@ -81,6 +81,11 @@ class AgentState(BaseModel):
     # --- Turn-specific state ---
     action_plan_struct: List[Dict[str, Any]] = Field(default_factory=list)
     
+    # --- Router & Loop Prevention ---
+    router_call_count: int = 0
+    correction_mode: bool = False
+    modification_reasoning: Optional[str] = None
+    
     # --- Scenario Continuation Management ---
     scenario_ready_for_continuation: Optional[bool] = None
     scenario_awaiting_user_response: Optional[bool] = None

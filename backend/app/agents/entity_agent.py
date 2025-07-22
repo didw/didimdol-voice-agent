@@ -6,7 +6,9 @@ import json
 import re
 from typing import Dict, Any, List, Optional, Tuple
 from langchain_core.messages import HumanMessage
-from ..graph.chains import json_llm
+from ..graph.chains import json_llm, generative_llm
+from ..config.prompt_loader import load_yaml_file
+from pathlib import Path
 
 
 class EntityRecognitionAgent:
@@ -15,6 +17,11 @@ class EntityRecognitionAgent:
     def __init__(self):
         self.extraction_prompt = self._get_extraction_prompt()
         self.validation_prompt = self._get_validation_prompt()
+        # entity_extraction_prompts.yaml 파일 로드
+        config_dir = Path(__file__).parent.parent / "config"
+        self.entity_prompts = load_yaml_file(str(config_dir / "entity_extraction_prompts.yaml"))
+        
+        # 필드 키 매핑은 더 이상 필요없음 (YAML 파일에서 customer_phone 직접 사용)
     
     def _get_extraction_prompt(self) -> str:
         """엔티티 추출 프롬프트"""
@@ -92,80 +99,100 @@ class EntityRecognitionAgent:
         user_input: str, 
         required_fields: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        """사용자 입력에서 엔티티 추출"""
+        """사용자 입력에서 엔티티 추출 - YAML 프롬프트 우선 사용"""
         
-        # 필드 정보를 프롬프트에 포함할 형태로 변환
-        field_descriptions = []
-        extraction_prompts = []
+        # 각 필드별로 개별 추출 수행
+        all_extracted_entities = {}
+        extraction_details = []
         
         for field in required_fields:
-            desc = f"- {field['key']} ({field['type']}): {field['display_name']}"
-            if field.get('choices'):
-                desc += f" [선택지: {', '.join(field['choices'])}]"
-            field_descriptions.append(desc)
+            field_key = field['key']
             
-            # 개별 필드의 추출 프롬프트 수집
-            if field.get('extraction_prompt'):
-                extraction_prompts.append(f"- {field['key']}: {field['extraction_prompt']}")
+            # YAML에서 해당 필드의 프롬프트 가져오기
+            if field_key in self.entity_prompts:
+                entity_config = self.entity_prompts[field_key]
+                prompt_template = entity_config.get('prompt', '')
+                
+                # 프롬프트에 user_input 삽입
+                specific_prompt = prompt_template.format(user_input=user_input)
+                
+                # 예시 추가 (있는 경우)
+                if 'examples' in entity_config:
+                    specific_prompt += "\n\n예시:"
+                    for example in entity_config['examples']:
+                        specific_prompt += f"\n입력: {example['input']} → 출력: {example['output']}"
+                
+                print(f"[EntityAgent] Using YAML prompt for {field_key}")
+            else:
+                # YAML에 없으면 scenario JSON의 extraction_prompt 사용
+                if field.get('extraction_prompt'):
+                    specific_prompt = f"사용자 발화: \"{user_input}\"\n\n{field['extraction_prompt']}"
+                    print(f"[EntityAgent] Using scenario extraction_prompt for {field_key}")
+                else:
+                    # 둘 다 없으면 기본 프롬프트 사용
+                    specific_prompt = f"""사용자 발화에서 {field['display_name']}을(를) 추출하세요.
+필드 타입: {field['type']}
+{"선택지: " + ", ".join(field['choices']) if field.get('choices') else ""}
+
+사용자 발화: "{user_input}"
+
+추출된 값 (없으면 null):"""
+                    print(f"[EntityAgent] Using fallback prompt for {field_key}")
+            
+            try:
+                # 개별 필드 추출 수행 (일반 LLM 사용)
+                response = await generative_llm.ainvoke([HumanMessage(content=specific_prompt)])
+                content = response.content.strip()
+                
+                # JSON이 아닌 단순 텍스트 응답 처리
+                if content and content != "null" and content != "None":
+                    # 따옴표 제거
+                    if content.startswith('"') and content.endswith('"'):
+                        content = content[1:-1]
+                    
+                    # 타입별 변환
+                    if field['type'] == 'boolean':
+                        if content.lower() in ['true', '네', '예', '맞습니다', '동의합니다']:
+                            all_extracted_entities[field_key] = True
+                        elif content.lower() in ['false', '아니요', '아니에요', '동의하지 않습니다']:
+                            all_extracted_entities[field_key] = False
+                    elif field['type'] == 'number':
+                        try:
+                            # 숫자 변환 시도
+                            if isinstance(content, str):
+                                converted = convert_korean_number(content)
+                                if converted is not None:
+                                    all_extracted_entities[field_key] = converted
+                                else:
+                                    all_extracted_entities[field_key] = int(content)
+                            else:
+                                all_extracted_entities[field_key] = int(content)
+                        except:
+                            pass
+                    elif field['type'] == 'choice':
+                        # 선택지 확인
+                        if content in field.get('choices', []):
+                            all_extracted_entities[field_key] = content
+                    else:
+                        # text 타입
+                        all_extracted_entities[field_key] = content
+                    
+                    extraction_details.append(f"{field_key}: {content} (YAML prompt used)")
+                
+            except Exception as e:
+                print(f"[EntityAgent] Error extracting {field_key}: {e}")
+                extraction_details.append(f"{field_key}: extraction failed - {str(e)}")
         
-        # 추출 가이드 텍스트 생성
-        extraction_guide = '\n'.join(extraction_prompts) if extraction_prompts else "없음"
+        # 전체 결과 구성
+        result = {
+            "extracted_entities": all_extracted_entities,
+            "confidence": 0.8 if all_extracted_entities else 0.0,
+            "unclear_fields": [f['key'] for f in required_fields if f['key'] not in all_extracted_entities],
+            "reasoning": "YAML 프롬프트 기반 개별 필드 추출\n" + "\n".join(extraction_details)
+        }
         
-        prompt = self.extraction_prompt.format(
-            required_fields='\n'.join(field_descriptions),
-            user_input=user_input,
-            extraction_prompts=extraction_guide
-        )
-        
-        try:
-            # JSON 형식 요청을 프롬프트에 명시적으로 추가
-            prompt += "\n\n반드시 JSON 형식으로 응답해주세요."
-            response = await json_llm.ainvoke([HumanMessage(content=prompt)])
-            
-            # JSON 파싱 개선
-            content = response.content.strip()
-            if content.startswith("```json"):
-                content = content[7:]
-            if content.endswith("```"):
-                content = content[:-3]
-            content = content.strip()
-            
-            result = json.loads(content)
-            
-            # 숫자 필드 후처리
-            extracted_entities = result.get("extracted_entities", {})
-            for field in required_fields:
-                if field["type"] == "number" and field["key"] in extracted_entities:
-                    value = extracted_entities[field["key"]]
-                    if isinstance(value, str):
-                        # 한국어 숫자 변환 시도
-                        converted = convert_korean_number(value)
-                        if converted is not None:
-                            extracted_entities[field["key"]] = converted
-            
-            result["extracted_entities"] = extracted_entities
-            print(f"[EntityAgent] Extraction result: {result}")
-            return result
-            
-        except json.JSONDecodeError as e:
-            print(f"[EntityAgent] JSON parsing error: {e}")
-            print(f"[EntityAgent] Raw response: {response.content if 'response' in locals() else 'No response'}")
-            return {
-                "extracted_entities": {},
-                "confidence": 0.0,
-                "unclear_fields": [field['key'] for field in required_fields],
-                "reasoning": f"JSON 파싱 오류: {str(e)}"
-            }
-        except Exception as e:
-            print(f"[EntityAgent] Extraction error: {type(e).__name__}: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return {
-                "extracted_entities": {},
-                "confidence": 0.0,
-                "unclear_fields": [field['key'] for field in required_fields],
-                "reasoning": f"추출 오류: {str(e)}"
-            }
+        print(f"[EntityAgent] Extraction result: {result}")
+        return result
     
     async def validate_entities(
         self, 
@@ -198,7 +225,12 @@ class EntityRecognitionAgent:
     def extract_with_patterns(self, user_input: str, field_key: str) -> Optional[str]:
         """패턴 기반 정보 추출 (fallback 방식)"""
         patterns = {
-            "phone_number": [
+            "customer_phone": [  # phone_number -> customer_phone으로 변경
+                r"010[-\s]?\d{4}[-\s]?\d{4}",
+                r"011[-\s]?\d{3,4}[-\s]?\d{4}",
+                r"\d{3}[-\s]?\d{4}[-\s]?\d{4}"
+            ],
+            "phone_number": [  # 호환성을 위해 유지
                 r"010[-\s]?\d{4}[-\s]?\d{4}",
                 r"011[-\s]?\d{3,4}[-\s]?\d{4}",
                 r"\d{3}[-\s]?\d{4}[-\s]?\d{4}"
@@ -213,7 +245,20 @@ class EntityRecognitionAgent:
                 r"한도\s*(\d+)",
                 r"(\d+)원?"
             ],
+            "transfer_limit_per_time": [
+                r"1회\s*(\d+)만원?",
+                r"회당\s*(\d+)만원?",
+                r"한번에\s*(\d+)만원?"
+            ],
+            "transfer_limit_per_day": [
+                r"1일\s*(\d+)만원?",
+                r"하루\s*(\d+)만원?",
+                r"일일\s*(\d+)만원?"
+            ],
             "cc_delivery_address": [
+                r"([\w가-힣\s\-\.]+(?:구|시|동|로|길)[\w가-힣\s\-\.]*)"
+            ],
+            "card_delivery_location": [
                 r"([\w가-힣\s\-\.]+(?:구|시|동|로|길)[\w가-힣\s\-\.]*)"
             ]
         }
@@ -224,7 +269,22 @@ class EntityRecognitionAgent:
         for pattern in patterns[field_key]:
             match = re.search(pattern, user_input)
             if match:
-                return match.group(1).strip()
+                # group(0)는 전체 매치, group(1)은 첫 번째 캡처 그룹
+                # 캡처 그룹이 있는지 확인
+                if match.groups():
+                    value = match.group(1).strip()
+                else:
+                    value = match.group(0).strip()
+                
+                # 전화번호의 경우 하이픈 형식으로 변환
+                if field_key in ["customer_phone", "phone_number"]:
+                    # 숫자만 추출
+                    numbers_only = re.sub(r'\D', '', value)
+                    if len(numbers_only) == 11 and numbers_only.startswith('010'):
+                        return f"{numbers_only[:3]}-{numbers_only[3:7]}-{numbers_only[7:]}"
+                    elif len(numbers_only) == 10:
+                        return f"{numbers_only[:3]}-{numbers_only[3:6]}-{numbers_only[6:]}"
+                return value
         
         return None
     

@@ -5,6 +5,7 @@ WebSocket 연결 관리자
 import uuid
 from typing import Dict
 from fastapi import WebSocket, WebSocketException
+from starlette.websockets import WebSocketState
 
 
 class ConnectionManager:
@@ -37,13 +38,28 @@ class ConnectionManager:
     async def send_json_to_client(self, session_id: str, data: dict):
         """클라이언트에게 JSON 메시지 전송"""
         if session_id in self.active_connections:
+            websocket = self.active_connections[session_id]
+            
+            # WebSocket 상태 확인
+            if websocket.client_state != WebSocketState.CONNECTED:
+                print(f"WebSocket not connected for session {session_id}, removing from active connections")
+                self.disconnect(session_id)
+                return
+                
             try:
-                await self.active_connections[session_id].send_json(data)
+                await websocket.send_json(data)
             except WebSocketException as e:
                 print(f"Error sending to client {session_id} (possibly closed): {e}")
                 self.disconnect(session_id)
             except RuntimeError as e:
-                print(f"RuntimeError sending to client {session_id} (WebSocket is closed): {e}")
+                # RuntimeError는 주로 이벤트 루프가 닫히거나 WebSocket이 이미 닫힌 경우 발생
+                if "Cannot schedule new futures after interpreter shutdown" in str(e):
+                    print(f"Interpreter shutting down, cannot send to {session_id}")
+                else:
+                    print(f"RuntimeError sending to client {session_id}: {e}")
+                self.disconnect(session_id)
+            except Exception as e:
+                print(f"Unexpected error sending to client {session_id}: {type(e).__name__}: {e}")
                 self.disconnect(session_id)
 
 

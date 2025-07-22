@@ -12,13 +12,14 @@ WORKER_ROUTING_MAP = {
     "invoke_qa_agent": "rag_worker", 
     "invoke_web_search": "web_worker",
     "set_product_type": "set_product_type_node",
-    "end_conversation": "end_conversation_node"
+    "end_conversation": "end_conversation_node",
+    "personal_info_correction": "personal_info_correction_node"
 }
 
 
 def execute_plan_router(state: AgentState) -> str:
     """
-    간소화된 라우터 - Worker 중심 라우팅
+    간소화된 라우터 - Worker 중심 라우팅 (무한루프 방지 포함)
     
     Args:
         state: 현재 에이전트 상태
@@ -31,10 +32,20 @@ def execute_plan_router(state: AgentState) -> str:
         log_node_execution("Router", "plan_complete → synthesizer")
         return "synthesize_response_node"
 
+    # 무한루프 방지: 라우터 호출 횟수 추적
+    router_count = state.get("router_call_count", 0) + 1
+    
+    if router_count > 20:  # 최대 20회 제한
+        log_node_execution("Router", f"MAX_ITERATIONS_REACHED ({router_count}) → force_synthesize")
+        return "synthesize_response_node"
+
     next_action = plan[0] 
     target_node = WORKER_ROUTING_MAP.get(next_action, "synthesize_response_node")
     
-    log_node_execution("Router", f"{next_action} → {target_node.replace('_node', '').replace('_worker', '')}")
+    # router_call_count를 state에 업데이트 (다음 노드에서 사용)
+    state["router_call_count"] = router_count
+    
+    log_node_execution("Router", f"{next_action} → {target_node.replace('_node', '').replace('_worker', '')} (#{router_count})")
     return target_node
 
 

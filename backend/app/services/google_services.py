@@ -194,7 +194,14 @@ class StreamSTTService:
         self._stop_event.clear()
         self._is_active = True
         while not self._audio_queue.empty(): self._audio_queue.get_nowait(); self._audio_queue.task_done()
-        self._processing_task = asyncio.create_task(self._process_responses())
+        try:
+            self._processing_task = asyncio.create_task(self._process_responses())
+        except RuntimeError as e:
+            if "no running event loop" in str(e) or "Cannot schedule new futures" in str(e):
+                print(f"STT stream ({self.session_id}): Cannot create task - event loop issue: {e}")
+                self._is_active = False
+                return
+            raise
 
     async def process_audio_chunk(self, chunk: bytes):
         if not GOOGLE_SERVICES_AVAILABLE or not self._is_active or self._stop_event.is_set():
@@ -253,6 +260,11 @@ class StreamSTTService:
             except asyncio.TimeoutError:
                 print(f"STT stream ({self.session_id}): Timeout waiting for task. Forcing cancellation.")
                 self._processing_task.cancel()
+            except RuntimeError as e:
+                if "Cannot schedule new futures" in str(e) or "no running event loop" in str(e):
+                    print(f"STT stream ({self.session_id}): Event loop closing, cannot wait for task")
+                else:
+                    print(f"STT stream ({self.session_id}): RuntimeError during task shutdown: {e}")
             except Exception as e:
                 print(f"STT stream ({self.session_id}): Error during task shutdown: {e}")
         self._processing_task = None
@@ -364,7 +376,17 @@ class StreamTTSService:
         
         print(f"TTS stream ({self.session_id}): Queueing TTS task for text: '{text_to_speak[:50]}...'")
         # Create and store the task for the current text_to_speak
-        self._current_tts_task = asyncio.create_task(self._generate_and_stream_audio(text_to_speak))
+        try:
+            self._current_tts_task = asyncio.create_task(self._generate_and_stream_audio(text_to_speak))
+        except RuntimeError as e:
+            if "no running event loop" in str(e) or "Cannot schedule new futures" in str(e):
+                print(f"TTS stream ({self.session_id}): Cannot create task - event loop issue: {e}")
+                if self.on_error: 
+                    await self.on_error("TTS 작업을 시작할 수 없습니다.")
+                if self.on_stream_complete: 
+                    await self.on_stream_complete()
+                return
+            raise
         
         try:
             # Await the completion of the current sentence's TTS streaming
@@ -388,6 +410,11 @@ class StreamTTSService:
                 await task_to_stop 
             except asyncio.CancelledError:
                 print(f"TTS stream ({self.session_id}): Active TTS task successfully cancelled.")
+            except RuntimeError as e:
+                if "Cannot schedule new futures" in str(e) or "no running event loop" in str(e):
+                    print(f"TTS stream ({self.session_id}): Event loop closing, cannot wait for task")
+                else:
+                    print(f"TTS stream ({self.session_id}): RuntimeError during TTS task cancellation: {e}")
             except Exception as e:
                 print(f"TTS stream ({self.session_id}): Error during TTS task cancellation: {e}")
             finally:

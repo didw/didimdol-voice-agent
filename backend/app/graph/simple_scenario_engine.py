@@ -143,6 +143,12 @@ class SimpleScenarioEngine:
         message += "\n위 정보가 맞으신가요? 틀린 부분이 있으시면 알려주세요."
         return message
     
+    def handle_correction_request(self, intent: str) -> str:
+        """정보 수정 요청 처리"""
+        if intent == "REQUEST_MODIFY":
+            return "네, 알겠습니다. 고객 정보 수정 단계로 이동하겠습니다. 어떤 정보를 수정하시겠어요?"
+        return None
+    
     def answer_simple_question(self, question: str) -> Optional[str]:
         """매뉴얼 기반 간단한 질문 답변"""
         question_lower = question.lower()

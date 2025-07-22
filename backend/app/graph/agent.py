@@ -32,6 +32,7 @@ from .nodes.orchestrator.main_router import main_agent_router_node
 from .nodes.control.end_conversation import end_conversation_node
 from .nodes.control.synthesize import synthesize_response_node
 from .nodes.control.set_product import set_product_type_node
+from .nodes.control.personal_info_correction import personal_info_correction_node
 from .nodes.workers.rag_worker import factual_answer_node
 from .nodes.workers.web_worker import web_search_node
 from .nodes.workers.scenario_agent import call_scenario_agent_node
@@ -58,6 +59,7 @@ workflow.add_node("web_worker", web_search_node)
 workflow.add_node("synthesize_response_node", synthesize_response_node)
 workflow.add_node("set_product_type_node", set_product_type_node)
 workflow.add_node("end_conversation_node", end_conversation_node)
+workflow.add_node("personal_info_correction_node", personal_info_correction_node)
 
 # Orchestrator Flow
 workflow.set_entry_point("entry_point_node")
@@ -74,6 +76,7 @@ workflow.add_conditional_edges(
         "synthesize_response_node": "synthesize_response_node",
         "set_product_type_node": "set_product_type_node",
         "end_conversation_node": "end_conversation_node",
+        "personal_info_correction_node": "personal_info_correction_node",
     }
 )
 
@@ -86,6 +89,7 @@ workflow.add_conditional_edges("web_worker", execute_plan_router)
 workflow.add_edge("synthesize_response_node", END)
 workflow.add_edge("set_product_type_node", END)
 workflow.add_edge("end_conversation_node", END)
+workflow.add_conditional_edges("personal_info_correction_node", execute_plan_router)
 
 app_graph = workflow.compile()
 
@@ -127,6 +131,9 @@ async def run_agent_streaming(
         "available_product_types": ["didimdol", "jeonse", "deposit_account"],
         "action_plan": [],
         "action_plan_struct": [],
+        # 라우터 및 루프 방지
+        "router_call_count": current_state_dict.get("router_call_count", 0) if current_state_dict else 0,
+        "correction_mode": current_state_dict.get("correction_mode", False) if current_state_dict else False,
         # 시나리오 연속성 상태 복원
         "scenario_ready_for_continuation": current_state_dict.get("scenario_ready_for_continuation", False) if current_state_dict else False,
         "scenario_awaiting_user_response": current_state_dict.get("scenario_awaiting_user_response", False) if current_state_dict else False,
@@ -143,16 +150,25 @@ async def run_agent_streaming(
         if final_state and final_state.get("final_response_text_for_tts"):
             text_to_stream = final_state["final_response_text_for_tts"]
             yield {"type": "stream_start"}
-            for char in text_to_stream:
-                yield char
-                streamed_text += char
-                await asyncio.sleep(0.01)
-            yield {"type": "stream_end", "full_text": streamed_text}
+            try:
+                for char in text_to_stream:
+                    yield char
+                    streamed_text += char
+                    await asyncio.sleep(0.01)
+                yield {"type": "stream_end", "full_text": streamed_text}
+            except GeneratorExit:
+                # Handle generator cleanup properly
+                print(f"Generator exit requested for session {session_id}")
+                raise
         else:
             error_msg = final_state.get("error_message", "Failed to generate a response.")
             yield {"type": "error", "message": error_msg}
             if final_state: final_state["final_response_text_for_tts"] = error_msg
 
+    except GeneratorExit:
+        # Re-raise GeneratorExit to allow proper cleanup
+        print(f"Generator exit for session {session_id}")
+        raise
     except Exception as e:
         print(f"CRITICAL error in run_agent_streaming for session {session_id}: {e}")
         traceback.print_exc()

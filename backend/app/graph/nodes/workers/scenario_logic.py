@@ -13,6 +13,7 @@ from ...models import next_stage_decision_parser
 from ...logger import log_node_execution
 from ...simple_scenario_engine import SimpleScenarioEngine
 from ....agents.entity_agent import entity_agent
+from ....agents.internet_banking_agent import internet_banking_agent
 from .scenario_helpers import (
     check_required_info_completion,
     get_next_missing_info_group_stage,
@@ -61,9 +62,9 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
     # 현재 스테이지가 정보 수집 단계인지 확인
     print(f"[DEBUG] Multiple info collection - 현재 스테이지 ID: {current_stage_id}")
     
-    # 인터넷뱅킹 정보 수집 스테이지 추가
+    # 인터넷뱅킹 정보 수집 스테이지 추가 (greeting 포함)
     info_collection_stages = [
-        "info_collection_guidance", "process_collected_info", 
+        "greeting", "info_collection_guidance", "process_collected_info", 
         "ask_missing_info_group1", "ask_missing_info_group2", "ask_missing_info_group3", 
         "eligibility_assessment", "collect_internet_banking_info", "ask_remaining_ib_info",
         "collect_check_card_info", "ask_remaining_card_info"
@@ -71,6 +72,25 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
     
     if current_stage_id in info_collection_stages:
         
+        # REQUEST_MODIFY 인텐트 또는 기본정보 수정 요청 처리 (Entity Agent 처리 전에 확인)
+        scenario_output = state.scenario_agent_output
+        print(f"[DEBUG] Scenario output type: {type(scenario_output)}, value: {scenario_output}")
+        if scenario_output and (isinstance(scenario_output, dict) or hasattr(scenario_output, 'get')):
+            intent = scenario_output.get("intent") if hasattr(scenario_output, 'get') else getattr(scenario_output, 'intent', None)
+            print(f"[DEBUG] Scenario output intent: '{intent}'")
+            
+            # 1. REQUEST_MODIFY 인텐트 감지 - 전용 노드로 안전하게 라우팅
+            if intent == "REQUEST_MODIFY":
+                print(f"[DEBUG] REQUEST_MODIFY intent detected in stage: {current_stage_id} - routing to correction node")
+                
+                # 무한루프 방지를 위해 전용 correction 노드로 라우팅
+                return state.merge_update({
+                    "action_plan": ["personal_info_correction"],
+                    "action_plan_struct": [{"action": "personal_info_correction", "reason": "User requested info correction"}],
+                    "router_call_count": 0,  # 라우터 카운트 초기화
+                    "is_final_turn_response": False  # 계속 처리하도록 설정
+                })
+    
         # Entity Agent를 사용한 정보 추출
         extraction_result = {"extracted_entities": {}, "collected_info": collected_info}
         
@@ -98,6 +118,54 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             print(f"[DEBUG] Final updated collected_info: {collected_info}")
             if extraction_result['extracted_entities']:
                 log_node_execution("Entity_Extract", output_info=f"entities={list(extraction_result['extracted_entities'].keys())}")
+
+        # greeting 단계에서 개인정보 확인 처리
+        if current_stage_id == "greeting":
+            # correction_mode가 활성화된 경우 InfoModificationAgent로 라우팅
+            if state.correction_mode:
+                print(f"[DEBUG] Correction mode active - routing to personal_info_correction_node")
+                
+                # 수정 완료 확인 처리
+                if user_input and ("확인" in user_input or "완료" in user_input or "끝" in user_input):
+                    # 수정 완료 의사 표시 - 다음 단계로 진행
+                    next_stage_id = "ask_lifelong_account"
+                    next_stage_prompt = active_scenario_data.get("stages", {}).get("ask_lifelong_account", {}).get("prompt", "평생계좌번호로 등록하시겠어요?")
+                    
+                    return state.merge_update({
+                        "current_scenario_stage_id": next_stage_id,
+                        "final_response_text_for_tts": f"네, 기본정보 수정이 완료되었습니다. {next_stage_prompt}",
+                        "is_final_turn_response": True,
+                        "action_plan": [],
+                        "action_plan_struct": [],
+                        "router_call_count": 0,
+                        "correction_mode": False  # 수정 모드 해제
+                    })
+                
+                # 그 외의 경우 personal_info_correction_node로 라우팅
+                return state.merge_update({
+                    "action_plan": ["personal_info_correction"],
+                    "action_plan_struct": [{"action": "personal_info_correction", "reason": "Correction mode active - processing modification"}],
+                    "router_call_count": 0,
+                    "is_final_turn_response": False
+                })
+            
+            # confirm_personal_info가 true인 경우 평생계좌 단계로 이동
+            elif collected_info.get("confirm_personal_info") == True:
+                print(f"[DEBUG] Personal info confirmed, moving to lifelong account stage")
+                
+                next_stage_id = "ask_lifelong_account"
+                next_stage_prompt = active_scenario_data.get("stages", {}).get("ask_lifelong_account", {}).get("prompt", "평생계좌번호로 등록하시겠어요?")
+                
+                return state.merge_update({
+                    "current_scenario_stage_id": next_stage_id,
+                    "final_response_text_for_tts": next_stage_prompt,
+                    "is_final_turn_response": True,
+                    "action_plan": [],
+                    "action_plan_struct": [],
+                    "correction_mode": False  # 수정 모드 해제
+                })
+            # confirm_personal_info가 false인 경우는 기존 시나리오 전환 로직을 따름
+        
         
         # 정보 수집 완료 여부 확인
         is_complete, missing_field_names = check_required_info_completion(collected_info, required_fields)
@@ -140,7 +208,27 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                     response_text = generate_group_specific_prompt(next_stage_id, collected_info)
                     
         elif current_stage_id == "collect_internet_banking_info":
-            # 인터넷뱅킹 정보 수집 처리
+            # 인터넷뱅킹 정보 수집 처리 - 전용 Agent 사용
+            print(f"[DEBUG] Internet Banking Stage - Using specialized agent for: '{user_input}'")
+            
+            # InternetBankingAgent로 정보 분석 및 추출
+            ib_analysis_result = {}
+            if user_input:
+                try:
+                    ib_analysis_result = await internet_banking_agent.analyze_internet_banking_info(
+                        user_input, collected_info, required_fields
+                    )
+                    
+                    # 추출된 정보를 collected_info에 통합
+                    if ib_analysis_result.get("extracted_info"):
+                        collected_info.update(ib_analysis_result["extracted_info"])
+                        print(f"[DEBUG] IB Agent extracted: {ib_analysis_result['extracted_info']}")
+                        
+                except Exception as e:
+                    print(f"[ERROR] Internet Banking Agent failed: {e}")
+                    ib_analysis_result = {"error": str(e)}
+            
+            # 완료 여부 재확인
             is_ib_complete, missing_ib_fields = check_internet_banking_completion(collected_info, required_fields)
             
             if is_ib_complete:
@@ -149,21 +237,44 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                 next_stage_prompt = active_scenario_data.get("stages", {}).get("ask_check_card", {}).get("prompt", "체크카드를 신청하시겠어요?")
                 response_text = f"인터넷뱅킹 설정이 완료되었습니다. {next_stage_prompt}"
             else:
-                # 첫 응답에서는 현재 스테이지에 머물면서 추가 정보 요청
-                if extraction_result.get("extracted_entities"):
-                    # 사용자가 일부 정보를 제공한 경우
-                    next_stage_id = "collect_internet_banking_info"  # 같은 스테이지 유지
-                    response_text = f"네, 알겠습니다. {generate_internet_banking_prompt(missing_ib_fields)}"
+                # 분석 결과에 안내 메시지가 있으면 사용, 없으면 기본 메시지
+                if ib_analysis_result.get("guidance_message"):
+                    response_text = ib_analysis_result["guidance_message"]
                 else:
-                    # 사용자가 정보를 제공하지 않은 경우
-                    next_stage_id = "ask_remaining_ib_info"
                     response_text = generate_internet_banking_prompt(missing_ib_fields)
+                
+                # 정보 추출이 있었다면 현재 스테이지 유지, 없으면 ask_remaining으로 이동
+                if ib_analysis_result.get("extracted_info"):
+                    next_stage_id = "collect_internet_banking_info"  # 같은 스테이지 유지
+                else:
+                    next_stage_id = "ask_remaining_ib_info"
             
             print(f"[DEBUG] Internet banking - Complete: {is_ib_complete}, Missing: {missing_ib_fields}")
+            print(f"[DEBUG] IB Agent confidence: {ib_analysis_result.get('confidence', 'N/A')}")
             print(f"[DEBUG] Next stage: {next_stage_id}")
             
         elif current_stage_id == "ask_remaining_ib_info":
-            # 부족한 인터넷뱅킹 정보 재요청
+            # 부족한 인터넷뱅킹 정보 재요청 - 전용 Agent 사용
+            print(f"[DEBUG] Remaining IB Info Stage - Using specialized agent for: '{user_input}'")
+            
+            # InternetBankingAgent로 정보 분석 및 추출
+            ib_analysis_result = {}
+            if user_input:
+                try:
+                    ib_analysis_result = await internet_banking_agent.analyze_internet_banking_info(
+                        user_input, collected_info, required_fields
+                    )
+                    
+                    # 추출된 정보를 collected_info에 통합
+                    if ib_analysis_result.get("extracted_info"):
+                        collected_info.update(ib_analysis_result["extracted_info"])
+                        print(f"[DEBUG] IB Agent extracted (remaining): {ib_analysis_result['extracted_info']}")
+                        
+                except Exception as e:
+                    print(f"[ERROR] Internet Banking Agent failed (remaining): {e}")
+                    ib_analysis_result = {"error": str(e)}
+            
+            # 완료 여부 재확인
             is_ib_complete, missing_ib_fields = check_internet_banking_completion(collected_info, required_fields)
             
             if is_ib_complete:
@@ -173,7 +284,12 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                 response_text = f"인터넷뱅킹 설정이 완료되었습니다. {next_stage_prompt}"
             else:
                 next_stage_id = "ask_remaining_ib_info"
-                response_text = generate_internet_banking_prompt(missing_ib_fields)
+                
+                # 분석 결과에 안내 메시지가 있으면 사용, 없으면 기본 메시지
+                if ib_analysis_result.get("guidance_message"):
+                    response_text = ib_analysis_result["guidance_message"]
+                else:
+                    response_text = generate_internet_banking_prompt(missing_ib_fields)
             
         elif current_stage_id == "collect_check_card_info":
             # 체크카드 정보 수집 처리
@@ -245,7 +361,8 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             "final_response_text_for_tts": response_text,
             "is_final_turn_response": True,
             "action_plan": updated_plan,
-            "action_plan_struct": updated_struct
+            "action_plan_struct": updated_struct,
+            "router_call_count": 0  # 라우터 카운트 초기화
         })
     
     # 일반 스테이지는 기존 로직으로 처리
