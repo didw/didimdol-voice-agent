@@ -34,6 +34,18 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
     mode = "business_guidance" if not current_product_type else "task_management"
     log_node_execution("Orchestrator", f"mode={mode}, input='{user_input[:20]}...'")
     
+    # customer_info_check 단계에서만 수정 관련 플래그를 처리
+    current_stage_id = state.current_scenario_stage_id or "greeting"
+    if ((state.waiting_for_additional_modifications or state.pending_modifications) and 
+        current_stage_id == "customer_info_check"):
+        log_node_execution("Orchestrator", f"Routing to personal_info_correction (waiting_for_additional_modifications={state.waiting_for_additional_modifications}, pending_modifications={state.pending_modifications})")
+        return state.merge_update({
+            "action_plan": ["personal_info_correction"],
+            "action_plan_struct": [{"action": "personal_info_correction", "reason": "Handle pending modifications or additional modifications"}],
+            "router_call_count": 0,
+            "is_final_turn_response": False
+        })
+    
     if not json_llm:
         return state.merge_update({
             "error_message": "Orchestrator service unavailable (LLM not initialized).",

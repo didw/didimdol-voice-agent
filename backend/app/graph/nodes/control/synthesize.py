@@ -31,8 +31,15 @@ async def synthesize_response_node(state: AgentState) -> AgentState:
         }
         return state.merge_update(state_updates)
     
+    # 디버그 로그 추가
+    print(f"[Synthesizer] ===== START =====")
+    print(f"[Synthesizer] Incoming final_response_text_for_tts: '{state.final_response_text_for_tts}'")
+    print(f"[Synthesizer] Incoming is_final_turn_response: {state.is_final_turn_response}")
+    print(f"[Synthesizer] Incoming action_plan: {state.action_plan}")
+    
     # 1. 이미 설정된 최종 응답이 있으면 반환
     if state.final_response_text_for_tts:
+        print(f"[Synthesizer] Using existing final_response_text_for_tts: '{state.final_response_text_for_tts}'")
         return create_response(state.final_response_text_for_tts, "existing response")
     
     # 2. Direct message가 있고 Worker 호출이 없는 경우 → 바로 출력

@@ -66,15 +66,23 @@ async def set_product_type_node(state: AgentState) -> AgentState:
 
     updated_messages = list(state.messages) + [AIMessage(content=response_text)]
     
-    # Default 값 초기화 - 기본정보만 설정
+    # Default 값 초기화 - 기존 정보를 유지하면서 기본정보만 추가
     from ....api.V1.chat_utils import initialize_default_values
+    
+    # 기존 collected_product_info 유지
+    existing_info = state.collected_product_info.copy()
+    
     temp_state = {
         **state.to_dict(),
         "current_product_type": new_product_type, 
-        "active_scenario_data": active_scenario
+        "active_scenario_data": active_scenario,
+        "collected_product_info": existing_info  # 기존 정보 전달
     }
     initialized_info = initialize_default_values(temp_state)
-    log_node_execution("Set_Product", f"initialized defaults: {initialized_info}")
+    
+    # 기존 정보와 새로운 기본값 병합 (기존 정보 우선)
+    merged_info = {**initialized_info, **existing_info}
+    log_node_execution("Set_Product", f"merged info (existing + defaults): {merged_info}")
     
     # 시나리오 연속성을 위한 상태 설정
     log_node_execution("Set_Product", f"scenario ready: {active_scenario.get('scenario_name')}")
@@ -84,7 +92,7 @@ async def set_product_type_node(state: AgentState) -> AgentState:
         "active_scenario_data": active_scenario,
         "active_scenario_name": active_scenario.get("scenario_name"),
         "current_scenario_stage_id": initial_stage_id,
-        "collected_product_info": initialized_info,  # 빈 dict로 시작
+        "collected_product_info": merged_info,  # 기존 정보 + 새 기본값
         "final_response_text_for_tts": response_text,
         "messages": updated_messages,
         "is_final_turn_response": True,

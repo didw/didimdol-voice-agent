@@ -105,7 +105,7 @@ class InfoModificationAgent:
         print(f"[InfoModAgent] Current info: {current_info}")
         
         # 1. 패턴 기반 매칭
-        pattern_matches = self._extract_using_patterns(user_input)
+        pattern_matches = self._extract_using_patterns(user_input, current_info)
         print(f"[InfoModAgent] Pattern matches: {pattern_matches}")
         
         # 2. 컨텍스트 기반 추론
@@ -124,9 +124,11 @@ class InfoModificationAgent:
         print(f"[InfoModAgent] Final result: {final_result}")
         return final_result
     
-    def _extract_using_patterns(self, user_input: str) -> Dict[str, Any]:
+    def _extract_using_patterns(self, user_input: str, current_info: Dict[str, Any] = None) -> Dict[str, Any]:
         """패턴 기반 정보 추출"""
         matches = {}
+        if current_info is None:
+            current_info = {}
         
         # 한국어 숫자를 아라비아 숫자로 변환한 버전도 생성
         converted_input = convert_korean_to_digits(user_input)
@@ -164,8 +166,15 @@ class InfoModificationAgent:
                         
                         # 4자리 숫자인 경우 전화번호 뒷자리로 간주
                         if re.match(r'^\d{4}$', new_digits):
-                            matches["customer_phone"] = f"010-xxxx-{new_digits}"
-                            print(f"[InfoModAgent] Phone number tail change: xxxx-{old_digits} → xxxx-{new_digits}")
+                            # 기존 전화번호에서 뒷자리만 변경
+                            current_phone = current_info.get("customer_phone", "010-1234-5678")
+                            phone_parts = current_phone.split("-")
+                            if len(phone_parts) == 3:
+                                new_phone = f"{phone_parts[0]}-{phone_parts[1]}-{new_digits}"
+                            else:
+                                new_phone = f"010-xxxx-{new_digits}"
+                            matches["customer_phone"] = new_phone
+                            print(f"[InfoModAgent] Phone number tail change: {current_phone} → {new_phone}")
                         
                         # 대조 표현을 찾았으면 결과 반환
                         if matches:
@@ -284,7 +293,6 @@ class InfoModificationAgent:
 예시:
 - "뒷번호 0987이야" → {{"target_field": "customer_phone", "new_value": "010-xxxx-0987", "confidence": 0.9, "reasoning": "뒷번호 4자리는 전화번호의 마지막 부분"}}
 - "이름은 김철수야" → {{"target_field": "customer_name", "new_value": "김철수", "confidence": 0.95, "reasoning": "명시적으로 이름을 제공"}}
-- "이이칠구야" → {{"target_field": "customer_phone", "new_value": "010-xxxx-2279", "confidence": 0.9, "reasoning": "한국어 숫자 표현으로 뒷번호 4자리 제공"}}
 - "오육칠팔이 아니라 이이오구야" → {{"target_field": "customer_phone", "new_value": "010-xxxx-2259", "confidence": 0.95, "reasoning": "기존 뒷번호 5678을 2259로 수정 요청"}}
 """
 
@@ -333,24 +341,28 @@ class InfoModificationAgent:
                 confidence = max(confidence, 0.8)
                 reasoning_parts.append(f"패턴 매칭: {field} = {value}")
         
-        # 2. LLM 분석 결과 적용
+        # 2. LLM 분석 결과 적용 (패턴 매칭이 없거나, LLM이 더 정확한 경우만)
         if "target_field" in llm_analysis and "new_value" in llm_analysis:
             field = llm_analysis["target_field"]
             value = llm_analysis["new_value"]
             
-            # 전화번호 특별 처리 - 기존 정보와 조합
-            if field == "customer_phone" and value.startswith("010-xxxx-"):
-                existing_phone = current_info.get("customer_phone", "")
-                if existing_phone and existing_phone.startswith("010-"):
-                    # 기존 번호의 중간 부분 유지
-                    parts = existing_phone.split("-")
-                    if len(parts) == 3:
-                        new_last_4 = value.split("-")[-1]
-                        value = f"{parts[0]}-{parts[1]}-{new_last_4}"
-            
-            modified_fields[field] = value
-            confidence = max(confidence, llm_analysis.get("confidence", 0.5))
-            reasoning_parts.append(f"LLM 분석: {llm_analysis.get('reasoning', 'N/A')}")
+            # 패턴 매칭 결과가 이미 있으면 패턴 매칭 우선 (특히 전화번호의 경우)
+            if field in modified_fields and (field == "customer_phone" or llm_analysis.get("confidence", 0.5) < 0.95):
+                reasoning_parts.append(f"LLM 분석 (패턴 매칭 우선): {llm_analysis.get('reasoning', 'N/A')}")
+            else:
+                # 전화번호 특별 처리 - 기존 정보와 조합
+                if field == "customer_phone" and value.startswith("010-xxxx-"):
+                    existing_phone = current_info.get("customer_phone", "")
+                    if existing_phone and existing_phone.startswith("010-"):
+                        # 기존 번호의 중간 부분 유지
+                        parts = existing_phone.split("-")
+                        if len(parts) == 3:
+                            new_last_4 = value.split("-")[-1]
+                            value = f"{parts[0]}-{parts[1]}-{new_last_4}"
+                
+                modified_fields[field] = value
+                confidence = max(confidence, llm_analysis.get("confidence", 0.5))
+                reasoning_parts.append(f"LLM 분석: {llm_analysis.get('reasoning', 'N/A')}")
         
         # 3. 컨텍스트 추론 보조 활용
         if "inferred_field" in context_matches and not modified_fields:

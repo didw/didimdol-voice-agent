@@ -48,7 +48,7 @@ async def process_scenario_logic_node(state: AgentState) -> AgentState:
     
     # 개선된 다중 정보 수집 처리
     if current_stage_info.get("collect_multiple_info"):
-        result = await process_multiple_info_collection(state, active_scenario_data, current_stage_id, current_stage_info, collected_info, user_input)
+        result = await process_multiple_info_collection(state, active_scenario_data, current_stage_id, current_stage_info, collected_info, scenario_output, user_input)
         return result
     
     # 기존 단일 정보 수집 처리
@@ -56,7 +56,7 @@ async def process_scenario_logic_node(state: AgentState) -> AgentState:
     return result
 
 
-async def process_multiple_info_collection(state: AgentState, active_scenario_data: Dict, current_stage_id: str, current_stage_info: Dict, collected_info: Dict, user_input: str) -> AgentState:
+async def process_multiple_info_collection(state: AgentState, active_scenario_data: Dict, current_stage_id: str, current_stage_info: Dict, collected_info: Dict, scenario_output: Optional[ScenarioAgentOutput], user_input: str) -> AgentState:
     """다중 정보 수집 처리 (개선된 그룹별 방식)"""
     required_fields = active_scenario_data.get("required_info_fields", [])
     
@@ -73,24 +73,8 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
     
     if current_stage_id in info_collection_stages:
         
-        # REQUEST_MODIFY 인텐트 또는 기본정보 수정 요청 처리 (Entity Agent 처리 전에 확인)
-        scenario_output = state.scenario_agent_output
-        print(f"[DEBUG] Scenario output type: {type(scenario_output)}, value: {scenario_output}")
-        if scenario_output and (isinstance(scenario_output, dict) or hasattr(scenario_output, 'get')):
-            intent = scenario_output.get("intent") if hasattr(scenario_output, 'get') else getattr(scenario_output, 'intent', None)
-            print(f"[DEBUG] Scenario output intent: '{intent}'")
-            
-            # 1. REQUEST_MODIFY 인텐트 감지 - 전용 노드로 안전하게 라우팅
-            if intent == "REQUEST_MODIFY":
-                print(f"[DEBUG] REQUEST_MODIFY intent detected in stage: {current_stage_id} - routing to correction node")
-                
-                # 무한루프 방지를 위해 전용 correction 노드로 라우팅
-                return state.merge_update({
-                    "action_plan": ["personal_info_correction"],
-                    "action_plan_struct": [{"action": "personal_info_correction", "reason": "User requested info correction"}],
-                    "router_call_count": 0,  # 라우터 카운트 초기화
-                    "is_final_turn_response": False  # 계속 처리하도록 설정
-                })
+        # REQUEST_MODIFY 인텐트는 이제 main_agent_router에서 직접 처리됨
+        # scenario_logic에서는 정보 수집에만 집중
     
         # Entity Agent를 사용한 정보 추출
         extraction_result = {"extracted_entities": {}, "collected_info": collected_info}
@@ -135,8 +119,33 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
 
         # customer_info_check 단계에서 개인정보 확인 처리
         if current_stage_id == "customer_info_check":
-            # correction_mode가 활성화된 경우 InfoModificationAgent로 라우팅
-            if state.correction_mode:
+            # 추가 수정사항 대기 중인 경우 먼저 체크
+            if state.waiting_for_additional_modifications:
+                print(f"[DEBUG] Waiting for additional modifications - user input: '{user_input}'")
+                
+                # 사용자가 추가 수정사항이 없다고 답한 경우
+                if user_input and any(word in user_input for word in ["아니", "아니요", "아니야", "없어", "없습니다", "괜찮", "됐어", "충분"]):
+                    print(f"[DEBUG] No additional modifications - waiting_for_additional_modifications will be handled in personal_info_correction")
+                    # personal_info_correction으로 라우팅하여 처리하도록 함
+                    return state.merge_update({
+                        "action_plan": ["personal_info_correction"],
+                        "action_plan_struct": [{"action": "personal_info_correction", "reason": "Handle no additional modifications"}],
+                        "router_call_count": 0,
+                        "is_final_turn_response": False
+                    })
+                elif user_input:
+                    # 추가 수정사항이 있는 경우 - personal_info_correction으로 라우팅
+                    print(f"[DEBUG] Additional modification requested - routing to personal_info_correction")
+                    return state.merge_update({
+                        "action_plan": ["personal_info_correction"],
+                        "action_plan_struct": [{"action": "personal_info_correction", "reason": "Additional modification requested"}],
+                        "router_call_count": 0,
+                        "is_final_turn_response": False
+                    })
+            
+            # correction_mode가 활성화된 경우
+            # pending_modifications가 있으면 이미 personal_info_correction에서 처리 중이므로 건너뛰기
+            elif state.correction_mode and not state.pending_modifications:
                 print(f"[DEBUG] Correction mode active - routing to personal_info_correction_node")
                 print(f"[DEBUG] Current collected_info: {collected_info}")
                 print(f"[DEBUG] Pending modifications: {state.pending_modifications}")
@@ -150,7 +159,8 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                 })
             
             # 자연스러운 정보 수정 감지 (correction_mode가 아닌 상태에서도)
-            elif not state.correction_mode and _is_info_modification_request(user_input, collected_info):
+            # pending_modifications가 있으면 이미 처리 중이므로 수정 요청으로 감지하지 않음
+            elif not state.correction_mode and not state.pending_modifications and _is_info_modification_request(user_input, collected_info):
                 print(f"[DEBUG] Natural modification detected in customer_info_check: '{user_input}' - activating correction mode")
                 
                 return state.merge_update({

@@ -86,6 +86,8 @@ class AgentState(BaseModel):
     correction_mode: bool = False
     modification_reasoning: Optional[str] = None
     pending_modifications: Optional[Dict[str, Any]] = None
+    original_values_before_modification: Optional[Dict[str, Any]] = None  # 수정 전 원본 값 저장
+    waiting_for_additional_modifications: Optional[bool] = None  # 추가 수정사항 대기 중인지 여부
     
     # --- Scenario Continuation Management ---
     scenario_ready_for_continuation: Optional[bool] = None
@@ -126,10 +128,26 @@ class AgentState(BaseModel):
     
     def merge_update(self, updates: Dict[str, Any]) -> "AgentState":
         """Merge updates and return new instance"""
-        current_data = self.model_dump()
-        current_data.update(updates)
+        if 'collected_product_info' in updates:
+            print(f"[AgentState.merge_update] Updating collected_product_info: {updates['collected_product_info']}")
+            print(f"[AgentState.merge_update] Current collected_product_info BEFORE update: {self.collected_product_info}")
+        
+        # Deep copy를 사용하여 중첩된 dict도 제대로 복사
+        from copy import deepcopy
+        current_data = deepcopy(self.model_dump())
+        
+        # Updates 적용
+        for key, value in updates.items():
+            current_data[key] = value
+        
         current_data['updated_at'] = datetime.now()
-        return AgentState(**current_data)
+        new_state = AgentState(**current_data)
+        
+        if 'collected_product_info' in updates:
+            print(f"[AgentState.merge_update] After update, new state has collected_product_info: {new_state.collected_product_info}")
+            print(f"[AgentState.merge_update] Verification - are they equal? {new_state.collected_product_info == updates['collected_product_info']}")
+        
+        return new_state
     
     # Dict-like interface for backward compatibility
     def get(self, key: str, default: Any = None) -> Any:
