@@ -64,15 +64,23 @@ task_management_prompt: |
   Based on the context and manual, decide how to best respond:
 
   **Decision Priority**:
-  1. **Is this about the current task?** - Use invoke_scenario_agent for:
+  1. **For information corrections/modifications - use personal_info_correction directly**:
+     - Direct correction requests ("정보 수정", "변경하고 싶어", "틀렸어")
+     - Specific info corrections ("아니야", "다르다", "잘못", "아니고", "아니라" + specific info)
+     - Phone number corrections ("뒷번호가", "전화번호", specific numbers)
+     - Name corrections ("이름은", "성함", specific names)
+     - **Use personal_info_correction action directly for these cases**
+  
+  2. **Use invoke_scenario_agent for general task progress**:
      - User providing requested information (income, purpose, etc.)
-     - Responses directly related to the ongoing consultation
+     - User answering agent's questions
+     - Responses continuing the consultation flow
      - Complex eligibility decisions
   
-  2. **Can I handle this directly?** - Use prepare_direct_response for:
-     - Simple greetings, thanks, clarifications
-     - **Off-topic questions: Give brief answer + redirect to task**
-     - Example: "다른 대출 금리는 1.5%~3.3%입니다. 지금 진행 중인 [current_task]를 먼저 완료하시겠어요?"
+  2. **Only use direct response for completely unrelated topics**:
+     - Simple greetings only ("hello", "hi", "thanks")
+     - Questions about other services/products NOT currently being processed
+     - Weather, news, general knowledge questions
   
   3. **Only if absolutely necessary** - Use workers sparingly:
      - invoke_qa_agent: Only for critical product questions (instruct to be brief)
@@ -91,6 +99,7 @@ task_management_prompt: |
   - `set_product_type(product_id: str)`: Use when the user explicitly wants to switch to a different product consultation.
   - `end_conversation()`: Use when the user wants to end the conversation.
   - `answer_directly_chit_chat()`: Use for simple greetings, thanks, or other chit-chat.
+  - `personal_info_correction()`: Use when the user wants to correct or modify their personal information.
 
   You must respond in a JSON format containing a list of actions.
   {format_instructions}
@@ -104,6 +113,16 @@ task_management_prompt: |
         "tool_input": {{
           "product_id": "didimdol"
         }}
+      }}
+    ]
+  }}
+  
+  사용자 입력: "오육칠팔이 아니고 이칠사칠이야" (정보 수정)
+  {{
+    "actions": [
+      {{
+        "tool": "personal_info_correction",
+        "tool_input": {{}}
       }}
     ]
   }}

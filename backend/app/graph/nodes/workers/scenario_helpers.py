@@ -376,17 +376,27 @@ def replace_template_variables(template: str, collected_info: Dict) -> str:
                 display_value = str(value)
             result = result.replace(placeholder, display_value)
     
-    # 남은 플레이스홀더 처리
-    # 조건부 필드 제거 (전체 줄 제거)
-    lines = result.split('\n')
-    filtered_lines = []
-    for line in lines:
-        if '%{' in line and '}%' in line:
-            # 플레이스홀더가 있는 줄은 제외
-            continue
-        filtered_lines.append(line)
+    # 특별한 경우 처리 - 체크카드 신청 안 함
+    if collected_info.get("use_check_card") == False:
+        # 체크카드 관련 항목들 제거
+        check_card_fields = ["card_type", "card_receive_method", "postpaid_transport", "card_usage_alert"]
+        for field in check_card_fields:
+            placeholder = f"%{{{field}}}%"
+            result = result.replace(placeholder, "해당없음")
     
-    result = '\n'.join(filtered_lines)
+    # 인터넷뱅킹 신청 안 함
+    if collected_info.get("use_internet_banking") == False:
+        # 인터넷뱅킹 관련 항목들 제거
+        ib_fields = ["security_medium", "transfer_limit_per_time", "transfer_limit_per_day", "alert", "additional_withdrawal_account"]
+        for field in ib_fields:
+            placeholder = f"%{{{field}}}%"
+            result = result.replace(placeholder, "해당없음")
+    
+    # 남은 플레이스홀더 처리 - 기본값으로 대체
+    remaining_placeholders = re.findall(r'%\{([^}]+)\}%', result)
+    for placeholder_key in remaining_placeholders:
+        placeholder = f"%{{{placeholder_key}}}%"
+        result = result.replace(placeholder, "미입력")
     
     # 빈 줄 정리
     result = re.sub(r'\n\s*\n\s*\n', '\n\n', result)

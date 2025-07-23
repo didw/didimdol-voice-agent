@@ -1,11 +1,19 @@
 {
   "scenario_name": "신한은행 입출금통장 신규 상담",
-  "initial_stage_id": "greeting",
+  "initial_stage_id": "limit_account_guide",
   "system_prompt": "당신은 신한은행의 친절하고 전문적인 입출금통장 신규 상담원입니다. 사용자의 질문에 명확하고 이해하기 쉽게 답변하며, 필요한 정보를 단계별로 안내해주세요.",
   "fallback_message": "죄송합니다, 고객님의 말씀을 정확히 이해하지 못했습니다. 다시 한번 말씀해주시겠어요?",
   "end_conversation_message": "네, 알겠습니다. 상담을 종료합니다. 이용해주셔서 감사합니다. 언제든지 다시 찾아주세요.",
   "end_scenario_message": "고객님, 입출금통장 신규 상담이 완료되었습니다. 안내된 내용에 따라 추가적인 가입 절차를 진행해주시기 바랍니다.",
   "required_info_fields": [
+    {
+      "key": "limit_account_agreement",
+      "display_name": "한도계좌 개설 동의",
+      "required": true,
+      "type": "boolean",
+      "description": "한도계좌로 입출금통장 개설 동의 여부",
+      "extraction_prompt": "고객이 한도계좌 개설에 대해 '네', '동의합니다', '진행해주세요', '좋아요' 등을 말하면 true로 추출하세요. '아니요', '싫어요', '취소할게요' 등을 말하면 false로 추출하세요."
+    },
     {
       "key": "customer_name",
       "display_name": "고객명",
@@ -240,9 +248,35 @@
     }
   ],
   "stages": {
-    "greeting": {
-      "id": "greeting",
-      "prompt": "안녕하세요, 신한은행 입출금통장 신규 서비스입니다. 한도제한계좌로 개설되며, 한도 해제는 영업점 방문 또는 모바일앱으로 가능합니다. \n\n현재 등록된 고객님 정보는 다음과 같습니다:\n- 성함: 홍길동\n- 연락처: 010-1234-5678\n\n이 정보가 맞으신가요?",
+    "limit_account_guide": {
+      "id": "limit_account_guide",
+      "prompt": "입출금계좌 가입을 도와드릴게요. 통장은 한도계좌로 먼저 개설되며, 서류 지참 시 일반 계좌로 전환 가능합니다. 한도계좌로 개설 진행해 드릴까요?",
+      "is_question": true,
+      "input_type": "yes_no",
+      "expected_info_key": "limit_account_agreement",
+      "transitions": [
+        {
+          "next_stage_id": "customer_info_check",
+          "condition_description": "한도계좌 개설에 동의한 경우",
+          "example_phrases": ["네", "좋아요", "진행해주세요", "동의합니다"]
+        },
+        {
+          "next_stage_id": "limit_account_decline",
+          "condition_description": "한도계좌 개설을 원하지 않는 경우",
+          "example_phrases": ["아니요", "싫어요", "취소할게요", "안할게요"]
+        }
+      ],
+      "default_next_stage_id": "customer_info_check"
+    },
+    "limit_account_decline": {
+      "id": "limit_account_decline",
+      "prompt": "네, 알겠습니다. 입출금통장 개설을 취소하겠습니다. 다른 도움이 필요하시면 언제든 말씀해 주세요.",
+      "is_question": false,
+      "default_next_stage_id": "END_SCENARIO"
+    },
+    "customer_info_check": {
+      "id": "customer_info_check",
+      "prompt": "감사합니다. 그럼 한도계좌로 입출금통장 개설 도와드릴게요. 제가 가지고 있는 정보는 다음과 같습니다.\n- 성함: 홍길동\n- 연락처: 010-1234-5678\n\n이 내용이 모두 맞으신가요?",
       "is_question": true,
       "input_type": "yes_no",
       "expected_info_key": "confirm_personal_info",
@@ -260,7 +294,7 @@
           "example_phrases": ["아니요", "틀려요", "수정할게요", "다릅니다"]
         }
       ],
-      "default_next_stage_id": "greeting"
+      "default_next_stage_id": "customer_info_check"
     },
     "info_correction_end": {
       "id": "info_correction_end",
@@ -270,7 +304,7 @@
     },
     "ask_lifelong_account": {
       "id": "ask_lifelong_account",
-      "prompt": "평생계좌번호로 등록하시겠어요? 휴대폰번호 등 기억하기 쉬운 번호로 계좌번호를 설정할 수 있습니다.",
+      "prompt": "다음으로, 통장 개설 시 평생 계좌 등록여부를 선택하실 수 있습니다. 평생계좌로 등록하시겠어요?",
       "is_question": true,
       "input_type": "yes_no",
       "expected_info_key": "use_lifelong_account",
@@ -279,7 +313,7 @@
     },
     "ask_internet_banking": {
       "id": "ask_internet_banking",
-      "prompt": "인터넷뱅킹을 가입하시겠어요?",
+      "prompt": "쏠이나 인터넷에서도 개설하시는 통장 사용할 수 있도록 도와드릴까요?",
       "is_question": true,
       "input_type": "yes_no",
       "expected_info_key": "use_internet_banking",

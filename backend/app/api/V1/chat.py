@@ -78,6 +78,7 @@ async def initialize_session(websocket: WebSocket) -> Optional[str]:
         "tts_cancelled": False,
         "router_call_count": 0,
         "correction_mode": False,
+        "pending_modifications": None,
     }
     
     print(f"New session initialized: {session_id}")
@@ -318,6 +319,8 @@ async def process_input_through_agent(
         })
         return
     
+    print(f"[{session_id}] Current SESSION_STATES collected_product_info: {current_state.get('collected_product_info', {})}")
+    
     # TTS 취소 플래그 초기화
     SESSION_STATES[session_id]['tts_cancelled'] = False
     
@@ -328,7 +331,7 @@ async def process_input_through_agent(
     
     full_ai_response_text = ""
     previous_state = {
-        "collected_info": current_state.get("collected_product_info", {}).copy(),
+        "collected_product_info": current_state.get("collected_product_info", {}).copy(),
         "scenario_data": current_state.get("active_scenario_data"),
         "product_type": product_type
     }
@@ -343,9 +346,26 @@ async def process_input_through_agent(
             )
             
             if final_data:
-                SESSION_STATES[session_id] = cast(AgentState, final_data)
+                print(f"[{session_id}] Received final_data with collected_product_info: {final_data.get('collected_product_info', {})}")
+                
+                # final_data가 dict인지 확인하고 기존 SESSION_STATES 업데이트
+                if session_id in SESSION_STATES:
+                    # 기존 상태를 유지하면서 새로운 데이터로 업데이트
+                    existing_state = SESSION_STATES[session_id]
+                    if isinstance(existing_state, dict):
+                        existing_state.update(final_data)
+                        SESSION_STATES[session_id] = existing_state
+                    else:
+                        # AgentState 인스턴스인 경우
+                        for key, value in final_data.items():
+                            existing_state[key] = value
+                        SESSION_STATES[session_id] = existing_state
+                else:
+                    SESSION_STATES[session_id] = cast(AgentState, final_data)
+                
                 current_state = SESSION_STATES[session_id]
-                print(f"[{session_id}] State updated")
+                print(f"[{session_id}] SESSION_STATES now has collected_product_info: {SESSION_STATES[session_id].get('collected_product_info', {})}")
+                print(f"[{session_id}] State updated with collected_product_info: {current_state.get('collected_product_info', {})}")
                 
                 # 슬롯 필링 업데이트
                 await handle_slot_filling_update(

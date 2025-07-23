@@ -407,8 +407,6 @@ async def send_slot_filling_update(
         
         await websocket.send_json(slot_filling_data)
         print(f"[{session_id}] Slot filling update sent: {slot_filling_data['completionRate']:.1f}% complete")
-        print(f"[{session_id}] Collected info in update: {collected_info}")
-        print(f"[{session_id}] Required fields in update: {[f['key'] for f in required_fields]}")
         
         # DEBUG: 디버깅용 상세 로그
         print(f"[{session_id}] ===== SLOT FILLING DEBUG =====")
