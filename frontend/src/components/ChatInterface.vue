@@ -5,6 +5,7 @@ import { useSlotFillingStore } from '@/stores/slotFillingStore'
 import { storeToRefs } from 'pinia' // storeToRefs can be useful if not using computed for everything
 import SlotFillingPanel from './SlotFillingPanel.vue'
 import SlotFillingDebug from './SlotFillingDebug.vue'
+import StageResponse from './StageResponse.vue'
 
 // Props for layout control
 interface Props {
@@ -323,15 +324,22 @@ watch(userInputText, (newValue) => {
         :key="message.id"
         :class="['message', message.sender, message.isInterimStt ? 'interim-stt-finalized' : '']"
       >
-        <p>
-          <strong>{{ message.sender === 'user' ? 'You' : 'AI' }}:</strong>
-          {{ message.text }}
-          <span
-            v-if="message.isStreaming && message.sender === 'ai'"
-            class="streaming-cursor"
-          ></span>
-        </p>
-        <span class="timestamp">{{ new Date(message.timestamp).toLocaleTimeString() }}</span>
+        <!-- Stage Response 메시지 처리 -->
+        <div v-if="message.stageResponse">
+          <StageResponse :response-data="message.stageResponse" />
+          <span class="timestamp">{{ new Date(message.timestamp).toLocaleTimeString() }}</span>
+        </div>
+        <!-- 일반 텍스트 메시지 처리 (빈 메시지는 제외) -->
+        <div v-else-if="message.text && message.text.trim()">
+          <p>
+            <strong>{{ message.sender === 'user' ? 'You' : 'AI' }}:</strong> {{ message.text }}
+            <span
+              v-if="message.isStreaming && message.sender === 'ai'"
+              class="streaming-cursor"
+            ></span>
+          </p>
+          <span class="timestamp">{{ new Date(message.timestamp).toLocaleTimeString() }}</span>
+        </div>
       </div>
       <div v-if="interimStt && isVoiceModeActive" class="message user interim-stt">
         <p>

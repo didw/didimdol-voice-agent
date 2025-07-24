@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import { v4 as uuidv4 } from "uuid";
 import { useSlotFillingStore } from "./slotFillingStore";
 import type { SlotFillingUpdate } from "@/types/slotFilling";
+import type { StageResponseMessage } from "@/types/stageResponse";
 
 interface Message {
   id: string;
@@ -11,6 +12,7 @@ interface Message {
   timestamp: Date;
   isStreaming?: boolean;
   isInterimStt?: boolean;
+  stageResponse?: StageResponseMessage;
 }
 
 interface AudioSegment {
@@ -24,6 +26,7 @@ interface ChatState {
   messages: Message[];
   isProcessingLLM: boolean;
   isSynthesizingTTS: boolean;
+  currentStageResponse: StageResponseMessage | null;
 
   ttsAudioSegmentQueue: AudioSegment[];
   _incomingTTSChunksForSentence: string[];
@@ -65,6 +68,7 @@ export const useChatStore = defineStore("chat", {
     messages: [],
     isProcessingLLM: false,
     isSynthesizingTTS: false,
+    currentStageResponse: null,
 
     ttsAudioSegmentQueue: [],
     _incomingTTSChunksForSentence: [],
@@ -267,6 +271,31 @@ export const useChatStore = defineStore("chat", {
               break;
             case "warning":
               this.addMessage("ai", `경고: ${data.message}`);
+              break;
+            case "stage_response":
+              // Stage response를 현재 상태에 저장하고 메시지로도 추가
+              this.currentStageResponse = {
+                type: 'stage_response',
+                stageId: data.stageId,
+                responseType: data.responseType,
+                prompt: data.prompt,
+                choices: data.choices,
+                skippable: data.skippable || false,
+                modifiableFields: data.modifiableFields
+              };
+              
+              // AI 메시지로 추가 (StageResponse 컴포넌트가 렌더링하도록)
+              this.messages.push({
+                id: uuidv4(),
+                sender: 'ai',
+                text: '', // 텍스트는 비워두고 stageResponse가 렌더링하도록
+                timestamp: new Date(),
+                isStreaming: false,
+                stageResponse: this.currentStageResponse
+              });
+              
+              // LLM 처리 완료 상태로 설정
+              this.isProcessingLLM = false;
               break;
             default:
               console.warn("Unknown WebSocket message type:", data.type);
@@ -802,6 +831,65 @@ export const useChatStore = defineStore("chat", {
         lastMessage.isStreaming = false;
       }
     },
+    
+    // Stage Response 관련 메서드들
+    sendUserChoice(stageId: string, selectedChoice: string) {
+      if (this.webSocket && this.webSocket.readyState === WebSocket.OPEN) {
+        this.webSocket.send(
+          JSON.stringify({
+            type: "user_choice_selection",
+            stageId: stageId,
+            selectedChoice: selectedChoice,
+          })
+        );
+        // Add user message to show the selection
+        this.addMessage("user", selectedChoice);
+        this.isProcessingLLM = true;
+      }
+    },
+    
+    sendBooleanSelections(stageId: string, selections: Record<string, boolean>) {
+      if (this.webSocket && this.webSocket.readyState === WebSocket.OPEN) {
+        this.webSocket.send(
+          JSON.stringify({
+            type: "user_boolean_selection",
+            stageId: stageId,
+            booleanSelections: selections,
+          })
+        );
+        // 키를 한글로 변환하는 매핑
+        const keyTranslations: Record<string, string> = {
+          important_transaction_alert: "중요거래 알림",
+          withdrawal_alert: "출금내역 알림", 
+          overseas_ip_restriction: "해외IP 제한"
+        };
+        
+        // Format selections for display with Korean labels
+        const displayText = Object.entries(selections)
+          .map(([key, value]) => {
+            const koreanLabel = keyTranslations[key] || key;
+            return `${koreanLabel}: ${value ? "신청" : "미신청"}`;
+          })
+          .join(", ");
+        this.addMessage("user", displayText);
+        this.isProcessingLLM = true;
+      }
+    },
+    
+    sendModificationRequest(field: string, newValue: any) {
+      if (this.webSocket && this.webSocket.readyState === WebSocket.OPEN) {
+        this.webSocket.send(
+          JSON.stringify({
+            type: "user_modification_request",
+            field: field,
+            newValue: newValue,
+          })
+        );
+        this.addMessage("user", `${field} 수정: ${newValue}`);
+        this.isProcessingLLM = true;
+      }
+    },
+    
     disconnectWebSocket() {
       if (this.isVoiceModeActive) {
         this.deactivateVoiceRecognition();
@@ -836,5 +924,6 @@ export const useChatStore = defineStore("chat", {
     getIsRecording: (state): boolean => state.isRecording,
     getIsEPDDetectedByServer: (state): boolean => state.isEPDDetectedByServer,
     getIsSynthesizingTTS: (state) => state.isSynthesizingTTS,
+    getCurrentStageResponse: (state): StageResponseMessage | null => state.currentStageResponse,
   },
 });
