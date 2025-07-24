@@ -25,6 +25,130 @@ from .scenario_helpers import (
     generate_check_card_prompt,
     replace_template_variables
 )
+from ...validators import FIELD_VALIDATORS, get_validator_for_field
+
+
+async def process_partial_response(
+    stage_id: str,
+    user_input: str,
+    required_fields: List[Dict[str, Any]],
+    collected_info: Dict[str, Any],
+    field_validators: Dict[str, Any] = None
+) -> Dict[str, Any]:
+    """부분 응답 처리 및 유효성 검증 - TRD 4.4 구현"""
+    
+    if field_validators is None:
+        field_validators = FIELD_VALIDATORS
+    
+    # 1. Entity Agent를 통한 개별 필드 추출
+    extracted_entities = {}
+    if user_input:
+        try:
+            extraction_result = await entity_agent.extract_entities(user_input, required_fields)
+            extracted_entities = extraction_result.get("extracted_entities", {})
+        except Exception as e:
+            print(f"[DEBUG] Entity extraction error in partial response: {e}")
+    
+    # 2. 유효성 검증
+    validation_results = {}
+    for field in required_fields:
+        field_key = field['key']
+        value = extracted_entities.get(field_key) or collected_info.get(field_key)
+        
+        if value is not None:
+            validator = get_validator_for_field(field_key, field)
+            if validator:
+                is_valid, error_message = validator.validate(value)
+                validation_results[field_key] = {
+                    "is_valid": is_valid,
+                    "error_message": error_message,
+                    "value": value
+                }
+            else:
+                # 검증기가 없으면 유효한 것으로 간주
+                validation_results[field_key] = {
+                    "is_valid": True,
+                    "error_message": None,
+                    "value": value
+                }
+    
+    # 3. 유효한 값만 collected_info에 저장
+    valid_fields = []
+    invalid_fields = []
+    for field_key, result in validation_results.items():
+        if result["is_valid"]:
+            collected_info[field_key] = result["value"]
+            valid_fields.append(field_key)
+        else:
+            invalid_fields.append({
+                "field": field_key,
+                "error": result["error_message"]
+            })
+    
+    # 4. 미수집 필드 확인
+    missing_fields = [
+        field for field in required_fields 
+        if field['key'] not in collected_info
+    ]
+    
+    # 5. 재질문 생성
+    response_text = None
+    if invalid_fields or missing_fields:
+        response_text = generate_re_prompt(
+            valid_fields, 
+            invalid_fields, 
+            missing_fields,
+            required_fields
+        )
+    
+    return {
+        "collected_info": collected_info,
+        "valid_fields": valid_fields,
+        "invalid_fields": invalid_fields,
+        "missing_fields": missing_fields,
+        "response_text": response_text,
+        "is_complete": not (invalid_fields or missing_fields)
+    }
+
+
+def generate_re_prompt(
+    valid_fields: List[str],
+    invalid_fields: List[Dict[str, str]],
+    missing_fields: List[Dict[str, Any]],
+    all_fields: List[Dict[str, Any]]
+) -> str:
+    """재질문 프롬프트 생성"""
+    
+    response_parts = []
+    
+    # 필드 정보를 딕셔너리로 변환
+    field_info_map = {field['key']: field for field in all_fields}
+    
+    # 유효한 필드에 대한 확인 메시지
+    if valid_fields:
+        field_names = []
+        for field_key in valid_fields:
+            field_info = field_info_map.get(field_key, {})
+            display_name = field_info.get('display_name', field_key)
+            field_names.append(display_name)
+        
+        response_parts.append(f"{', '.join(field_names)}은(는) 확인했습니다.")
+    
+    # 유효하지 않은 필드에 대한 재질문
+    if invalid_fields:
+        for field_info in invalid_fields:
+            response_parts.append(field_info["error"])
+    
+    # 누락된 필드에 대한 질문
+    if missing_fields:
+        field_names = []
+        for field in missing_fields:
+            display_name = field.get('display_name', field['key'])
+            field_names.append(display_name)
+        
+        response_parts.append(f"{', '.join(field_names)}도 함께 말씀해주세요.")
+    
+    return " ".join(response_parts)
 
 
 async def process_scenario_logic_node(state: AgentState) -> AgentState:
@@ -68,30 +192,41 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
         "greeting", "info_collection_guidance", "process_collected_info", 
         "ask_missing_info_group1", "ask_missing_info_group2", "ask_missing_info_group3", 
         "eligibility_assessment", "collect_internet_banking_info", "ask_remaining_ib_info",
-        "collect_check_card_info", "ask_remaining_card_info"
+        "collect_check_card_info", "ask_remaining_card_info", "ask_notification_settings",
+        "ask_transfer_limit"
     ]
     
     if current_stage_id in info_collection_stages:
-        
         # REQUEST_MODIFY 인텐트는 이제 main_agent_router에서 직접 처리됨
         # scenario_logic에서는 정보 수집에만 집중
-    
+        
         # Entity Agent를 사용한 정보 추출
         extraction_result = {"extracted_entities": {}, "collected_info": collected_info}
         
         # ScenarioAgent가 이미 entities를 추출한 경우 Entity Agent 호출 생략
         if scenario_output and hasattr(scenario_output, 'entities') and scenario_output.entities:
             print(f"[DEBUG] Using entities from ScenarioAgent: {scenario_output.entities}")
+            
+            # entities가 "not specified" 키를 가지고 있고 그 값이 dict인 경우 평탄화
+            entities_to_merge = scenario_output.entities.copy()
+            if "not specified" in entities_to_merge and isinstance(entities_to_merge["not specified"], dict):
+                not_specified_data = entities_to_merge.pop("not specified")
+                entities_to_merge.update(not_specified_data)
+                print(f"[DEBUG] Flattened entities from 'not specified': {not_specified_data}")
+            
             extraction_result = {
-                "extracted_entities": scenario_output.entities,
-                "collected_info": {**collected_info, **scenario_output.entities},
-                "valid_entities": scenario_output.entities,
+                "extracted_entities": entities_to_merge,
+                "collected_info": {**collected_info, **entities_to_merge},
+                "valid_entities": entities_to_merge,
                 "invalid_entities": {},
                 "missing_fields": [],
                 "extraction_confidence": 0.9,
                 "is_complete": False
             }
             collected_info = extraction_result["collected_info"]
+            
+            # 필드명 매핑 적용
+            _handle_field_name_mapping(collected_info)
         elif user_input and len(user_input.strip()) > 0:
             try:
                 # Entity Agent로 정보 추출 (ScenarioAgent가 추출하지 못한 경우에만)
@@ -113,6 +248,10 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             print(f"[DEBUG] Entity Agent extraction result - extracted_entities: {extraction_result['extracted_entities']}")
             print(f"[DEBUG] Entity Agent extraction result - valid_entities: {extraction_result.get('valid_entities', {})}")
             print(f"[DEBUG] Entity Agent extraction result - invalid_entities: {extraction_result.get('invalid_entities', {})}")
+            
+            # 필드명 매핑 적용 (Entity Agent 결과에도)
+            _handle_field_name_mapping(collected_info)
+            
             print(f"[DEBUG] Final updated collected_info: {collected_info}")
             if extraction_result['extracted_entities']:
                 log_node_execution("Entity_Extract", output_info=f"entities={list(extraction_result['extracted_entities'].keys())}")
@@ -406,6 +545,216 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                 else:
                     response_text = generate_check_card_prompt(missing_cc_fields)
             
+        elif current_stage_id == "ask_transfer_limit":
+            # 이체한도 설정 단계 처리 - 개선된 버전
+            print(f"[DEBUG] Transfer Limit Stage - Processing: '{user_input}'")
+            print(f"[DEBUG] Before processing - collected_info: {collected_info}")
+            
+            # ScenarioAgent의 entities를 먼저 병합 및 필드명 매핑
+            if scenario_output and hasattr(scenario_output, 'entities') and scenario_output.entities:
+                print(f"[DEBUG] Found entities from scenario_output: {scenario_output.entities}")
+                # "not specified" 중첩 처리
+                entities_to_merge = scenario_output.entities.copy()
+                if "not specified" in entities_to_merge and isinstance(entities_to_merge["not specified"], dict):
+                    not_specified_data = entities_to_merge.pop("not specified")
+                    entities_to_merge.update(not_specified_data)
+                    print(f"[DEBUG] Flattened entities from 'not specified': {not_specified_data}")
+                
+                # collected_info에 병합 및 필드명 매핑
+                for field_key, value in entities_to_merge.items():
+                    if value is not None:
+                        # transfer_limits 객체인 경우 특별 처리
+                        if field_key == "transfer_limits" and isinstance(value, dict):
+                            if "one_time" in value:
+                                collected_info["transfer_limit_per_time"] = value["one_time"]
+                                print(f"[DEBUG] Extracted transfer_limit_per_time from transfer_limits: {value['one_time']}")
+                            if "daily" in value:
+                                collected_info["transfer_limit_per_day"] = value["daily"]
+                                print(f"[DEBUG] Extracted transfer_limit_per_day from transfer_limits: {value['daily']}")
+                        elif field_key in ["transfer_limit_per_time", "transfer_limit_per_day"]:
+                            collected_info[field_key] = value
+                            print(f"[DEBUG] Merged from scenario_output - {field_key}: {value}")
+            
+            # collected_info의 "not specified" 객체 처리 및 필드명 매핑
+            _handle_field_name_mapping(collected_info)
+            
+            # 필요한 필드 정의
+            transfer_limit_fields = [
+                {"key": "transfer_limit_per_time", "display_name": "1회 이체한도", "type": "number"},
+                {"key": "transfer_limit_per_day", "display_name": "1일 이체한도", "type": "number"}
+            ]
+            
+            # Entity Agent를 사용한 추출 (scenario_output에 entities가 없거나 부족한 경우)
+            if user_input and (not collected_info.get("transfer_limit_per_time") or not collected_info.get("transfer_limit_per_day")):
+                try:
+                    extraction_result = await entity_agent.extract_entities(user_input, transfer_limit_fields)
+                    extracted_entities = extraction_result.get("extracted_entities", {})
+                    
+                    # 추출된 엔티티를 collected_info에 병합
+                    for field_key, value in extracted_entities.items():
+                        if value is not None and field_key not in collected_info:
+                            collected_info[field_key] = value
+                            print(f"[DEBUG] Extracted via Entity Agent - {field_key}: {value}")
+                            
+                except Exception as e:
+                    print(f"[DEBUG] Entity extraction error: {e}")
+            
+            # 최종 필드명 매핑 재실행 (Entity Agent가 추출한 데이터도 처리)
+            _handle_field_name_mapping(collected_info)
+            
+            per_time_value = collected_info.get("transfer_limit_per_time")
+            per_day_value = collected_info.get("transfer_limit_per_day")
+            
+            print(f"[DEBUG] Current values - per_time: {per_time_value}, per_day: {per_day_value}")
+            print(f"[DEBUG] Final collected_info after all processing: {collected_info}")
+            
+            # 유효성 검증
+            valid_fields = []
+            invalid_fields = []
+            error_messages = []
+            
+            # 1회 이체한도 검증
+            if per_time_value is not None:
+                validator = FIELD_VALIDATORS.get("transfer_limit_per_time")
+                if validator:
+                    is_valid, error_msg = validator.validate(per_time_value)
+                    if is_valid:
+                        valid_fields.append({"key": "transfer_limit_per_time", "value": per_time_value})
+                    else:
+                        invalid_fields.append("transfer_limit_per_time")
+                        error_messages.append(error_msg)
+                        # 유효하지 않은 값은 제거
+                        collected_info.pop("transfer_limit_per_time", None)
+            
+            # 1일 이체한도 검증
+            if per_day_value is not None:
+                validator = FIELD_VALIDATORS.get("transfer_limit_per_day")
+                if validator:
+                    is_valid, error_msg = validator.validate(per_day_value)
+                    if is_valid:
+                        valid_fields.append({"key": "transfer_limit_per_day", "value": per_day_value})
+                    else:
+                        invalid_fields.append("transfer_limit_per_day")
+                        error_messages.append(error_msg)
+                        # 유효하지 않은 값은 제거
+                        collected_info.pop("transfer_limit_per_day", None)
+            
+            # 응답 생성
+            collected_messages = []
+            missing_fields = []
+            
+            # 유효한 값들에 대한 확인 메시지
+            for field in valid_fields:
+                if field["key"] == "transfer_limit_per_time":
+                    value = field["value"]
+                    # 값은 이미 만원 단위로 저장되어 있음
+                    collected_messages.append(f"1회 이체한도 {value:,}만원")
+                elif field["key"] == "transfer_limit_per_day":
+                    value = field["value"]
+                    # 값은 이미 만원 단위로 저장되어 있음
+                    collected_messages.append(f"1일 이체한도 {value:,}만원")
+            
+            # 누락된 필드 확인
+            if "transfer_limit_per_time" not in [f["key"] for f in valid_fields]:
+                missing_fields.append("1회 이체한도")
+            if "transfer_limit_per_day" not in [f["key"] for f in valid_fields]:
+                missing_fields.append("1일 이체한도")
+            
+            # 모든 정보가 수집되고 유효한 경우
+            if not missing_fields and not invalid_fields:
+                next_stage_id = current_stage_info.get("default_next_stage_id", "ask_notification_settings")
+                # 다음 스테이지가 boolean 타입이면 텍스트 응답 없이 stage_response_data만 생성
+                next_stage_info = active_scenario_data.get("stages", {}).get(next_stage_id, {})
+                if next_stage_info.get("response_type") == "boolean":
+                    response_text = f"{', '.join(collected_messages)}으로 설정되었습니다."
+                else:
+                    next_stage_prompt = next_stage_info.get("prompt", "")
+                    response_text = f"{', '.join(collected_messages)}으로 설정되었습니다. {next_stage_prompt}"
+            else:
+                # 부분 응답 처리
+                response_parts = []
+                
+                # 유효한 값에 대한 확인
+                if collected_messages:
+                    response_parts.append(f"{', '.join(collected_messages)}으로 설정했습니다.")
+                
+                # 유효성 검증 실패 메시지
+                if error_messages:
+                    response_parts.extend(error_messages)
+                
+                # 누락된 정보 요청
+                if missing_fields:
+                    response_parts.append(f"{', '.join(missing_fields)}도 말씀해주세요.")
+                
+                next_stage_id = "ask_transfer_limit"  # 같은 스테이지 유지
+                response_text = " ".join(response_parts)
+            
+        elif current_stage_id == "ask_notification_settings":
+            # 알림 설정 단계 처리 - Boolean 타입 단계로 올바르게 처리
+            print(f"[DEBUG] === NOTIFICATION SETTINGS STAGE (BOOLEAN TYPE) ===")
+            print(f"[DEBUG] User input: '{user_input}'")
+            print(f"[DEBUG] Current collected_info: {collected_info}")
+            
+            # 사용자 입력이 있으면 entities 처리 후 다음 단계로 진행
+            if user_input:
+                print(f"[DEBUG] Processing user input for notification settings")
+                
+                # entities 처리 및 boolean 변환
+                if scenario_output and scenario_output.entities:
+                    entities = scenario_output.entities
+                    print(f"[DEBUG] Processing entities: {entities}")
+                    
+                    # boolean 값들을 collected_info에 저장
+                    boolean_fields = ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
+                    for field in boolean_fields:
+                        if field in entities:
+                            value = entities[field]
+                            if value in ["신청", "네", "예", "좋아요", "동의"]:
+                                collected_info[field] = True
+                            elif value in ["미신청", "아니요", "아니", "싫어요", "거부"]:
+                                collected_info[field] = False
+                            print(f"[DEBUG] Set {field} = {collected_info.get(field)}")
+                
+                # 다음 단계로 진행
+                next_stage_id = current_stage_info.get("default_next_stage_id", "ask_check_card")
+                print(f"[DEBUG] Moving to next stage: {next_stage_id}")
+                
+                # 다음 스테이지 정보 가져오기
+                next_stage_info = active_scenario_data.get("stages", {}).get(next_stage_id, {})
+                next_stage_prompt = next_stage_info.get("prompt", "")
+                
+                # 간단한 확인 메시지 + 다음 단계 프롬프트
+                response_text = f"알림 설정을 완료했습니다. {next_stage_prompt}"
+                
+                print(f"[DEBUG] Response: {response_text}")
+                print(f"[DEBUG] Updated collected_info: {collected_info}")
+                
+                return state.merge_update({
+                    "current_scenario_stage_id": next_stage_id,
+                    "collected_product_info": collected_info,
+                    "final_response_text_for_tts": response_text,
+                    "is_final_turn_response": True,
+                    "action_plan": [],
+                    "action_plan_struct": [],
+                    "router_call_count": 0
+                })
+            
+            else:
+                # 사용자 입력이 없는 경우 - boolean UI 표시를 위해 stage_response_data 생성
+                next_stage_id = current_stage_id
+                stage_response_data = generate_stage_response(current_stage_info, collected_info, active_scenario_data)
+                print(f"[DEBUG] Generated boolean stage_response_data: {stage_response_data}")
+                
+                return state.merge_update({
+                    "current_scenario_stage_id": next_stage_id,
+                    "collected_product_info": collected_info,
+                    "stage_response_data": stage_response_data,
+                    "is_final_turn_response": True,
+                    "action_plan": [],
+                    "action_plan_struct": [],
+                    "router_call_count": 0
+                })
+            
         elif current_stage_id == "eligibility_assessment":
             # 자격 검토 완료 후 서류 안내로 자동 진행
             next_stage_id = "application_documents_guidance"
@@ -432,19 +781,46 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
         if next_stage_id != current_stage_id:
             log_node_execution("Stage_Change", f"{current_stage_id} → {next_stage_id}")
         
-        return state.merge_update({
-            "current_scenario_stage_id": next_stage_id,
-            "collected_product_info": collected_info,
-            "final_response_text_for_tts": response_text,
-            "is_final_turn_response": True,
-            "action_plan": updated_plan,
-            "action_plan_struct": updated_struct,
-            "router_call_count": 0  # 라우터 카운트 초기화
-        })
-    
-    # 일반 스테이지는 기존 로직으로 처리
-    print(f"[DEBUG] Stage '{current_stage_id}' not in info_collection_stages, processing as single info collection")
-    return await process_single_info_collection(state, active_scenario_data, current_stage_id, current_stage_info, collected_info, state.get("scenario_agent_output"), user_input)
+        # 다음 스테이지의 stage_response_data 생성
+        stage_response_data = None
+        if next_stage_id and next_stage_id != current_stage_id:
+            next_stage_info = active_scenario_data.get("stages", {}).get(next_stage_id, {})
+            if "response_type" in next_stage_info:
+                stage_response_data = generate_stage_response(next_stage_info, collected_info, active_scenario_data)
+                print(f"[DEBUG] Generated stage_response_data for {next_stage_id}: {stage_response_data}")
+        
+        # 스테이지가 변경되지 않은 경우와 사용자 입력이 없는 경우에만 is_final_turn_response를 False로 설정
+        is_final_response = True
+        if next_stage_id == current_stage_id and not user_input:
+            is_final_response = False
+            print(f"[DEBUG] Same stage and no user input - setting is_final_response = False")
+        
+        # stage_response_data가 있으면 텍스트 응답 대신 사용
+        if stage_response_data:
+            return state.merge_update({
+                "current_scenario_stage_id": next_stage_id,
+                "collected_product_info": collected_info,
+                "stage_response_data": stage_response_data,
+                "is_final_turn_response": is_final_response,
+                "action_plan": updated_plan,
+                "action_plan_struct": updated_struct,
+                "router_call_count": 0  # 라우터 카운트 초기화
+            })
+        else:
+            return state.merge_update({
+                "current_scenario_stage_id": next_stage_id,
+                "collected_product_info": collected_info,
+                "final_response_text_for_tts": response_text,
+                "is_final_turn_response": is_final_response,
+                "action_plan": updated_plan,
+                "action_plan_struct": updated_struct,
+                "router_call_count": 0  # 라우터 카운트 초기화
+            })
+        
+    else:
+        # 일반 스테이지는 기존 로직으로 처리
+        print(f"[DEBUG] Stage '{current_stage_id}' not in info_collection_stages, processing as single info collection")
+        return await process_single_info_collection(state, active_scenario_data, current_stage_id, current_stage_info, collected_info, state.get("scenario_agent_output"), user_input)
 
 
 async def process_single_info_collection(state: AgentState, active_scenario_data: Dict, current_stage_id: str, current_stage_info: Dict, collected_info: Dict, scenario_output: Optional[ScenarioAgentOutput], user_input: str) -> AgentState:
@@ -558,6 +934,32 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         intent = scenario_output.get("intent", "") if scenario_output else ""
         entities = scenario_output.get("entities", {}) if scenario_output else {}
         
+        # 먼저 긍정적 확인 응답을 체크
+        is_positive_confirmation = (
+            intent == "확인_긍정" or 
+            entities.get("confirm_personal_info") == True or
+            (user_input and any(word in user_input for word in ["네", "예", "맞아", "맞습니다", "맞어요", "확인", "좋아요"]))
+        )
+        
+        # 긍정적 확인이면 바로 다음 단계로 진행
+        if is_positive_confirmation:
+            print(f"[DEBUG] customer_info_check - positive confirmation detected, moving to next stage")
+            collected_info["confirm_personal_info"] = True
+            
+            next_stage_id = "ask_lifelong_account"
+            next_stage_prompt = active_scenario_data.get("stages", {}).get("ask_lifelong_account", {}).get("prompt", "평생계좌번호로 등록하시겠어요?")
+            
+            return state.merge_update({
+                "current_scenario_stage_id": next_stage_id,
+                "collected_product_info": collected_info,
+                "final_response_text_for_tts": next_stage_prompt,
+                "is_final_turn_response": True,
+                "action_plan": [],
+                "action_plan_struct": [],
+                "correction_mode": False
+            })
+        
+        # 부정적 응답이나 수정 요청인 경우에만 correction mode 진입
         # 1. 명시적 부정 응답
         is_negative_response = (
             intent == "확인_부정" or 
@@ -572,6 +974,7 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         has_new_info = False
         if entities:
             # customer_name이나 customer_phone이 entities에 있고 기존 정보와 다른 경우
+            # confirm_personal_info는 제외 (단순 확인이므로 수정으로 인식하지 않음)
             for field in ["customer_name", "customer_phone"]:
                 if field in entities and entities[field] != collected_info.get(field):
                     has_new_info = True
@@ -601,8 +1004,53 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         # 필요한 정보가 수집되었는지 확인
         expected_info_key = current_stage_info.get("expected_info_key")
         if expected_info_key and expected_info_key not in collected_info:
-            # 필요한 정보가 아직 수집되지 않았으면 현재 스테이지 유지
-            next_stage_id = current_stage_id
+            # Boolean 타입 필드에 대한 특별 처리
+            if current_stage_info.get("input_type") == "yes_no" and user_input:
+                # 사용자 입력에서 boolean 값 직접 추출
+                user_lower = user_input.lower().strip()
+                if user_lower in ["네", "예", "좋아요", "그래요", "맞아요", "신청", "원해요", "할게요", "하겠어요"]:
+                    collected_info[expected_info_key] = True
+                    print(f"[DEBUG] Direct boolean extraction for {expected_info_key}: True from '{user_input}'")
+                elif user_lower in ["아니요", "아니에요", "안", "필요없", "괜찮", "나중에", "안할", "미신청", "싫어요", "거부"]:
+                    collected_info[expected_info_key] = False
+                    print(f"[DEBUG] Direct boolean extraction for {expected_info_key}: False from '{user_input}'")
+            
+            # Choice 타입 필드에 대한 특별 처리
+            elif current_stage_info.get("input_type") == "choice" and user_input:
+                # 선택지에서 정확한 매칭 확인
+                choices = current_stage_info.get("choices", [])
+                user_input_clean = user_input.strip()
+                
+                # 정확한 value 매칭 우선
+                for choice in choices:
+                    if choice.get("value") == user_input_clean:
+                        collected_info[expected_info_key] = user_input_clean
+                        print(f"[DEBUG] Direct choice extraction for {expected_info_key}: '{user_input_clean}'")
+                        break
+                else:
+                    # value 매칭 실패시 label 매칭 시도
+                    for choice in choices:
+                        if choice.get("label") == user_input_clean:
+                            collected_info[expected_info_key] = choice.get("value")
+                            print(f"[DEBUG] Choice extraction via label for {expected_info_key}: '{choice.get('value')}' from label '{user_input_clean}'")
+                            break
+                    else:
+                        # 부분 문자열 매칭 시도
+                        for choice in choices:
+                            if user_input_clean in choice.get("value", "") or user_input_clean in choice.get("label", ""):
+                                collected_info[expected_info_key] = choice.get("value")
+                                print(f"[DEBUG] Choice extraction via partial match for {expected_info_key}: '{choice.get('value')}' from '{user_input_clean}'")
+                                break
+            
+            # 여전히 정보가 수집되지 않았으면 현재 스테이지 유지
+            if expected_info_key not in collected_info:
+                next_stage_id = current_stage_id
+            else:
+                # 정보가 수집되었으면 다음 단계로 진행
+                if len(transitions) == 1:
+                    next_stage_id = transitions[0].get("next_stage_id", default_next)
+                else:
+                    next_stage_id = default_next
         elif len(transitions) == 1:
             # 단일 전환 경로가 있으면 자동 진행
             next_stage_id = transitions[0].get("next_stage_id", default_next)
@@ -685,8 +1133,10 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             "reasoning": "시나리오가 완료되어 상담을 종료합니다."
         })
 
-    # 다음 스테이지의 프롬프트 가져오기
+    # 다음 스테이지의 프롬프트와 response_type 가져오기
     next_stage_prompt = ""
+    stage_response_data = None
+    
     if determined_next_stage_id and not str(determined_next_stage_id).startswith("END"):
         next_stage_info = active_scenario_data.get("stages", {}).get(str(determined_next_stage_id), {})
         next_stage_prompt = next_stage_info.get("prompt", "")
@@ -694,15 +1144,116 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         # final_summary 단계인 경우 템플릿 변수 치환
         if determined_next_stage_id == "final_summary":
             next_stage_prompt = replace_template_variables(next_stage_prompt, collected_info)
+        
+        # response_type이 있는 경우 stage_response_data 생성
+        if "response_type" in next_stage_info:
+            stage_response_data = generate_stage_response(next_stage_info, collected_info, active_scenario_data)
     
-    return state.merge_update({
-        "collected_product_info": collected_info, 
-        "current_scenario_stage_id": determined_next_stage_id,
-        "final_response_text_for_tts": next_stage_prompt,
-        "is_final_turn_response": True,
-        "action_plan": updated_plan,
-        "action_plan_struct": updated_struct
-    })
+    # stage_response_data가 있으면 일반 텍스트 대신 stage_response만 사용
+    if stage_response_data:
+        update_dict = {
+            "collected_product_info": collected_info, 
+            "current_scenario_stage_id": determined_next_stage_id,
+            "stage_response_data": stage_response_data,
+            "is_final_turn_response": True,
+            "action_plan": updated_plan,
+            "action_plan_struct": updated_struct
+        }
+    else:
+        update_dict = {
+            "collected_product_info": collected_info, 
+            "current_scenario_stage_id": determined_next_stage_id,
+            "final_response_text_for_tts": next_stage_prompt,
+            "is_final_turn_response": True,
+            "action_plan": updated_plan,
+            "action_plan_struct": updated_struct
+        }
+    
+    return state.merge_update(update_dict)
+
+
+def _handle_field_name_mapping(collected_info: Dict[str, Any]) -> None:
+    """
+    필드명 매핑 처리 - 다양한 형태의 필드명을 표준화된 형태로 변환
+    """
+    print(f"[DEBUG] Field mapping - Before: {collected_info}")
+    
+    # "not specified" 객체 내의 값들을 상위 레벨로 이동
+    if "not specified" in collected_info and isinstance(collected_info["not specified"], dict):
+        not_specified_data = collected_info.pop("not specified")
+        # 기존 값이 없는 경우에만 병합
+        for key, value in not_specified_data.items():
+            if key not in collected_info:
+                collected_info[key] = value
+        print(f"[DEBUG] Flattened 'not specified' data: {not_specified_data}")
+    
+    # transfer_limits 객체 처리
+    if "transfer_limits" in collected_info and isinstance(collected_info["transfer_limits"], dict):
+        transfer_limits = collected_info["transfer_limits"]
+        # one_time/daily 필드를 transfer_limit_per_time/day로 변환
+        if "one_time" in transfer_limits and "transfer_limit_per_time" not in collected_info:
+            collected_info["transfer_limit_per_time"] = transfer_limits["one_time"]
+            print(f"[DEBUG] Mapped one_time → transfer_limit_per_time: {transfer_limits['one_time']}")
+        if "daily" in transfer_limits and "transfer_limit_per_day" not in collected_info:
+            collected_info["transfer_limit_per_day"] = transfer_limits["daily"]
+            print(f"[DEBUG] Mapped daily → transfer_limit_per_day: {transfer_limits['daily']}")
+        
+        # transfer_limits 객체 제거 (이미 변환됨)
+        collected_info.pop("transfer_limits", None)
+    
+    # 한국어 boolean 값을 boolean 타입으로 변환
+    boolean_fields = [
+        "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction",
+        "limit_account_agreement", "confirm_personal_info", "use_lifelong_account", 
+        "use_internet_banking", "use_check_card", "postpaid_transport"
+    ]
+    
+    print(f"[DEBUG] Processing boolean conversion for fields: {boolean_fields}")
+    
+    for field in boolean_fields:
+        if field in collected_info:
+            current_value = collected_info[field]
+            print(f"[DEBUG] Checking field '{field}': value='{current_value}', type={type(current_value)}")
+            
+            if isinstance(current_value, str):
+                korean_value = current_value.strip()
+                if korean_value in ["신청", "네", "예", "true", "True", "좋아요", "동의", "확인"]:
+                    collected_info[field] = True
+                    print(f"[DEBUG] Converted '{korean_value}' → True for {field}")
+                elif korean_value in ["미신청", "아니요", "아니", "false", "False", "싫어요", "거부"]:
+                    collected_info[field] = False
+                    print(f"[DEBUG] Converted '{korean_value}' → False for {field}")
+                else:
+                    print(f"[DEBUG] No conversion rule for '{korean_value}' in field {field}")
+            else:
+                print(f"[DEBUG] Field '{field}' is not a string, skipping conversion")
+    
+    # 기타 필드명 매핑
+    field_mappings = {
+        "customer_phone": "phone_number",  # customer_phone → phone_number
+        # 필요시 추가 매핑 규칙 추가
+    }
+    
+    for old_key, new_key in field_mappings.items():
+        if old_key in collected_info and new_key not in collected_info:
+            collected_info[new_key] = collected_info.pop(old_key)
+            print(f"[DEBUG] Mapped {old_key} → {new_key}: {collected_info[new_key]}")
+    
+    # 하위 정보로부터 상위 boolean 값 추론
+    # 체크카드 관련 정보가 있으면 use_check_card = True로 추론
+    check_card_fields = ["card_type", "card_receive_method", "postpaid_transport", "card_usage_alert", "statement_method"]
+    if any(field in collected_info for field in check_card_fields) and "use_check_card" not in collected_info:
+        collected_info["use_check_card"] = True
+        print(f"[DEBUG] Inferred use_check_card = True from existing card fields: {[f for f in check_card_fields if f in collected_info]}")
+    
+    # 인터넷뱅킹 관련 정보가 있으면 use_internet_banking = True로 추론
+    ib_fields = ["security_medium", "transfer_limit_per_time", "transfer_limit_per_day", 
+                 "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
+    if any(field in collected_info for field in ib_fields) and "use_internet_banking" not in collected_info:
+        collected_info["use_internet_banking"] = True
+        print(f"[DEBUG] Inferred use_internet_banking = True from existing IB fields: {[f for f in ib_fields if f in collected_info]}")
+    
+    print(f"[DEBUG] Field mapping - After: {collected_info}")
 
 
 def _is_info_modification_request(user_input: str, collected_info: Dict[str, Any]) -> bool:
@@ -809,3 +1360,74 @@ def _is_info_modification_request(user_input: str, collected_info: Dict[str, Any
                 return True
     
     return False
+
+
+def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str, Any], scenario_data: Dict = None) -> Dict[str, Any]:
+    """단계별 응답 유형에 맞는 데이터 생성"""
+    response_type = stage_info.get("response_type", "narrative")
+    prompt = stage_info.get("prompt", "")
+    
+    # display_fields가 있는 경우 처리 (bullet 타입)
+    if stage_info.get("display_fields"):
+        prompt = format_prompt_with_fields(prompt, collected_info, stage_info["display_fields"], scenario_data)
+    
+    # 템플릿 변수 치환
+    prompt = replace_template_variables(prompt, collected_info)
+    
+    response_data = {
+        "stage_id": stage_info.get("id"),
+        "response_type": response_type,
+        "prompt": prompt,
+        "skippable": stage_info.get("skippable", False)
+    }
+    
+    # 선택지가 있는 경우
+    if response_type in ["bullet", "boolean"]:
+        response_data["choices"] = stage_info.get("choices", [])
+    
+    # 수정 가능한 필드 정보
+    if stage_info.get("modifiable_fields"):
+        response_data["modifiable_fields"] = stage_info["modifiable_fields"]
+    
+    return response_data
+
+
+def format_prompt_with_fields(prompt: str, collected_info: Dict[str, Any], display_fields: List[str], scenario_data: Dict = None) -> str:
+    """프롬프트에 수집된 정보 동적 삽입 (기본값 포함)"""
+    field_display = []
+    
+    field_names = {
+        "customer_name": "성함",
+        "phone_number": "연락처", 
+        "customer_phone": "연락처",
+        "address": "집주소"
+    }
+    
+    # 기본값 매핑
+    default_values = {
+        "customer_name": "홍길동",
+        "phone_number": "010-1234-5678", 
+        "address": "서울특별시 종로구 숭인동 123"
+    }
+    
+    # 시나리오 데이터에서 기본값 가져오기
+    if scenario_data:
+        for field in scenario_data.get("required_info_fields", []):
+            if field.get("key") in display_fields and field.get("default"):
+                default_values[field["key"]] = field["default"]
+    
+    for field_key in display_fields:
+        # 수집된 정보가 있으면 사용, 없으면 기본값 사용
+        value = collected_info.get(field_key)
+        if not value and field_key in default_values:
+            value = default_values[field_key]
+        if not value:
+            value = "미입력"
+            
+        field_name = field_names.get(field_key, field_key)
+        field_display.append(f"- {field_name}: {value}")
+    
+    if field_display:
+        prompt += "\n" + "\n".join(field_display)
+    
+    return prompt

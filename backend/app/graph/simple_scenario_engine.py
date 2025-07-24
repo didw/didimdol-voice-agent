@@ -222,8 +222,13 @@ class SimpleScenarioEngine:
                 return False, "숫자로 입력해주세요."
         
         elif field_type == "boolean":
-            if value not in [True, False, "true", "false", "True", "False", 1, 0, "1", "0"]:
-                return False, "예/아니요로 답변해주세요."
+            # Boolean 타입은 다양한 한국어 표현과 boolean 값을 모두 허용
+            valid_true_values = [True, "true", "True", 1, "1", "네", "예", "신청", "좋아요", "동의", "확인"]
+            valid_false_values = [False, "false", "False", 0, "0", "아니요", "아니", "미신청", "싫어요", "거부"]
+            valid_values = valid_true_values + valid_false_values
+            
+            if value not in valid_values:
+                return False, "신청/미신청 또는 예/아니요로 답변해주세요."
         
         return True, ""
 

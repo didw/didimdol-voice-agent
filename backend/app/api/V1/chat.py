@@ -193,6 +193,10 @@ async def handle_websocket_messages(
             await handle_tts_stop(session_id, tts_service)
         elif message_type == "audio_chunk":
             await handle_audio_chunk(session_id, stt_service, payload)
+        elif message_type == "user_choice_selection":
+            await handle_user_choice_selection(session_id, payload, tts_service, websocket)
+        elif message_type == "user_boolean_selection":
+            await handle_user_boolean_selection(session_id, payload, tts_service, websocket)
 
 
 def parse_websocket_message(data: dict) -> tuple[str, Any]:
@@ -274,6 +278,72 @@ async def handle_audio_chunk(
     """오디오 청크 처리"""
     if stt_service and GOOGLE_SERVICES_AVAILABLE:
         await stt_service.process_audio_chunk(audio_data)
+
+
+async def handle_user_choice_selection(
+    session_id: str,
+    payload: dict,
+    tts_service: Optional[StreamTTSService],
+    websocket: WebSocket
+) -> None:
+    """사용자 선택지 처리"""
+    stage_id = payload.get("stageId")
+    choice = payload.get("selectedChoice")  # 프론트엔드에서 보내는 키명에 맞춤
+    
+    if not stage_id or not choice:
+        await manager.send_json_to_client(session_id, {
+            "type": "error",
+            "message": f"stageId와 selectedChoice가 필요합니다. 받은 데이터: {payload}"
+        })
+        return
+    
+    print(f"[{session_id}] User choice selection: {stage_id} -> {choice}")
+    
+    # 사용자 선택을 에이전트로 전달
+    await process_input_through_agent(
+        session_id, choice, tts_service, "choice", websocket
+    )
+
+
+async def handle_user_boolean_selection(
+    session_id: str,
+    payload: dict,
+    tts_service: Optional[StreamTTSService],
+    websocket: WebSocket
+) -> None:
+    """사용자 불린 선택 처리"""
+    stage_id = payload.get("stageId")
+    selections = payload.get("booleanSelections")  # 프론트엔드에서 보내는 키명에 맞춤
+    
+    if not stage_id or not selections:
+        await manager.send_json_to_client(session_id, {
+            "type": "error",
+            "message": f"stageId와 booleanSelections가 필요합니다. 받은 데이터: {payload}"
+        })
+        return
+    
+    print(f"[{session_id}] User boolean selection: {stage_id} -> {selections}")
+    
+    # 불린 선택을 문자열로 변환하여 에이전트로 전달
+    selection_text = ", ".join([
+        f"{key}: {'신청' if value else '미신청'}" 
+        for key, value in selections.items()
+    ])
+    
+    # boolean 선택을 collected_product_info에 직접 저장
+    current_state = SESSION_STATES.get(session_id)
+    if current_state:
+        collected_info = current_state.get("collected_product_info", {})
+        # boolean 선택 항목들을 직접 저장
+        for key, value in selections.items():
+            collected_info[key] = value
+        current_state["collected_product_info"] = collected_info
+        SESSION_STATES[session_id] = current_state
+        print(f"[{session_id}] Boolean selections directly saved to collected_product_info: {selections}")
+    
+    await process_input_through_agent(
+        session_id, selection_text, tts_service, "boolean", websocket
+    )
 
 
 async def handle_empty_stt_result(

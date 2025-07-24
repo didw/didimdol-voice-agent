@@ -160,7 +160,12 @@ async def run_agent_streaming(
         print(f"[run_agent_streaming] final_state type: {type(final_state)}")
         print(f"[run_agent_streaming] final_state collected_product_info: {final_state.get('collected_product_info', {}) if final_state else {}}")
         
-        if final_state and final_state.get("final_response_text_for_tts"):
+        # Check for stage_response_data and send it first
+        if final_state and final_state.get("stage_response_data"):
+            yield {"type": "stage_response", "data": final_state["stage_response_data"]}
+        
+        # Only stream text if there's no stage_response_data
+        elif final_state and final_state.get("final_response_text_for_tts"):
             text_to_stream = final_state["final_response_text_for_tts"]
             yield {"type": "stream_start"}
             try:

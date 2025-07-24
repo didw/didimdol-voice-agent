@@ -184,15 +184,24 @@ class EntityRecognitionAgent:
             for field_key, value in extracted_fields.items():
                 field_def = next((f for f in required_fields if f['key'] == field_key), None)
                 if field_def:
-                    if field_def['type'] == 'number' and isinstance(value, str):
-                        converted = convert_korean_number(value)
-                        if converted is not None:
-                            processed_entities[field_key] = converted
-                        else:
-                            try:
-                                processed_entities[field_key] = int(value)
-                            except:
-                                pass
+                    if field_def['type'] == 'number':
+                        # 숫자 타입 처리
+                        if isinstance(value, (int, float)):
+                            # 이미 숫자인 경우 그대로 사용
+                            processed_entities[field_key] = int(value)
+                            print(f"[EntityAgent] {field_key}: already number = {value}")
+                        elif isinstance(value, str):
+                            # 문자열인 경우 변환 시도
+                            converted = convert_korean_number(value)
+                            if converted is not None:
+                                processed_entities[field_key] = converted
+                                print(f"[EntityAgent] {field_key}: converted '{value}' → {converted}")
+                            else:
+                                try:
+                                    processed_entities[field_key] = int(value)
+                                    print(f"[EntityAgent] {field_key}: parsed '{value}' → {int(value)}")
+                                except:
+                                    print(f"[EntityAgent] {field_key}: failed to convert '{value}'")
                     else:
                         processed_entities[field_key] = value
             
@@ -267,21 +276,31 @@ class EntityRecognitionAgent:
                 r"([김이박최정강조윤장임한신오서권황안송류전고문양손배백허남심노정하곽성차주우구신임나전민유진지마진원봉][\w]{1,3})",
                 r"([\w가-힣]{2,4})(?:입니다|이에요|예요|이고|입니다)"
             ],
+            "transfer_limit_per_time": [
+                r"일회\s*([가-힣]+)만원",  # "일회 사백만원"
+                r"1회\s*([가-힣]+)만원",   # "1회 사백만원"
+                r"일회\s*(\d+)(?:만원)?",  # "일회 400만원"
+                r"1회\s*이체\s*한도\s*(\d+)(?:만원)?",
+                r"1회\s*한도\s*(\d+)(?:만원)?",
+                r"회당\s*(\d+)(?:만원)?",
+                r"1회\s*(\d+)(?:만원)?",
+                r"한번에\s*(\d+)(?:만원)?"
+            ],
+            "transfer_limit_per_day": [
+                r"일일\s*([가-힣]+)만원",  # "일일 천만원"
+                r"1일\s*([가-힣]+)만원",   # "1일 천만원"
+                r"일일\s*(\d+)(?:만원)?",  # "일일 1000만원"
+                r"1일\s*이체\s*한도\s*(\d+)(?:만원)?",
+                r"일일\s*한도\s*(\d+)(?:만원)?",
+                r"하루\s*(\d+)(?:만원)?",
+                r"1일\s*(\d+)(?:만원)?",
+                r"일당\s*(\d+)(?:만원)?"
+            ],
             "ib_daily_limit": [
                 r"(\d+)만원?",
                 r"(\d+)천만원?",
                 r"한도\s*(\d+)",
                 r"(\d+)원?"
-            ],
-            "transfer_limit_per_time": [
-                r"1회\s*(\d+)만원?",
-                r"회당\s*(\d+)만원?",
-                r"한번에\s*(\d+)만원?"
-            ],
-            "transfer_limit_per_day": [
-                r"1일\s*(\d+)만원?",
-                r"하루\s*(\d+)만원?",
-                r"일일\s*(\d+)만원?"
             ],
             "cc_delivery_address": [
                 r"([\w가-힣\s\-\.]+(?:구|시|동|로|길)[\w가-힣\s\-\.]*)"
@@ -334,6 +353,20 @@ class EntityRecognitionAgent:
                         return f"{numbers_only[:3]}-{numbers_only[3:7]}-{numbers_only[7:]}"
                     elif len(numbers_only) == 10:
                         return f"{numbers_only[:3]}-{numbers_only[3:6]}-{numbers_only[6:]}"
+                
+                # 이체한도의 경우 한국어 숫자를 변환
+                if field_key in ["transfer_limit_per_time", "transfer_limit_per_day"]:
+                    # convert_korean_number 함수 사용
+                    converted = convert_korean_number(value)
+                    if converted is not None:
+                        return str(converted)
+                    
+                    # 일반 숫자 추출 시도
+                    import re
+                    num_match = re.search(r'(\d+)', value)
+                    if num_match:
+                        return num_match.group(1)
+                    
                 return value
         
         return None
@@ -427,13 +460,19 @@ def convert_korean_number(text: str) -> Optional[int]:
         # 단순 한글 숫자 케이스 (오백만원, 삼천만원 등)
         simple_patterns = {
             "오백만원": 500, "오백만": 500,
+            "사백만원": 400, "사백만": 400,
             "삼백만원": 300, "삼백만": 300,
             "이백만원": 200, "이백만": 200,
             "백만원": 100, "백만": 100,
             "오천만원": 5000, "오천만": 5000,
+            "사천만원": 4000, "사천만": 4000,
             "삼천만원": 3000, "삼천만": 3000,
             "이천만원": 2000, "이천만": 2000,
             "천만원": 1000, "천만": 1000,
+            "구백만원": 900, "구백만": 900,
+            "팔백만원": 800, "팔백만": 800,
+            "칠백만원": 700, "칠백만": 700,
+            "육백만원": 600, "육백만": 600,
             "구십만원": 90, "구십만": 90,
             "팔십만원": 80, "팔십만": 80,
             "칠십만원": 70, "칠십만": 70,

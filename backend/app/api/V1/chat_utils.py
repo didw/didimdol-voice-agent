@@ -636,12 +636,12 @@ def initialize_default_values(state: Dict[str, Any]) -> Dict[str, Any]:
     if not scenario_data:
         return collected_info
     
-    # 기본정보(customer_name, customer_phone)만 default 값 설정
+    # 기본정보(customer_name, phone_number, address)만 default 값 설정
     for field in scenario_data.get("required_info_fields", []):
         field_key = field["key"]
         
         # 기본정보 필드만 처리
-        if field_key not in ["customer_name", "customer_phone"]:
+        if field_key not in ["customer_name", "phone_number", "address"]:
             continue
         
         # 이미 값이 있으면 skip

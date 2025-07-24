@@ -73,6 +73,7 @@ class AgentState(BaseModel):
     main_agent_direct_response: Optional[str] = None
     factual_response: Optional[str] = None
     scenario_agent_output: Optional[ScenarioAgentOutput] = None
+    stage_response_data: Optional[Dict[str, Any]] = None  # Stage response type data
     
     # --- Conversation History & Final Response ---
     messages: Sequence[BaseMessage] = Field(default_factory=list)

@@ -38,6 +38,21 @@ async def handle_agent_output_chunk(
             await manager.send_json_to_client(session_id, agent_output_chunk)
             return full_ai_response_text, False, None
             
+        elif chunk_type == "stage_response":
+            # Send stage response data to client
+            stage_data = agent_output_chunk.get("data")
+            if stage_data:
+                await manager.send_json_to_client(session_id, {
+                    "type": "stage_response",
+                    "stageId": stage_data.get("stage_id"),
+                    "responseType": stage_data.get("response_type"),
+                    "prompt": stage_data.get("prompt"),
+                    "choices": stage_data.get("choices"),
+                    "skippable": stage_data.get("skippable", False),
+                    "modifiableFields": stage_data.get("modifiable_fields")
+                })
+            return full_ai_response_text, False, None
+            
         elif chunk_type == "stream_end":
             await manager.send_json_to_client(session_id, {
                 "type": "llm_response_end", 
@@ -48,6 +63,10 @@ async def handle_agent_output_chunk(
         elif chunk_type == "final_state":
             final_data = agent_output_chunk.get("data")
             if final_data:
+                # stage_response_data가 있으면 일반 텍스트 응답은 보내지 않음
+                if final_data.get("stage_response_data"):
+                    return full_ai_response_text, True, final_data
+                
                 # 텍스트가 없으면 final_state에서 가져오기
                 if not full_ai_response_text and final_data.get("final_response_text_for_tts"):
                     text = final_data["final_response_text_for_tts"]

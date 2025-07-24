@@ -360,10 +360,27 @@ def replace_template_variables(template: str, collected_info: Dict) -> str:
     """템플릿 문자열의 변수를 수집된 정보로 치환"""
     import re
     
+    # 수집된 정보의 복사본 생성 (원본 수정 방지)
+    info_copy = collected_info.copy()
+    
+    # 하위 정보가 있으면 상위 boolean 값을 추론
+    # 체크카드 관련 정보가 있으면 use_check_card = True로 추론
+    check_card_fields = ["card_type", "card_receive_method", "postpaid_transport", "card_usage_alert", "statement_method"]
+    if any(field in info_copy for field in check_card_fields) and "use_check_card" not in info_copy:
+        info_copy["use_check_card"] = True
+        print(f"[DEBUG] Inferred use_check_card = True from existing card fields: {[f for f in check_card_fields if f in info_copy]}")
+    
+    # 인터넷뱅킹 관련 정보가 있으면 use_internet_banking = True로 추론
+    ib_fields = ["security_medium", "transfer_limit_per_time", "transfer_limit_per_day", 
+                 "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
+    if any(field in info_copy for field in ib_fields) and "use_internet_banking" not in info_copy:
+        info_copy["use_internet_banking"] = True
+        print(f"[DEBUG] Inferred use_internet_banking = True from existing IB fields: {[f for f in ib_fields if f in info_copy]}")
+    
     result = template
     
     # 수집된 정보로 변수 치환
-    for key, value in collected_info.items():
+    for key, value in info_copy.items():
         placeholder = f"%{{{key}}}%"
         if placeholder in result:
             # boolean 값 한글로 변환
