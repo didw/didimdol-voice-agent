@@ -363,6 +363,12 @@ def replace_template_variables(template: str, collected_info: Dict) -> str:
     # 수집된 정보의 복사본 생성 (원본 수정 방지)
     info_copy = collected_info.copy()
     
+    # 디버그 로그 추가
+    print(f"[DEBUG] replace_template_variables - collected_info keys: {list(collected_info.keys())}")
+    print(f"[DEBUG] Notification values - important_transaction_alert: {collected_info.get('important_transaction_alert')}")
+    print(f"[DEBUG] Notification values - withdrawal_alert: {collected_info.get('withdrawal_alert')}")
+    print(f"[DEBUG] Notification values - overseas_ip_restriction: {collected_info.get('overseas_ip_restriction')}")
+    
     # 하위 정보가 있으면 상위 boolean 값을 추론
     # 체크카드 관련 정보가 있으면 use_check_card = True로 추론
     check_card_fields = ["card_type", "card_receive_method", "postpaid_transport", "card_usage_alert", "statement_method"]

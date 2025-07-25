@@ -942,6 +942,18 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
     
     # customer_info_check 단계에서 수정 요청 특별 처리
     if current_stage_id == "customer_info_check":
+        # customer_info_check 단계 진입 시 default 값 설정
+        display_fields = current_stage_info.get("display_fields", [])
+        if display_fields:
+            print(f"[DEBUG] customer_info_check - setting default values for display fields: {display_fields}")
+            for field_key in display_fields:
+                if field_key not in collected_info:
+                    # 시나리오에서 해당 필드의 default 값 찾기
+                    for field in active_scenario_data.get("required_info_fields", []):
+                        if field.get("key") == field_key and "default" in field:
+                            collected_info[field_key] = field["default"]
+                            print(f"[DEBUG] Set default value: {field_key} = {field['default']}")
+        
         intent = scenario_output.get("intent", "") if scenario_output else ""
         entities = scenario_output.get("entities", {}) if scenario_output else {}
         

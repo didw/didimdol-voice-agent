@@ -167,7 +167,8 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
     # limit_account_guide 단계에서는 아무것도 표시하지 않음
     if current_stage == "limit_account_guide":
         print(f"[DEBUG] limit_account_guide stage - no fields shown")
-        # 아무 필드도 추가하지 않음
+        # 빈 리스트를 반환하여 아무것도 표시하지 않음
+        return []
     elif current_stage == "limit_account_agreement":
         # 한도계좌 동의 단계
         allowed_fields.add("limit_account_agreement")
@@ -190,19 +191,17 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
     # 평생계좌 사용 여부 단계
     if current_stage == "ask_lifelong_account":
         allowed_fields.add("use_lifelong_account")
-        print(f"[DEBUG] Added use_lifelong_account for ask_lifelong_account stage")
+        # 기본 정보도 함께 표시
+        allowed_fields.update(["customer_name", "phone_number", "address"])
+        print(f"[DEBUG] Added use_lifelong_account and basic info for ask_lifelong_account stage")
     
     # 2-1. 현재 단계가 인터넷뱅킹이나 체크카드면 해당 메인 필드도 추가
     print(f"[DEBUG] Checking stage-specific fields for stage: {current_stage}")
     
     if current_stage == "ask_internet_banking":
-        # ask_internet_banking 단계에서 인터넷뱅킹 관련 필드들 모두 표시
-        internet_banking_fields = ["use_internet_banking", "security_medium", "initial_password", "other_otp_info", 
-                                 "transfer_limit_per_time", "transfer_limit_per_day", 
-                                 "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
-        allowed_fields.update(internet_banking_fields)
-        print(f"[DEBUG] Stage is ask_internet_banking - Added all {len(internet_banking_fields)} internet banking fields")
-        print(f"[DEBUG] Internet banking fields added: {internet_banking_fields}")
+        # ask_internet_banking 단계에서는 use_internet_banking만 표시
+        allowed_fields.add("use_internet_banking")
+        print(f"[DEBUG] Stage is ask_internet_banking - Added use_internet_banking field only")
     elif current_stage == "internet_banking":
         allowed_fields.add("use_internet_banking")
         print(f"[DEBUG] Added use_internet_banking for internet_banking stage")
@@ -219,9 +218,12 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
         print(f"[DEBUG] Added use_check_card for check_card stage")
     elif current_stage == "ask_notification_settings":
         # 알림 설정 단계에서 모든 알림 관련 필드 표시
-        notification_fields = ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
+        # 인터넷뱅킹 기본 필드도 포함
+        notification_fields = ["use_internet_banking", "security_medium", "transfer_limit_per_time", 
+                              "transfer_limit_per_day", "important_transaction_alert", 
+                              "withdrawal_alert", "overseas_ip_restriction"]
         allowed_fields.update(notification_fields)
-        print(f"[DEBUG] Added notification fields for ask_notification_settings stage")
+        print(f"[DEBUG] Added all internet banking fields for ask_notification_settings stage")
     
     # 3. 진행 상황에 따른 추가 필드 결정 (단계별 표시로 변경되어 대부분 불필요)
     # 특정 단계가 아닌 경우에만 점진적 공개 적용
@@ -233,16 +235,21 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
             print(f"[DEBUG] Personal info confirmed, maintaining basic fields")
     
     # 4. 추가 서비스 선택 후 하위 필드들 표시 (개인정보 단계와 동일한 방식)
-    # 인터넷뱅킹 단계이거나 선택했을 때 모든 관련 하위 필드들을 표시
-    # 보안매체 선택 단계부터 하위 항목들 표시
-    if (current_stage == "internet_banking" or 
+    # 인터넷뱅킹 관련 모든 단계에서 필드 표시
+    internet_banking_stages = ["ask_security_medium", "ask_other_otp_info", "ask_transfer_limit", 
+                              "ask_notification_settings", "ask_internet_banking"]
+    
+    # use_internet_banking이 true이거나 인터넷뱅킹 관련 단계에서는 항상 모든 필드 표시
+    # 또는 security_medium이 이미 수집되었으면 계속 표시
+    if (current_stage in internet_banking_stages or 
         collected_info.get("use_internet_banking") == True or
-        expected_info_key == "security_medium"):
-        internet_banking_sub = ["security_medium", "initial_password", "other_otp_info", 
+        expected_info_key == "security_medium" or
+        "security_medium" in collected_info):
+        internet_banking_sub = ["use_internet_banking", "security_medium", "initial_password", "other_otp_info", 
                                "transfer_limit_per_time", "transfer_limit_per_day", 
                                "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
         allowed_fields.update(internet_banking_sub)
-        print(f"[DEBUG] Added ALL internet banking sub-fields (stage={current_stage}, expected={expected_info_key}): {internet_banking_sub}")
+        print(f"[DEBUG] Added ALL internet banking sub-fields (stage={current_stage}, use_internet_banking={collected_info.get('use_internet_banking')}, has_security_medium={'security_medium' in collected_info})")
     
     # 체크카드 단계이거나 선택했을 때 모든 관련 하위 필드들을 표시
     # 체크카드 관련 모든 단계에서 하위 필드 표시
@@ -385,10 +392,20 @@ def update_slot_filling_with_hierarchy(scenario_data: Dict, collected_info: Dict
     visible_fields = get_contextual_visible_fields(scenario_data, collected_info, current_stage)
     
     # Default 값 자동 추가 비활성화 - 고객 응답을 기다림
+    # customer_info_check 단계 전에는 기본값을 수집하지 않음
     enhanced_collected_info = collected_info.copy()
+    
+    # customer_info_check 단계 이후에만 기본값 적용
+    stages_allowing_defaults = ["customer_info_check", "info_correction", "ask_lifelong_account", 
+                                "ask_internet_banking", "ask_security_medium", "ask_transfer_limit",
+                                "ask_notification_settings", "ask_check_card"]
+    
     # for field in visible_fields:
     #     field_key = field["key"]
-    #     if field_key not in enhanced_collected_info and "default" in field and field["default"] is not None:
+    #     if (field_key not in enhanced_collected_info and 
+    #         "default" in field and 
+    #         field["default"] is not None and
+    #         current_stage in stages_allowing_defaults):
     #         enhanced_collected_info[field_key] = field["default"]
     #         print(f"Auto-collected default value: {field_key} = {field['default']}")
     
@@ -467,17 +484,39 @@ def update_slot_filling_with_hierarchy(scenario_data: Dict, collected_info: Dict
         field_key = field["key"]
         completion_status[field_key] = is_field_completed(field, enhanced_collected_info)
     
-    # 완료율 계산 (전체 필수 필드 기준 - 시나리오 JSON의 모든 필드)
-    all_required_fields = [f for f in all_fields if f.get("required", True)]
-    total_required = len(all_required_fields)
-    completed_required = sum(1 for f in all_required_fields if completion_status.get(f["key"], False))
+    # 완료율 계산 - 실제로 표시되는 필드만 기준으로 계산
+    # visible_fields 중 required=true인 필드만 계산
+    
+    # use_internet_banking, use_check_card 같은 boolean 필드는 제외 (선택 옵션이미로 필수 필드 아님)
+    excluded_from_count = ["use_internet_banking", "use_check_card", "confirm_personal_info"]
+    
+    # 실제로 표시되는 필수 필드만 필터링
+    countable_fields = [f for f in visible_fields 
+                       if f.get("required", True) and f["key"] not in excluded_from_count]
+    
+    # 전체 필수 필드 개수
+    total_required = len(countable_fields)
+    
+    # 완료된 필드 개수 계산
+    completed_required = 0
+    for field in countable_fields:
+        field_key = field["key"]
+        if completion_status.get(field_key, False):
+            completed_required += 1
+            print(f"DEBUG: Field '{field_key}' is completed")
+    
+    # 완료율 계산
     completion_rate = (completed_required / total_required * 100) if total_required > 0 else 0
     
-    # 표시되는 필드 기준 완료율 (UI 참고용)
-    required_visible_fields = [f for f in visible_fields if f.get("required", True)]
-    visible_total_required = len(required_visible_fields)
-    visible_completed_required = sum(1 for f in required_visible_fields if completion_status.get(f["key"], False))
-    visible_completion_rate = (visible_completed_required / visible_total_required * 100) if visible_total_required > 0 else 0
+    print(f"DEBUG: Total visible required fields: {total_required}")
+    print(f"DEBUG: Completed required fields: {completed_required}")
+    print(f"DEBUG: Excluded fields: {excluded_from_count}")
+    print(f"DEBUG: Countable field keys: {[f['key'] for f in countable_fields]}")
+    
+    # 표시되는 필드 기준 완료율 (이미 위에서 계산됨)
+    visible_total_required = total_required
+    visible_completed_required = completed_required
+    visible_completion_rate = completion_rate
     
     # 디버그 로그
     print(f"DEBUG: Total all fields: {len(all_fields)}")
@@ -584,7 +623,9 @@ async def send_slot_filling_update(
         overall_progress = (total_collected / total_required * 100) if total_required > 0 else 0
         
         # 현재 stage에서 표시할 그룹 정보 가져오기
-        visible_groups = get_stage_visible_groups(scenario_data, current_stage)
+        groups_info = get_stage_visible_groups(scenario_data, current_stage, collected_info)
+        visible_groups = groups_info["visible_groups"]
+        current_stage_groups = groups_info["current_stage_groups"]
         
         # 새로운 계층적 슬롯 필링 계산
         try:
@@ -660,7 +701,8 @@ async def send_slot_filling_update(
             } for group in field_groups] if field_groups else [],
             "currentStage": {
                 "stageId": current_stage,
-                "visibleGroups": visible_groups
+                "visibleGroups": visible_groups,
+                "currentStageGroups": current_stage_groups  # 현재 단계의 그룹만
             }
         }
         
@@ -899,25 +941,36 @@ def get_info_collection_stages() -> List[str]:
     ]
 
 
-def get_stage_visible_groups(scenario_data: Dict, stage_id: str) -> List[str]:
-    """현재 stage에서 표시할 field_groups 반환 (시나리오 데이터 기반)"""
+def get_stage_visible_groups(scenario_data: Dict, stage_id: str, collected_info: Dict = None) -> Dict[str, List[str]]:
+    """현재 stage에서 표시할 field_groups 반환 (현재 단계 그룹과 전체 표시 그룹 구분)"""
     
     if not scenario_data or not stage_id:
-        return []
+        return {"current_stage_groups": [], "visible_groups": []}
     
     # 시나리오 데이터에서 stage 정보 가져오기
     stages = scenario_data.get("stages", {})
     current_stage = stages.get(stage_id, {})
     
-    # stage에 visible_groups가 정의되어 있으면 사용
-    visible_groups = current_stage.get("visible_groups", [])
+    # stage에 visible_groups가 정의되어 있으면 사용 (현재 단계 그룹)
+    current_stage_groups = current_stage.get("visible_groups", [])
     
-    if visible_groups:
-        return visible_groups
+    # 전체 표시할 그룹 (현재 단계 + 이미 수집된 정보가 있는 그룹)
+    visible_groups = current_stage_groups.copy()
     
-    # fallback: 모든 그룹 표시
-    field_groups = scenario_data.get("field_groups", [])
-    return [group["id"] for group in field_groups]
+    # 이미 수집된 정보가 있는 그룹도 추가
+    if collected_info:
+        field_groups = scenario_data.get("field_groups", [])
+        for group in field_groups:
+            # 그룹에 속한 필드 중 하나라도 수집되었으면 해당 그룹도 표시
+            if any(field_key in collected_info and collected_info[field_key] not in [None, "", []] 
+                   for field_key in group.get("fields", [])):
+                if group["id"] not in visible_groups:
+                    visible_groups.append(group["id"])
+    
+    return {
+        "current_stage_groups": current_stage_groups,  # 현재 단계의 그룹만
+        "visible_groups": visible_groups  # 표시할 모든 그룹
+    }
 
 
 def initialize_default_values(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -928,6 +981,15 @@ def initialize_default_values(state: Dict[str, Any]) -> Dict[str, Any]:
     collected_info = state.get("collected_product_info", {}).copy()
     
     if not scenario_data:
+        return collected_info
+    
+    # 현재 단계 확인
+    current_stage = state.get("current_scenario_stage_id", "")
+    
+    # customer_info_check 단계 이전에는 default 값을 설정하지 않음
+    # (limit_account_guide 단계에서 정보가 노출되는 것을 방지)
+    if current_stage in ["limit_account_guide", "limit_account_agreement", ""]:
+        print(f"Skipping default value initialization for stage: {current_stage}")
         return collected_info
     
     # 기본정보(customer_name, phone_number, address)만 default 값 설정

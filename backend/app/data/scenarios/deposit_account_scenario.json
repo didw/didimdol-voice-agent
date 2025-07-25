@@ -41,14 +41,6 @@
       "description": "고객 주소"
     },
     {
-      "key": "confirm_personal_info",
-      "display_name": "개인정보 확인",
-      "required": true,
-      "type": "boolean",
-      "description": "개인정보 확인 여부",
-      "extraction_prompt": "고객이 '네', '확인했습니다', '동의합니다', '맞습니다' 등을 말하면 true로 추출하세요. '아니요', '동의하지 않습니다', '확인 안 했어요' 등을 말하면 false로 추출하세요."
-    },
-    {
       "key": "use_lifelong_account",
       "display_name": "평생계좌 등록",
       "required": true,
@@ -183,7 +175,7 @@
     {
       "key": "postpaid_transport",
       "display_name": "후불교통기능",
-      "required": false,
+      "required": true,
       "type": "boolean",
       "description": "후불교통기능 추가 여부",
       "extraction_prompt": "고객이 후불교통기능에 대해 '네', '추가할게요', '필요해요' 등을 말하면 true, '아니요', '안해요', '필요없어요' 등을 말하면 false로 추출하세요.",
@@ -217,28 +209,29 @@
   "field_groups": [
     {
       "id": "basic_info",
-      "name": "기본 정보",
-      "fields": ["customer_name", "phone_number", "address", "confirm_personal_info"]
+      "name": "고객 정보 확인",
+      "fields": ["customer_name", "phone_number", "address"]
     },
     {
       "id": "account_settings",
-      "name": "계좌 설정",
+      "name": "평생계좌 설정",
       "fields": ["use_lifelong_account"]
     },
     {
       "id": "internet_banking",
-      "name": "인터넷뱅킹",
+      "name": "인터넷뱅킹 설정",
       "fields": ["use_internet_banking", "security_medium", "other_otp_info", "transfer_limit_per_time", "transfer_limit_per_day", "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
     },
     {
       "id": "check_card",
-      "name": "체크카드",
+      "name": "체크카드 설정",
       "fields": ["use_check_card", "card_receive_method", "card_delivery_location", "card_type", "postpaid_transport", "statement_method", "card_usage_alert"]
     }
   ],
   "stages": {
     "limit_account_guide": {
       "id": "limit_account_guide",
+      "total_cnt": 0,
       "response_type": "narrative",
       "prompt": "입출금 계좌 가입을 도와드릴게요. 통장은 한도계좌로 먼저 개설되며, 서류지참시 일반 계좌로 전환가능합니다. 한도계좌로 개설 진행해 드릴까요?",
       "is_question": true,
@@ -261,6 +254,7 @@
     },
     "limit_account_decline": {
       "id": "limit_account_decline",
+      "total_cnt": 0,
       "response_type": "narrative",
       "prompt": "네, 알겠습니다. 입출금통장 개설을 취소하겠습니다. 다른 도움이 필요하시면 언제든 말씀해 주세요.",
       "is_question": false,
@@ -268,12 +262,13 @@
     },
     "customer_info_check": {
       "id": "customer_info_check",
+      "total_cnt": 3,
       "response_type": "narrative",
       "prompt": "감사합니다. 그럼 한도계좌로 입출금 통장 개설 도와드릴게요. 제가 가지고 있는 정보는 다음과 같습니다. 아래 내용이 모두 맞으신가요?",
       "display_fields": ["customer_name", "phone_number", "address"],
       "is_question": true,
       "input_type": "yes_no",
-      "expected_info_key": "confirm_personal_info",
+      "expected_info_key": null,
       "visible_groups": ["basic_info"],
       "modifiable_fields": ["customer_name", "phone_number", "address"],
       "skippable": false,
@@ -293,6 +288,7 @@
     },
     "info_correction": {
       "id": "info_correction",
+      "total_cnt": 0,
       "response_type": "narrative",
       "prompt": "어떤 정보를 수정하시겠어요? 수정하실 항목과 올바른 정보를 말씀해 주세요.",
       "is_question": true,
@@ -301,6 +297,7 @@
     },
     "ask_lifelong_account": {
       "id": "ask_lifelong_account",
+      "total_cnt": 1,
       "response_type": "narrative",
       "prompt": "다음으로, 통장 개설 시 평생 계좌 등록여부를 선택하실 수 있습니다. 평생계좌로 등록하시겠어요?",
       "is_question": true,
@@ -312,6 +309,7 @@
     },
     "ask_internet_banking": {
       "id": "ask_internet_banking",
+      "total_cnt": 0,
       "response_type": "narrative",
       "prompt": "쏠이나 인터넷에서도 개설하시는 통장 사용할 수 있도록 도와드릴까요?",
       "is_question": true,
@@ -335,6 +333,7 @@
     },
     "ask_security_medium": {
       "id": "ask_security_medium",
+      "total_cnt": 1,
       "response_type": "bullet",
       "prompt": "보안매체는 어떤걸로 하시겠어요?",
       "choices": [
@@ -363,6 +362,7 @@
     },
     "ask_other_otp_info": {
       "id": "ask_other_otp_info",
+      "total_cnt": 0,
       "response_type": "narrative",
       "prompt": "타행 OTP의 제조사와 일련번호를 말씀해주세요.",
       "is_question": true,
@@ -373,6 +373,7 @@
     },
     "ask_transfer_limit": {
       "id": "ask_transfer_limit",
+      "total_cnt": 2,
       "response_type": "narrative",
       "prompt": "이체 한도를 말씀해주세요. (1회 이체한도 최대 5천만원, 1일 이체한도 최대 1억원)",
       "is_question": true,
@@ -384,6 +385,7 @@
     },
     "ask_notification_settings": {
       "id": "ask_notification_settings",
+      "total_cnt": 3,
       "response_type": "boolean",
       "prompt": "중요거래 알림, 출금내역 알림, 해외IP 제한 여부를 말씀해주세요.",
       "choices": [
@@ -399,6 +401,7 @@
     },
     "ask_check_card": {
       "id": "ask_check_card",
+      "total_cnt": 0,
       "response_type": "narrative",
       "prompt": "체크카드 신청을 도와드릴까요?",
       "is_question": true,
@@ -422,6 +425,7 @@
     },
     "ask_card_receive_method": {
       "id": "ask_card_receive_method",
+      "total_cnt": 1,
       "response_type": "bullet",
       "prompt": "체크카드 수령 방법을 선택해주세요.",
       "choices": [
@@ -449,6 +453,7 @@
     },
     "ask_card_delivery_location": {
       "id": "ask_card_delivery_location",
+      "total_cnt": 1,
       "response_type": "bullet",
       "prompt": "배송지를 선택해주세요.",
       "choices": [
@@ -463,6 +468,7 @@
     },
     "ask_card_type": {
       "id": "ask_card_type",
+      "total_cnt": 1,
       "response_type": "bullet",
       "prompt": "%{card_receive_method}% 가능한 카드를 보여드릴게요. 어떤 카드로 발급하시겠어요?",
       "choices": [
@@ -479,6 +485,7 @@
     },
     "ask_postpaid_transport": {
       "id": "ask_postpaid_transport",
+      "total_cnt": 1,
       "response_type": "narrative",
       "prompt": "후불 교통 기능을 추가해드릴까요?",
       "is_question": true,
@@ -489,6 +496,7 @@
     },
     "ask_statement_method": {
       "id": "ask_statement_method",
+      "total_cnt": 1,
       "response_type": "bullet",
       "prompt": "카드 명세서 수령 방법을 선택해주세요.",
       "choices": [
@@ -505,6 +513,7 @@
     },
     "ask_card_usage_alert": {
       "id": "ask_card_usage_alert",
+      "total_cnt": 1,
       "response_type": "bullet",
       "prompt": "카드 사용 알림 문자 서비스를 선택해주세요.",
       "choices": [
@@ -521,8 +530,9 @@
     },
     "final_summary": {
       "id": "final_summary",
+      "total_cnt": 0,
       "response_type": "narrative",
-      "prompt": "아래 정보들로 입출금 통장 가입을 도와드릴까요?\n\n[기본정보]\n- 성함: %{customer_name}%\n- 연락처: %{phone_number}%\n- 평생계좌 등록: %{use_lifelong_account}%\n\n[인터넷뱅킹]\n- 가입여부: %{use_internet_banking}%\n- 보안매체: %{security_medium}%\n- 1회 이체한도: %{transfer_limit_per_time}%만원\n- 1일 이체한도: %{transfer_limit_per_day}%만원\n\n[체크카드]\n- 신청여부: %{use_check_card}%\n- 카드 종류: %{card_type}%\n- 수령 방법: %{card_receive_method}%\n- 카드사용알림: %{card_usage_alert}%",
+      "prompt": "아래 정보들로 입출금 통장 가입을 도와드릴까요?\n\n[기본정보]\n- 성함: %{customer_name}%\n- 연락처: %{phone_number}%\n- 주소: %{address}%\n\n[평생계좌]\n- 평생계좌 등록: %{use_lifelong_account}%\n\n[인터넷뱅킹]\n- 가입여부: %{use_internet_banking}%\n- 보안매체: %{security_medium}%\n- 1회 이체한도: %{transfer_limit_per_time}%만원\n- 1일 이체한도: %{transfer_limit_per_day}%만원\n- 중요거래 알림: %{important_transaction_alert}%\n- 출금내역 알림: %{withdrawal_alert}%\n- 해외IP 제한: %{overseas_ip_restriction}%\n\n[체크카드]\n- 신청여부: %{use_check_card}%\n- 카드 종류: %{card_type}%\n- 수령 방법: %{card_receive_method}%\n- 카드사용알림: %{card_usage_alert}%",
       "is_question": true,
       "input_type": "text",
       "visible_groups": ["basic_info", "account_settings", "internet_banking", "check_card"],
@@ -542,6 +552,7 @@
     },
     "handle_modification": {
       "id": "handle_modification",
+      "total_cnt": 0,
       "response_type": "narrative",
       "prompt": "어떤 내용을 수정하고 싶으신가요? 수정하실 항목과 변경하실 내용을 말씀해 주세요.",
       "is_question": true,
@@ -550,6 +561,7 @@
     },
     "complete_application": {
       "id": "complete_application",
+      "total_cnt": 0,
       "response_type": "narrative",
       "prompt": "상담을 종료하고 입출금 통장 가입을 도와드리겠습니다.",
       "is_question": false,

@@ -22,6 +22,7 @@ export interface FieldGroup {
 export interface CurrentStageInfo {
   stageId: string
   visibleGroups: string[]
+  currentStageGroups?: string[]  // 현재 단계의 그룹만
 }
 
 export interface SlotFillingState {

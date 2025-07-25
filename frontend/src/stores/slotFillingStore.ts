@@ -73,11 +73,52 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
     }
 
     // currentStage.visibleGroups가 있으면 해당 그룹만 필터링
+    // 단, 이미 수집된 정보가 있는 그룹은 항상 표시
     let groupsToShow = fieldGroups.value
     if (currentStage.value?.visibleGroups?.length) {
-      groupsToShow = fieldGroups.value.filter(group => 
-        currentStage.value!.visibleGroups.includes(group.id)
-      )
+      console.log('[SlotFillingStore] Current stage visible groups:', currentStage.value.visibleGroups)
+      console.log('[SlotFillingStore] All field groups:', fieldGroups.value.map(g => ({ id: g.id, fields: g.fields })))
+      console.log('[SlotFillingStore] Collected info keys:', Object.keys(collectedInfo.value))
+      
+      groupsToShow = fieldGroups.value.filter(group => {
+        // 현재 단계의 visible 그룹인지 확인
+        const isCurrentStageGroup = currentStage.value!.visibleGroups.includes(group.id)
+        
+        // 해당 그룹에 이미 수집된 정보가 있는지 확인
+        // visibleFields를 통해 실제 표시되는 필드들로 확인
+        const hasCollectedData = visibleFields.value.some(field => {
+          // 이 필드가 현재 그룹에 속하는지 확인
+          if (!group.fields.includes(field.key)) return false
+          
+          const hasData = collectedInfo.value[field.key] !== undefined && 
+                         collectedInfo.value[field.key] !== null &&
+                         collectedInfo.value[field.key] !== ''
+          if (hasData) {
+            console.log(`[SlotFillingStore] Group ${group.id} has collected data: ${field.key} = ${collectedInfo.value[field.key]}`)
+          }
+          return hasData
+        })
+        
+        // internet_banking 그룹의 경우 특별 처리
+        // use_internet_banking이 true이면 항상 표시
+        let keepVisible = false
+        if (group.id === 'internet_banking' && collectedInfo.value['use_internet_banking'] === true) {
+          keepVisible = true
+          console.log(`[SlotFillingStore] Keeping internet_banking group visible because use_internet_banking is true`)
+        }
+        
+        // check_card 그룹도 동일하게 처리
+        if (group.id === 'check_card' && collectedInfo.value['use_check_card'] === true) {
+          keepVisible = true
+          console.log(`[SlotFillingStore] Keeping check_card group visible because use_check_card is true`)
+        }
+        
+        const shouldShow = isCurrentStageGroup || hasCollectedData || keepVisible
+        console.log(`[SlotFillingStore] Group ${group.id}: isCurrentStage=${isCurrentStageGroup}, hasData=${hasCollectedData}, keepVisible=${keepVisible}, show=${shouldShow}`)
+        
+        // 현재 단계 그룹이거나 이미 수집된 정보가 있거나 특별히 유지해야 하면 표시
+        return shouldShow
+      })
     }
 
     return groupsToShow.map(group => ({

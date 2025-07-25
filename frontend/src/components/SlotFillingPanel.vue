@@ -1,15 +1,31 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import { useSlotFillingStore } from '@/stores/slotFillingStore'
 import type { SmartField } from '@/types/slotFilling'
 import ProgressBar from './ProgressBar.vue'
 
 const slotFillingStore = useSlotFillingStore()
 
+// refs for auto-scroll
+const panelBodyRef = ref<HTMLElement>()
+const lastFieldCount = ref(0)
+
 // Store에서 데이터 가져오기 (새로운 구조)
 const productType = computed(() => slotFillingStore.productType)
-const hierarchicalFieldGroups = computed(() => slotFillingStore.hierarchicalFieldGroups)
-const currentStage = computed(() => slotFillingStore.currentStage)
+const hierarchicalFieldGroups = computed(() => {
+  // limit_account_guide 단계에서는 아무것도 표시하지 않음
+  if (currentStage.value?.stageId === 'limit_account_guide') {
+    return []
+  }
+  return slotFillingStore.hierarchicalFieldGroups
+})
+const currentStage = computed(() => {
+  const stage = slotFillingStore.currentStage
+  if (stage) {
+    console.log('[SlotFillingPanel] Current stage:', stage.stageId, 'visibleGroups:', stage.visibleGroups)
+  }
+  return stage
+})
 const completionRate = computed(() => slotFillingStore.visibleCompletionRate)
 const collectedInfo = computed(() => slotFillingStore.collectedInfo)
 const completionStatus = computed(() => slotFillingStore.completionStatus)
@@ -57,6 +73,108 @@ const getFieldDepthStyle = (field: SmartField) => {
     borderLeft: depth > 0 ? `2px solid rgba(76, 175, 80, ${0.3 + (depth * 0.2)})` : 'none'
   }
 }
+
+// 현재 단계의 그룹인지 확인
+const isCurrentStageGroup = (group: any): boolean => {
+  if (!currentStage.value) {
+    return false
+  }
+  
+  // currentStageGroups가 있으면 우선 사용 (더 정확함)
+  if (currentStage.value.currentStageGroups) {
+    console.log('[SlotFillingPanel] Checking group:', group.id, 'against currentStageGroups:', currentStage.value.currentStageGroups)
+    return currentStage.value.currentStageGroups.includes(group.id)
+  }
+  
+  // fallback: visibleGroups 사용
+  if (currentStage.value.visibleGroups) {
+    console.log('[SlotFillingPanel] Checking group:', group.id, 'against visibleGroups:', currentStage.value.visibleGroups)
+    return currentStage.value.visibleGroups.includes(group.id)
+  }
+  
+  return false
+}
+
+// 자동 스크롤 기능
+watch(() => slotFillingStore.visibleFields, (newFields, oldFields) => {
+  // 새로운 필드가 추가되었는지 확인
+  if (newFields.length > lastFieldCount.value) {
+    console.log('[SlotFillingPanel] New fields added, auto-scrolling...')
+    
+    // DOM이 업데이트된 후 스크롤
+    nextTick(() => {
+      if (panelBodyRef.value) {
+        // 현재 단계의 모든 필드가 보이도록 스크롤
+        const currentStageGroups = panelBodyRef.value.querySelectorAll('.field-group')
+        
+        if (currentStageGroups.length > 0) {
+          // 현재 단계 배지가 있는 그룹 찾기
+          let targetGroup: HTMLElement | null = null
+          currentStageGroups.forEach((group) => {
+            if (group.querySelector('.stage-badge')) {
+              targetGroup = group as HTMLElement
+            }
+          })
+          
+          if (targetGroup) {
+            // 현재 단계 그룹으로 스크롤
+            targetGroup.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'start' 
+            })
+            
+            // 해당 그룹의 모든 필드에 하이라이트 효과
+            const groupFields = targetGroup.querySelectorAll('.field-item')
+            groupFields.forEach((field) => {
+              field.classList.add('newly-added')
+              setTimeout(() => {
+                field.classList.remove('newly-added')
+              }, 2000)
+            })
+          } else {
+            // 현재 단계 배지가 없으면 마지막 필드로 스크롤
+            const fieldItems = panelBodyRef.value.querySelectorAll('.field-item')
+            if (fieldItems.length > 0) {
+              const lastFieldItem = fieldItems[fieldItems.length - 1] as HTMLElement
+              lastFieldItem.scrollIntoView({ 
+                behavior: 'smooth', 
+                block: 'center' 
+              })
+            }
+          }
+        }
+      }
+    })
+  }
+  
+  // 현재 필드 수 업데이트
+  lastFieldCount.value = newFields.length
+}, { immediate: true })
+
+// 현재 단계 변경 감지
+watch(() => slotFillingStore.currentStage, (newStage, oldStage) => {
+  if (newStage && newStage.stageId !== oldStage?.stageId) {
+    console.log('[SlotFillingPanel] Stage changed to:', newStage.stageId)
+    
+    // 새로운 단계로 자동 스크롤
+    nextTick(() => {
+      if (panelBodyRef.value) {
+        const currentStageGroups = panelBodyRef.value.querySelectorAll('.field-group')
+        
+        currentStageGroups.forEach((group) => {
+          const stageBadge = group.querySelector('.stage-badge')
+          if (stageBadge) {
+            const groupElement = group as HTMLElement
+            groupElement.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'start' 
+            })
+          }
+        })
+      }
+    })
+  }
+})
 </script>
 
 <template>
@@ -78,7 +196,7 @@ const getFieldDepthStyle = (field: SmartField) => {
       </div>
     </div>
 
-    <div class="panel-body">
+    <div class="panel-body" ref="panelBodyRef">
       <!-- 새로운 계층적 필드 표시 -->
       <div 
         v-for="group in hierarchicalFieldGroups" 
@@ -87,7 +205,7 @@ const getFieldDepthStyle = (field: SmartField) => {
       >
         <h4 class="group-title">
           {{ group.name }}
-          <span v-if="currentStage" class="stage-badge">현재 단계</span>
+          <span v-if="isCurrentStageGroup(group)" class="stage-badge">현재 단계</span>
         </h4>
         
         <!-- 계층적 필드 렌더링 (간소화) -->
@@ -152,7 +270,12 @@ const getFieldDepthStyle = (field: SmartField) => {
 
       <!-- 필드가 없을 때 메시지 -->
       <div v-if="hierarchicalFieldGroups.length === 0" class="empty-message">
-        대화를 시작하면 수집된 정보가 여기에 표시됩니다.
+        <template v-if="currentStage?.stageId === 'limit_account_guide'">
+          한도계좌 개설에 동의하시면 정보 수집을 시작합니다.
+        </template>
+        <template v-else>
+          대화를 시작하면 수집된 정보가 여기에 표시됩니다.
+        </template>
       </div>
     </div>
   </div>
@@ -571,5 +694,49 @@ const getFieldDepthStyle = (field: SmartField) => {
 
 .field-item.value-updated {
   animation: valueUpdate 0.6s ease;
+}
+
+/* 새로 추가된 필드 애니메이션 */
+.field-item.newly-added {
+  animation: highlightNewField 2s ease-out;
+}
+
+@keyframes highlightNewField {
+  0% {
+    background-color: #ffeb3b;
+    transform: scale(1.05);
+    box-shadow: 0 4px 20px rgba(255, 235, 59, 0.5);
+  }
+  50% {
+    background-color: #fff59d;
+    transform: scale(1.02);
+  }
+  100% {
+    background-color: var(--color-background-mute);
+    transform: scale(1);
+    box-shadow: none;
+  }
+}
+
+/* 완료된 필드에 대한 newly-added 애니메이션 */
+.field-item.completed.newly-added {
+  animation: highlightNewCompletedField 2s ease-out;
+}
+
+@keyframes highlightNewCompletedField {
+  0% {
+    background-color: #81c784;
+    transform: scale(1.05);
+    box-shadow: 0 4px 20px rgba(76, 175, 80, 0.5);
+  }
+  50% {
+    background-color: #a5d6a7;
+    transform: scale(1.02);
+  }
+  100% {
+    background-color: #e8f5e9;
+    transform: scale(1);
+    box-shadow: 0 2px 8px rgba(76, 175, 80, 0.2);
+  }
 }
 </style>
