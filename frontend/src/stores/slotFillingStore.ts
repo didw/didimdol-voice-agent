@@ -99,18 +99,36 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
           return hasData
         })
         
-        // internet_banking 그룹의 경우 특별 처리
-        // use_internet_banking이 true이면 항상 표시
+        // boolean 필드 그룹의 특별 처리: 값이 있으면(true든 false든) 완료된 것으로 간주
         let keepVisible = false
-        if (group.id === 'internet_banking' && collectedInfo.value['use_internet_banking'] === true) {
+        
+        // final_summary 단계에서는 모든 visible_groups를 표시
+        const isFinalSummary = currentStage.value?.stageId === 'final_summary'
+        if (isFinalSummary && currentStage.value?.visibleGroups?.includes(group.id)) {
           keepVisible = true
-          console.log(`[SlotFillingStore] Keeping internet_banking group visible because use_internet_banking is true`)
+          console.log(`[SlotFillingStore] final_summary: Keeping group ${group.id} visible (in visible_groups)`)
         }
         
-        // check_card 그룹도 동일하게 처리
-        if (group.id === 'check_card' && collectedInfo.value['use_check_card'] === true) {
-          keepVisible = true
-          console.log(`[SlotFillingStore] Keeping check_card group visible because use_check_card is true`)
+        // internet_banking 그룹: boolean 값이 있거나 관련 필드가 완료되었으면 표시
+        if (group.id === 'internet_banking') {
+          const useInternetBanking = collectedInfo.value['use_internet_banking']
+          const isCompleted = completionStatus.value['use_internet_banking']
+          
+          if (useInternetBanking !== undefined || isCompleted) {
+            keepVisible = true
+            console.log(`[SlotFillingStore] Keeping internet_banking group visible: value=${useInternetBanking}, completed=${isCompleted}`)
+          }
+        }
+        
+        // check_card 그룹: boolean 값이 있거나 관련 필드가 완료되었으면 표시
+        if (group.id === 'check_card') {
+          const useCheckCard = collectedInfo.value['use_check_card']
+          const isCompleted = completionStatus.value['use_check_card']
+          
+          if (useCheckCard !== undefined || isCompleted) {
+            keepVisible = true
+            console.log(`[SlotFillingStore] Keeping check_card group visible: value=${useCheckCard}, completed=${isCompleted}`)
+          }
         }
         
         const shouldShow = isCurrentStageGroup || hasCollectedData || keepVisible

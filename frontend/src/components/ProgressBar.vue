@@ -30,17 +30,44 @@ const slotFillingStore = useSlotFillingStore()
 
 // 진행률 관련 데이터
 const completionRate = computed(() => {
-  // 소수점 제거를 위해 Math.ceil 사용 (올림 처리)
-  return Math.ceil(slotFillingStore.completionRate)
+  // 조건부 필드를 고려한 완료율 계산
+  if (totalCount.value === 0) return 0
+  const rate = (completedCount.value / totalCount.value) * 100
+  return Math.round(rate)  // 반올림
 })
 const completedCount = computed(() => {
   // 백엔드에서 계산한 완료된 필수 필드 수 사용
-  return slotFillingStore.completedRequiredCount
+  let count = slotFillingStore.completedRequiredCount
+  
+  // card_receive_method가 "즉시수령"이고 card_delivery_location이 완료로 표시되어 있다면 제외
+  const collectedInfo = slotFillingStore.collectedInfo
+  const completionStatus = slotFillingStore.completionStatus
+  if (collectedInfo?.card_receive_method === '즉시수령' && 
+      completionStatus?.card_delivery_location === true) {
+    console.log('[ProgressBar] 즉시수령 selected - adjusting completed count')
+    count = Math.max(0, count - 1)
+  }
+  
+  return count
 })
 const totalCount = computed(() => {
-  // 백엔드에서 계산한 전체 필수 필드 수 사용 (시나리오 JSON 기준)
-  // 초기값이 0인 경우 19로 표시 (deposit_account의 필수 필드 수)
-  return slotFillingStore.totalRequiredCount || 19
+  // 백엔드에서 계산한 전체 필수 필드 수 사용
+  let count = slotFillingStore.totalRequiredCount || 0
+  
+  // card_receive_method가 "즉시수령"일 때 card_delivery_location 제외
+  const collectedInfo = slotFillingStore.collectedInfo
+  if (collectedInfo?.card_receive_method === '즉시수령') {
+    // card_delivery_location이 아직 포함되어 있다면 1개 감소
+    const hasDeliveryField = slotFillingStore.visibleFields.some(
+      field => field.key === 'card_delivery_location'
+    )
+    if (hasDeliveryField) {
+      console.log('[ProgressBar] 즉시수령 selected - adjusting total count')
+      count = Math.max(0, count - 1)
+    }
+  }
+  
+  return count || 19  // 기본값 19
 })
 </script>
 

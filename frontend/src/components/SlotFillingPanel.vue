@@ -50,7 +50,18 @@ const formatFieldValue = (field: SmartField, value: any): string => {
 const isFieldCompleted = (field: SmartField): boolean => {
   // 백엔드에서 default 값이 있는 필드는 자동으로 collected_info에 포함되므로
   // completionStatus만 확인하면 됨
-  return completionStatus.value[field.key] || false
+  const isCompleted = completionStatus.value[field.key] || false
+  
+  // 디버그: boolean 필드 상태 확인
+  if (field.type === 'boolean' && (field.key === 'use_check_card' || field.key === 'use_internet_banking')) {
+    console.log(`[SlotFillingPanel] ${field.key} completion:`, {
+      completionStatus: completionStatus.value[field.key],
+      collectedValue: collectedInfo.value[field.key],
+      isCompleted
+    })
+  }
+  
+  return isCompleted
 }
 
 // 현재 스테이지의 필드인지 확인 (시각적 강조용)
