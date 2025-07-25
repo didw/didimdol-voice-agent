@@ -68,7 +68,13 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
     format_instructions = parser.get_format_instructions()
     
     try:
-        prompt_kwargs = {"user_input": user_input, "format_instructions": format_instructions}
+        # 현재 stage 정보 추가
+        current_stage = state.get("current_scenario_stage_id", "")
+        prompt_kwargs = {
+            "user_input": user_input, 
+            "format_instructions": format_instructions,
+            "current_stage": current_stage
+        }
         
         # business_guidance_prompt에 서비스 설명 추가
         if not current_product_type:

@@ -208,7 +208,185 @@
   - 각 필드별 validation 규칙 정의
   - 검증 실패 시 구체적인 오류 메시지와 재질문 생성
 
-## 6. 예상 효과
+## 6. 웹 UI Slot Filling 기능
+
+### 6.1 기능 개요
+웹 인터페이스에서 사용자의 정보 수집 현황을 실시간으로 표시하고 관리하는 기능
+
+### 6.2 주요 기능
+
+#### 6.2.1 단계별 Slot 표시
+- **현재 단계 기반 노출**: 진행 중인 Step에 해당하는 slot만 선별적으로 표시
+- **점진적 공개**: 대화 진행에 따라 관련 필드들이 단계적으로 노출
+- **계층적 구조**: 상위 선택(예: 인터넷뱅킹 가입)에 따른 하위 필드들 자동 표시
+
+```
+예시:
+Step 3-1: 인터넷뱅킹 가입 → use_internet_banking 필드만 표시
+Step 3-2: 보안매체 선택 → security_medium, initial_password 등 하위 필드 추가 표시
+```
+
+#### 6.2.2 실시간 Slot Value 업데이트
+- **자동 추출**: 사용자 음성/텍스트 입력에서 Entity Agent가 자동으로 정보 추출
+- **즉시 반영**: 추출된 값이 해당 slot에 실시간으로 표시
+- **완료 상태 표시**: 수집 완료된 필드와 미완료 필드를 시각적으로 구분
+
+#### 6.2.3 사용자 쿼리 기반 Slot 수정
+- **직접 수정 요청**: "전화번호를 010-1234-5678로 바꿔주세요" 등의 수정 요청 처리
+- **대조 표현 처리**: "전화번호는 010-9999-8888이 아니라 010-1111-2222입니다" 형태 지원
+- **실시간 업데이트**: 수정 요청 즉시 slot 값 변경 및 화면 반영
+
+### 6.3 UI/UX 명세
+
+#### 6.3.1 Slot 표시 형태
+```
+[기본정보]
+✓ 성함: 홍길동
+✓ 연락처: 010-1234-5678
+○ 집주소: 미입력
+
+[인터넷뱅킹]
+✓ 가입여부: 신청
+○ 보안매체: 미입력
+○ 초기비밀번호: 미입력
+```
+
+#### 6.3.2 단계별 노출 정책
+- **Step 1 (개인정보)**: 기본정보 필드들만 표시
+- **Step 2 (이체한도)**: 이체한도 관련 필드 추가
+- **Step 3 (부가서비스)**: 선택한 서비스의 하위 필드들 표시
+- **Step 4 (확인)**: 모든 수집된 정보 종합 표시
+
+#### 6.3.3 상태 표시
+- **완료 (✓)**: 값이 정상 수집된 필드
+- **미입력 (○)**: 아직 값이 수집되지 않은 필드
+- **수정필요 (!)**: 유효성 검증 실패한 필드
+
+#### 6.3.4 진행률 표시 (Progress Bar)
+- **전체 대비 수집 비율**: 전체 필수 정보 중 수집 완료된 정보의 비율을 백분율로 표시
+- **실시간 업데이트**: 정보가 수집될 때마다 진행률 자동 갱신
+- **시각적 피드백**: 프로그레스 바 형태로 진행 상황을 직관적으로 표시
+
+```
+예시:
+정보 수집 현황: [■■■■■■■□□□] 70%
+수집 완료: 7개 / 전체: 10개
+```
+
+##### 진행률 계산 방식
+- **분자**: 현재 표시된 필드 중 값이 수집된 필드 개수
+- **분모**: 현재 단계에서 표시된 전체 필수 필드 개수
+- **계산식**: (수집 완료 필드 수 / 전체 필수 필드 수) × 100
+
+##### UI 구현 예시
+```vue
+<div class="progress-container">
+  <div class="progress-header">
+    <span>정보 수집 현황</span>
+    <span class="progress-percentage">{{ completionRate }}%</span>
+  </div>
+  <div class="progress-bar">
+    <div class="progress-fill" :style="{ width: completionRate + '%' }"></div>
+  </div>
+  <div class="progress-detail">
+    수집 완료: {{ completedCount }}개 / 전체: {{ totalCount }}개
+  </div>
+</div>
+```
+
+### 6.4 기술 구현
+
+#### 6.4.1 Backend 처리
+```python
+def update_slot_filling_with_hierarchy(scenario_data, collected_info, current_stage):
+    # 현재 단계에 맞는 필드들만 선별
+    visible_fields = get_contextual_visible_fields(scenario_data, collected_info, current_stage)
+    
+    # 실시간 완료 상태 계산
+    completion_status = calculate_field_completion(visible_fields, collected_info)
+    
+    # 진행률 계산 (표시되는 필수 필드 기준)
+    required_visible_fields = [f for f in visible_fields if f.get("required", True)]
+    total_required = len(required_visible_fields)
+    completed_required = sum(1 for f in required_visible_fields if completion_status.get(f["key"], False))
+    completion_rate = (completed_required / total_required * 100) if total_required > 0 else 0
+    
+    # WebSocket으로 프론트엔드에 전송
+    return {
+        "type": "slot_filling_update",
+        "visible_fields": visible_fields,
+        "collected_info": collected_info,
+        "completion_status": completion_status,
+        "completion_rate": round(completion_rate, 1),
+        "completed_count": completed_required,
+        "total_count": total_required,
+        "current_stage": current_stage
+    }
+```
+
+#### 6.4.2 Frontend 처리
+```typescript
+// SlotFillingStore에서 진행률 관리
+interface SlotFillingState {
+  completionRate: number
+  completedCount: number
+  totalCount: number
+  // ... 기타 상태
+}
+
+// 실시간 slot 및 진행률 업데이트
+watch(() => slotFillingStore.collectedInfo, (newInfo) => {
+  updateSlotDisplay(newInfo)
+  updateProgressBar(slotFillingStore.completionRate)
+}, { deep: true })
+
+// 진행률 바 컴포넌트
+const ProgressBar = {
+  template: `
+    <div class="progress-section">
+      <div class="progress-header">
+        <h3>정보 수집 현황</h3>
+        <span class="percentage">{{ completionRate }}%</span>
+      </div>
+      <div class="progress-bar-container">
+        <div class="progress-bar-fill" 
+             :style="{ width: completionRate + '%' }"
+             :class="{ 'complete': completionRate === 100 }">
+        </div>
+      </div>
+      <p class="progress-detail">
+        수집 완료: {{ completedCount }}개 / 전체: {{ totalCount }}개
+      </p>
+    </div>
+  `
+}
+
+// 사용자 수정 요청 처리
+const handleUserModification = (field: string, newValue: any) => {
+  chatStore.sendModificationRequest(field, newValue)
+}
+```
+
+### 6.5 사용자 시나리오
+
+#### 6.5.1 정보 수집 과정
+1. **Step 시작**: 해당 단계의 slot들이 "미입력" 상태로 표시
+2. **음성 입력**: 사용자가 정보를 말하면 Entity Agent가 추출
+3. **실시간 반영**: 추출된 정보가 즉시 slot에 표시
+4. **완료 확인**: 모든 필수 정보 수집 시 다음 단계로 진행
+
+#### 6.5.2 정보 수정 과정
+1. **수정 요청**: "전화번호를 다른 번호로 바꿔주세요"
+2. **현재 값 표시**: "현재 010-1234-5678로 등록되어 있습니다"
+3. **새 값 입력**: 사용자가 새로운 전화번호 제공
+4. **즉시 업데이트**: slot에 새로운 값 반영
+
+## 7. 예상 효과
 - 사용자 경험 향상: 각 단계에 최적화된 인터랙션 제공
 - 상담 효율성 증대: 명확한 선택지 제시로 빠른 진행
 - 오류 감소: 구조화된 입력으로 잘못된 응답 최소화
+- **정보 투명성**: 실시간 slot 표시로 수집 현황 명확 파악
+- **수정 용이성**: 언제든지 정보 수정 가능한 유연한 시스템
+- **단계별 최적화**: 현재 진행 단계에 집중할 수 있는 UI 제공
+- **진행 상황 가시화**: 프로그레스 바를 통한 전체 진행률 직관적 파악
+- **동기 부여**: 완료율 표시로 사용자의 작업 완수 의욕 고취

@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useSlotFillingStore } from '@/stores/slotFillingStore'
 import type { SmartField } from '@/types/slotFilling'
+import ProgressBar from './ProgressBar.vue'
 
 const slotFillingStore = useSlotFillingStore()
 
@@ -60,8 +61,11 @@ const getFieldDepthStyle = (field: SmartField) => {
 
 <template>
   <div class="slot-filling-panel">
+    <!-- 진행률 바 컴포넌트 -->
+    <ProgressBar />
+    
     <div class="panel-header">
-      <h3>정보 수집 현황</h3>
+      <h3>수집 정보 상세</h3>
       
       <!-- 현재 스테이지 정보 표시 -->
       <div v-if="currentStage" class="stage-info">
@@ -69,15 +73,6 @@ const getFieldDepthStyle = (field: SmartField) => {
         <div class="stage-name">{{ currentStage.stageId }}</div>
       </div>
       
-      <div class="progress-section">
-        <div class="progress-bar">
-          <div 
-            class="progress-fill" 
-            :style="{ width: `${completionRate}%` }"
-          ></div>
-        </div>
-        <span class="progress-text">{{ completionRate }}%</span>
-      </div>
       <div v-if="productType" class="product-type">
         {{ productType }}
       </div>
@@ -210,47 +205,7 @@ const getFieldDepthStyle = (field: SmartField) => {
   font-weight: 600;
 }
 
-.progress-section {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.progress-bar {
-  flex: 1;
-  height: 10px;
-  background-color: #e0e0e0;
-  border-radius: 5px;
-  overflow: hidden;
-  position: relative;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.progress-fill {
-  height: 100%;
-  background: linear-gradient(135deg, #66bb6a 0%, #4caf50 50%, #43a047 100%);
-  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-  border-radius: 5px;
-  position: relative;
-  overflow: hidden;
-}
-
-.progress-fill::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(
-    45deg,
-    transparent 30%,
-    rgba(255, 255, 255, 0.3) 50%,
-    transparent 70%
-  );
-  animation: progressShine 2s infinite;
-}
+/* Progress section styles moved to ProgressBar.vue component */
 
 @keyframes progressShine {
   0% {

@@ -60,13 +60,15 @@ task_management_prompt: |
      - invoke_web_search: For external market information (minimize usage)
   
   **User Input**: "{user_input}"
+  **Current Stage**: "{current_stage}"
   
   Based on the context and manual, decide how to best respond:
 
   **Decision Priority**:
   1. **For information corrections/modifications - use personal_info_correction directly**:
+     - EXCEPT when current stage is "ask_notification_settings" (always use invoke_scenario_agent)
      - Direct correction requests ("정보 수정", "변경하고 싶어", "틀렸어")
-     - Specific info corrections ("아니야", "다르다", "잘못", "아니고", "아니라" + specific info)
+     - Specific info corrections with clear contrast ("아니야", "다르다", "잘못", "X아니고 Y", "X아니라 Y" + specific replacement info)
      - Phone number corrections ("뒷번호가", "전화번호", specific numbers)
      - Name corrections ("이름은", "성함", specific names)
      - **Use personal_info_correction action directly for these cases**

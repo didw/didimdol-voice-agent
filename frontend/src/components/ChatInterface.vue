@@ -296,7 +296,7 @@ watch(userInputText, (newValue) => {
       </button>
     <header class="chat-header">
       <h2>
-        디딤돌 대출 음성봇
+        동시신규 테스트봇
         <small v-if="sessionId"> (세션: {{ sessionId?.substring(0, 8) }})</small>
       </h2>
       <div class="status-indicators">

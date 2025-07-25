@@ -3,6 +3,7 @@
 """
 
 import json
+import copy
 from typing import Optional, Dict, cast, Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from langchain_core.messages import HumanMessage, AIMessage
@@ -337,9 +338,11 @@ async def handle_user_boolean_selection(
         # boolean 선택 항목들을 직접 저장
         for key, value in selections.items():
             collected_info[key] = value
+            print(f"[{session_id}] Saving boolean field '{key}' = {value}")
         current_state["collected_product_info"] = collected_info
         SESSION_STATES[session_id] = current_state
         print(f"[{session_id}] Boolean selections directly saved to collected_product_info: {selections}")
+        print(f"[{session_id}] Updated collected_product_info: {collected_info}")
     
     await process_input_through_agent(
         session_id, selection_text, tts_service, "boolean", websocket
@@ -400,10 +403,12 @@ async def process_input_through_agent(
     print(f"[{session_id}] Using New LLM-based Agent")
     
     full_ai_response_text = ""
+    # deep copy를 사용하여 previous_state 생성
     previous_state = {
-        "collected_product_info": current_state.get("collected_product_info", {}).copy(),
+        "collected_product_info": copy.deepcopy(current_state.get("collected_product_info", {})),
         "scenario_data": current_state.get("active_scenario_data"),
-        "product_type": product_type
+        "product_type": product_type,
+        "current_scenario_stage_id": current_state.get("current_scenario_stage_id", "")
     }
     
     try:

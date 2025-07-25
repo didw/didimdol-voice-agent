@@ -630,17 +630,361 @@ class TestResponseTypeParsing:
 - 사용자 입력 오류율 모니터링
 - 응답 시간 성능 측정
 
-## 8. 향후 확장 계획
+## 8. Slot Filling UI 시스템 기술 요구사항
 
-### 8.1 추가 응답 유형
+### 8.1 실시간 정보 수집 표시 시스템
+
+#### 8.1.1 데이터 모델
+```python
+# backend/app/api/V1/chat_utils.py
+@dataclass
+class SlotFillingUpdate:
+    """WebSocket으로 전송될 Slot Filling 업데이트 구조"""
+    type: str = "slot_filling_update"
+    product_type: str
+    required_fields: List[Dict[str, Any]]  # 표시할 필드들
+    collected_info: Dict[str, Any]  # 수집된 정보
+    completion_status: Dict[str, bool]  # 필드별 완료 상태
+    completion_rate: float  # 진행률 (%)
+    completed_count: int  # 완료된 필드 수
+    total_count: int  # 전체 필드 수
+    field_groups: List[Dict[str, Any]]  # 필드 그룹 정보
+    current_stage: str  # 현재 진행 단계
+```
+
+#### 8.1.2 단계별 필드 노출 로직
+```python
+def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, current_stage: str) -> List[Dict]:
+    """현재 단계에 맞는 필드들만 선별적으로 반환"""
+    
+    # 단계별 필드 그룹 정의
+    stage_groups = {
+        "customer_info": ["customer_name", "phone_number", "address", "confirm_personal_info"],
+        "transfer_limit": ["transfer_limit_per_time", "transfer_limit_per_day"],
+        "notification": ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"],
+        "check_card": ["use_check_card", "card_type", "card_receive_method", "card_delivery_location", 
+                      "postpaid_transport", "card_usage_alert", "statement_method"],
+        "internet_banking": ["use_internet_banking", "security_medium", "initial_password", "other_otp_info",
+                            "transfer_limit_per_time", "transfer_limit_per_day",
+                            "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
+    }
+    
+    # 현재 단계와 수집 상태에 따른 필드 필터링
+    allowed_fields = determine_allowed_fields(current_stage, collected_info, stage_groups)
+    
+    # 조건부 필드 평가 (show_when)
+    visible_fields = evaluate_conditional_fields(scenario_data, allowed_fields, collected_info)
+    
+    return visible_fields
+```
+
+### 8.2 진행률 표시 시스템
+
+#### 8.2.1 진행률 계산 로직
+```python
+def calculate_completion_rate(visible_fields: List[Dict], collected_info: Dict) -> Dict[str, Any]:
+    """전체 필수 정보 대비 수집 완료 비율 계산"""
+    
+    # 필수 필드만 추출
+    required_fields = [f for f in visible_fields if f.get("required", True)]
+    total_required = len(required_fields)
+    
+    # 완료된 필드 수 계산
+    completed_fields = [
+        f for f in required_fields 
+        if is_field_completed(f, collected_info)
+    ]
+    completed_count = len(completed_fields)
+    
+    # 진행률 계산
+    completion_rate = (completed_count / total_required * 100) if total_required > 0 else 0
+    
+    return {
+        "completion_rate": round(completion_rate, 1),
+        "completed_count": completed_count,
+        "total_count": total_required
+    }
+```
+
+#### 8.2.2 Frontend 진행률 컴포넌트
+```vue
+<!-- frontend/src/components/ProgressBar.vue -->
+<template>
+  <div class="progress-section">
+    <div class="progress-header">
+      <h3>정보 수집 현황</h3>
+      <span class="percentage">{{ completionRate }}%</span>
+    </div>
+    <div class="progress-bar-container">
+      <div 
+        class="progress-bar-fill" 
+        :style="{ width: completionRate + '%' }"
+        :class="{ 
+          'in-progress': completionRate > 0 && completionRate < 100,
+          'complete': completionRate === 100 
+        }"
+      >
+        <div class="progress-animation"></div>
+      </div>
+    </div>
+    <p class="progress-detail">
+      수집 완료: {{ completedCount }}개 / 전체: {{ totalCount }}개
+    </p>
+  </div>
+</template>
+
+<style scoped>
+.progress-bar-container {
+  width: 100%;
+  height: 24px;
+  background-color: #f0f0f0;
+  border-radius: 12px;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4caf50, #45a049);
+  transition: width 0.3s ease;
+  position: relative;
+}
+
+.progress-bar-fill.complete {
+  background: linear-gradient(90deg, #2196f3, #1976d2);
+}
+
+.progress-animation {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.3),
+    transparent
+  );
+  animation: progress-shine 2s infinite;
+}
+
+@keyframes progress-shine {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+</style>
+```
+
+### 8.3 사용자 정보 수정 시스템
+
+#### 8.3.1 수정 요청 처리 엔진
+```python
+# backend/app/graph/nodes/workers/modification_handler.py
+class ModificationHandler:
+    """사용자의 정보 수정 요청 처리"""
+    
+    async def process_modification_request(
+        self, 
+        user_input: str, 
+        collected_info: Dict[str, Any],
+        scenario_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        
+        # 1. 수정 의도 분석
+        modification_intent = await self.extract_modification_intent(user_input)
+        
+        # 2. 대조 표현 처리
+        if self.is_contrast_expression(user_input):
+            return await self.handle_contrast_modification(user_input, collected_info)
+        
+        # 3. 직접 수정 요청 처리
+        if modification_intent.field and modification_intent.new_value:
+            return await self.apply_direct_modification(
+                modification_intent.field,
+                modification_intent.new_value,
+                collected_info
+            )
+        
+        return {"status": "no_modification_needed"}
+```
+
+#### 8.3.2 Frontend 수정 인터페이스
+```typescript
+// frontend/src/stores/slotFillingStore.ts
+export const useSlotFillingStore = defineStore('slotFilling', {
+  state: () => ({
+    // ... 기존 state
+    modificationMode: false,
+    selectedFieldForModification: null as string | null,
+  }),
+  
+  actions: {
+    async requestFieldModification(field: string, newValue: any) {
+      // WebSocket으로 수정 요청 전송
+      const chatStore = useChatStore()
+      await chatStore.sendModificationRequest({
+        type: 'field_modification',
+        field: field,
+        newValue: newValue,
+        currentValue: this.collectedInfo[field]
+      })
+    },
+    
+    handleModificationResponse(response: any) {
+      if (response.success) {
+        // 수정 성공 시 즉시 UI 업데이트
+        this.collectedInfo[response.field] = response.newValue
+        this.updateCompletionStatus()
+        
+        // 시각적 피드백
+        this.showModificationSuccess(response.field)
+      }
+    }
+  }
+})
+```
+
+### 8.4 WebSocket 통신 프로토콜
+
+#### 8.4.1 메시지 타입 정의
+```typescript
+// frontend/src/types/slotFilling.ts
+export enum SlotFillingMessageType {
+  UPDATE = 'slot_filling_update',
+  MODIFICATION_REQUEST = 'field_modification_request',
+  MODIFICATION_RESPONSE = 'field_modification_response',
+  STAGE_CHANGED = 'stage_changed'
+}
+
+export interface SlotFillingWebSocketMessage {
+  type: SlotFillingMessageType
+  sessionId: string
+  timestamp: string
+  data: any
+}
+```
+
+#### 8.4.2 실시간 동기화 로직
+```python
+# backend/app/api/V1/chat.py
+async def send_slot_filling_update(
+    websocket: WebSocket, 
+    session_id: str,
+    trigger: str = "auto"
+):
+    """Slot Filling 상태를 실시간으로 전송"""
+    
+    session_state = SESSION_STATES.get(session_id)
+    if not session_state:
+        return
+    
+    # 현재 상태 기반 업데이트 데이터 생성
+    update_data = update_slot_filling_with_hierarchy(
+        session_state.get("active_scenario_data"),
+        session_state.get("collected_product_info", {}),
+        session_state.get("current_stage", "")
+    )
+    
+    # WebSocket으로 전송
+    await websocket.send_json({
+        "type": "slot_filling_update",
+        "trigger": trigger,
+        **update_data
+    })
+```
+
+### 8.5 성능 최적화
+
+#### 8.5.1 Debouncing 전략
+```typescript
+// frontend/src/composables/useDebounce.ts
+export function useDebouncedSlotUpdate() {
+  const pending = ref(false)
+  const timeoutId = ref<number | null>(null)
+  
+  const debouncedUpdate = (updateFn: () => void, delay: number = 300) => {
+    if (timeoutId.value) {
+      clearTimeout(timeoutId.value)
+    }
+    
+    pending.value = true
+    timeoutId.value = window.setTimeout(() => {
+      updateFn()
+      pending.value = false
+    }, delay)
+  }
+  
+  return { debouncedUpdate, pending }
+}
+```
+
+#### 8.5.2 캐싱 전략
+```python
+# backend/app/api/V1/chat_utils.py
+from functools import lru_cache
+
+@lru_cache(maxsize=128)
+def get_field_hierarchy_cached(scenario_json_str: str) -> Dict:
+    """시나리오 필드 계층 구조를 캐싱하여 반복 계산 방지"""
+    scenario_data = json.loads(scenario_json_str)
+    return calculate_field_hierarchy(scenario_data)
+```
+
+## 9. 테스트 전략
+
+### 9.1 단위 테스트
+```python
+# backend/tests/test_slot_filling.py
+class TestSlotFilling:
+    def test_contextual_field_visibility(self):
+        """단계별 필드 노출이 올바른지 테스트"""
+        collected_info = {"use_internet_banking": True}
+        current_stage = "ask_security_medium"
+        
+        visible_fields = get_contextual_visible_fields(
+            scenario_data, collected_info, current_stage
+        )
+        
+        # security_medium 필드가 표시되는지 확인
+        field_keys = [f["key"] for f in visible_fields]
+        assert "security_medium" in field_keys
+    
+    def test_completion_rate_calculation(self):
+        """진행률 계산이 정확한지 테스트"""
+        visible_fields = [
+            {"key": "name", "required": True},
+            {"key": "phone", "required": True},
+            {"key": "address", "required": False}
+        ]
+        collected_info = {"name": "홍길동", "phone": "010-1234-5678"}
+        
+        result = calculate_completion_rate(visible_fields, collected_info)
+        
+        assert result["completion_rate"] == 100.0  # 필수 필드 2개 모두 완료
+        assert result["completed_count"] == 2
+        assert result["total_count"] == 2
+```
+
+### 9.2 통합 테스트
+- Slot Filling 실시간 업데이트 검증
+- 진행률 바 동적 업데이트 확인
+- 정보 수정 플로우 전체 검증
+- WebSocket 연결 안정성 테스트
+
+## 10. 향후 확장 계획
+
+### 10.1 추가 응답 유형
 - **grid**: 표 형태의 정보 표시
 - **slider**: 수치 입력을 위한 슬라이더
 - **multi-select**: 다중 선택 가능한 체크박스
 
-### 8.2 AI 기반 입력 이해 향상
+### 10.2 AI 기반 입력 이해 향상
 - 자연어 처리를 통한 선택지 매칭 정확도 향상
 - 컨텍스트 기반 입력 해석
+- 정보 수정 의도 자동 감지
 
-### 8.3 개인화
+### 10.3 개인화 및 학습
 - 사용자별 선호 응답 유형 학습
 - 상황별 최적 응답 유형 자동 선택
+- 수정 패턴 학습을 통한 예측 제안

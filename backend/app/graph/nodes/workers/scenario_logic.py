@@ -167,6 +167,10 @@ async def process_scenario_logic_node(state: AgentState) -> AgentState:
     
     current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
     collected_info = state.collected_product_info.copy()
+    
+    print(f"🔥🔥🔥🔥🔥 [MAIN STAGE CHECK] Current stage: '{current_stage_id}'")
+    print(f"🔥🔥🔥🔥🔥 [MAIN STAGE CHECK] Is notification stage? {current_stage_id == 'ask_notification_settings'}")
+    print(f"🔥🔥🔥🔥🔥 [MAIN STAGE CHECK] Collected info keys: {list(collected_info.keys())}")
     scenario_output = state.scenario_agent_output
     user_input = state.stt_result or ""
     
@@ -691,33 +695,40 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             
         elif current_stage_id == "ask_notification_settings":
             # 알림 설정 단계 처리 - Boolean 타입 단계로 올바르게 처리
-            print(f"[DEBUG] === NOTIFICATION SETTINGS STAGE (BOOLEAN TYPE) ===")
-            print(f"[DEBUG] User input: '{user_input}'")
-            print(f"[DEBUG] Current collected_info: {collected_info}")
+            print(f"🔥🔥🔥🔥🔥 [STAGE] === NOTIFICATION SETTINGS STAGE ENTERED ===")
+            print(f"🔥🔥🔥🔥🔥 [STAGE] User input: '{user_input}'")
+            print(f"🔥🔥🔥🔥🔥 [STAGE] Current collected_info BEFORE: {collected_info}")
             
-            # 사용자 입력이 있으면 entities 처리 후 다음 단계로 진행
-            if user_input:
-                print(f"[DEBUG] Processing user input for notification settings")
-                
-                # entities 처리 및 boolean 변환
-                if scenario_output and scenario_output.entities:
-                    entities = scenario_output.entities
-                    print(f"[DEBUG] Processing entities: {entities}")
+            # === 무조건 강제 Boolean 변환 (모든 조건 무시) ===
+            boolean_fields = ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
+            
+            print(f"🔥🔥🔥 [FORCE] === UNCONDITIONAL BOOLEAN CONVERSION START ===")
+            for field in boolean_fields:
+                if field in collected_info and isinstance(collected_info[field], str):
+                    str_value = collected_info[field].strip()
+                    print(f"🔥🔥🔥 [FORCE] Converting {field}: '{str_value}'")
                     
-                    # boolean 값들을 collected_info에 저장
-                    boolean_fields = ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
-                    for field in boolean_fields:
-                        if field in entities:
-                            value = entities[field]
-                            if value in ["신청", "네", "예", "좋아요", "동의"]:
-                                collected_info[field] = True
-                            elif value in ["미신청", "아니요", "아니", "싫어요", "거부"]:
-                                collected_info[field] = False
-                            print(f"[DEBUG] Set {field} = {collected_info.get(field)}")
-                
+                    if str_value in ["신청", "네", "예", "좋아요", "동의", "하겠습니다", "필요해요", "받을게요"]:
+                        collected_info[field] = True
+                        print(f"🔥🔥🔥 [FORCE] ✅ {field}: '{str_value}' → TRUE")
+                    elif str_value in ["미신청", "아니요", "아니", "싫어요", "거부", "안할게요", "필요없어요", "안받을게요"]:
+                        collected_info[field] = False  
+                        print(f"🔥🔥🔥 [FORCE] ✅ {field}: '{str_value}' → FALSE")
+                    else:
+                        print(f"🔥🔥🔥 [FORCE] ❌ Unknown value: {field} = '{str_value}'")
+                elif field in collected_info:
+                    print(f"🔥🔥🔥 [FORCE] {field} = {collected_info[field]} ({type(collected_info[field]).__name__}) - already boolean")
+                else:
+                    print(f"🔥🔥🔥 [FORCE] {field} not found in collected_info")
+            
+            print(f"🔥🔥🔥 [FORCE] === UNCONDITIONAL BOOLEAN CONVERSION END ===")
+            print(f"🔥🔥🔥 [DEBUG] Current collected_info AFTER: {collected_info}")
+            
+            # === 간단한 다음 단계 진행 로직 ===
+            if user_input:
                 # 다음 단계로 진행
                 next_stage_id = current_stage_info.get("default_next_stage_id", "ask_check_card")
-                print(f"[DEBUG] Moving to next stage: {next_stage_id}")
+                print(f"🔥🔥🔥 [DEBUG] Moving to next stage: {next_stage_id}")
                 
                 # 다음 스테이지 정보 가져오기
                 next_stage_info = active_scenario_data.get("stages", {}).get(next_stage_id, {})
@@ -726,7 +737,7 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                 # 간단한 확인 메시지 + 다음 단계 프롬프트
                 response_text = f"알림 설정을 완료했습니다. {next_stage_prompt}"
                 
-                print(f"[DEBUG] Response: {response_text}")
+                print(f"🔥🔥🔥 [DEBUG] Response: {response_text}")
                 print(f"[DEBUG] Updated collected_info: {collected_info}")
                 
                 return state.merge_update({

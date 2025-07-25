@@ -17,6 +17,8 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
   const collectedInfo = ref<Record<string, any>>({})
   const completionStatus = ref<Record<string, boolean>>({})
   const completionRate = ref<number>(0)
+  const totalRequiredCount = ref<number>(0)  // 전체 필수 필드 수
+  const completedRequiredCount = ref<number>(0)  // 완료된 필수 필드 수
   const fieldGroups = ref<FieldGroup[]>([])
   const currentStage = ref<CurrentStageInfo | null>(null)
   const visibleFields = ref<SmartField[]>([])  // Backend에서 계산된 표시 필드
@@ -27,6 +29,11 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
   const updateDebounceTimer = ref<number | null>(null)
   const fieldVisibilityCache = ref<Map<string, boolean>>(new Map())
   const cacheCleanupInterval = ref<number | null>(null)
+  
+  // 수정 모드 관련 상태
+  const modificationMode = ref<boolean>(false)
+  const selectedFieldForModification = ref<string | null>(null)
+  const modificationPending = ref<boolean>(false)
   
   // 메모리 누수 방지를 위한 정리 함수
   const cleanup = () => {
@@ -127,6 +134,7 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
   // Actions
   const updateSlotFilling = (message: SlotFillingUpdate) => {
     // DEBUG: 업데이트 시작 로그
+    console.log('🔥🔥🔥 [SlotFilling] UPDATE SLOT FILLING CALLED!')
     console.log('[SlotFilling] ===== UPDATE SLOT FILLING START =====')
     console.log('[SlotFilling] Received message:', message)
     console.log('[SlotFilling] Message type:', message.type)
@@ -174,6 +182,8 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
       collectedInfo.value = { ...message.collectedInfo }
       completionStatus.value = { ...message.completionStatus }
       completionRate.value = message.completionRate
+      totalRequiredCount.value = message.totalRequiredCount || 0
+      completedRequiredCount.value = message.completedRequiredCount || 0
       fieldGroups.value = message.fieldGroups ? [...message.fieldGroups] : []
       currentStage.value = message.currentStage || null
       
@@ -183,44 +193,42 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
       // 깊이별 필드 그룹화
       computeFieldsByDepth()
       
-      console.log('[SlotFilling] Visible fields updated:', visibleFields.value.length)
-      console.log('[SlotFilling] Fields by depth:', fieldsByDepth.value)
-      console.log('[SlotFilling] Sample visible fields:', visibleFields.value.slice(0, 5))
+      if (DEBUG_MODE) {
+        console.log('[SlotFilling] Visible fields updated:', visibleFields.value.length)
+        console.log('[SlotFilling] Fields by depth:', fieldsByDepth.value)
+        
+        // 중요한 필드 상태만 로깅
+        const importantFields = ['use_check_card', 'use_internet_banking', 'confirm_personal_info']
+        const importantStatus = importantFields.reduce((acc, key) => {
+          if (collectedInfo.value[key] !== undefined) {
+            acc[key] = collectedInfo.value[key]
+          }
+          return acc
+        }, {} as Record<string, any>)
+        
+        if (Object.keys(importantStatus).length > 0) {
+          console.log('[SlotFilling] Important fields status:', importantStatus)
+        }
+      }
       
-      // 체크카드 관련 필드 디버깅
-      const checkCardFields = visibleFields.value.filter(f => 
-        f.key.includes('card') || f.key.includes('check')
-      )
-      console.log('[SlotFilling] Check card related fields:', checkCardFields)
-      
-      // card_delivery_location 필드 확인
-      const deliveryLocationField = visibleFields.value.find(f => f.key === 'card_delivery_location')
-      console.log('[SlotFilling] card_delivery_location field:', deliveryLocationField)
-      console.log('[SlotFilling] card_receive_method value:', collectedInfo.value.card_receive_method)
-      console.log('[SlotFilling] Collected info keys:', Object.keys(collectedInfo.value))
-      console.log('[SlotFilling] Boolean fields status:', {
-        use_internet_banking: collectedInfo.value.use_internet_banking,
-        use_check_card: collectedInfo.value.use_check_card,
-        confirm_personal_info: collectedInfo.value.confirm_personal_info,
-        use_lifelong_account: collectedInfo.value.use_lifelong_account
-      })
-      
-      // 업데이트 후 상태 로그
-      console.log('[SlotFilling] Updated state:', {
-        productType: productType.value,
-        fieldsCount: requiredFields.value.length,
-        collectedCount: Object.keys(collectedInfo.value).length,
-        completionRate: completionRate.value,
-        fieldGroups: fieldGroups.value,
-        currentStage: currentStage.value
-      })
-      
-      // 필드별 상세 정보
-      requiredFields.value.forEach(field => {
-        const value = collectedInfo.value[field.key]
-        const completed = completionStatus.value[field.key]
-        console.log(`[SlotFilling] Field '${field.key}': ${value} (completed: ${completed})`)
-      })
+      if (DEBUG_MODE) {
+        // 업데이트 후 상태 요약
+        console.log('[SlotFilling] Updated state summary:', {
+          productType: productType.value,
+          fieldsCount: requiredFields.value.length,
+          collectedCount: Object.keys(collectedInfo.value).length,
+          completionRate: completionRate.value,
+          currentStage: currentStage.value
+        })
+        
+        // 완료되지 않은 필드만 로깅
+        const incompleteFields = requiredFields.value.filter(field => 
+          !completionStatus.value[field.key]
+        )
+        if (incompleteFields.length > 0) {
+          console.log('[SlotFilling] Incomplete fields:', incompleteFields.map(f => f.key))
+        }
+      }
       
       // localStorage에 상태 저장 (선택사항)
       nextTick(() => {
@@ -249,6 +257,8 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
       collectedInfo.value = {}
       completionStatus.value = {}
       completionRate.value = 0
+      totalRequiredCount.value = 0
+      completedRequiredCount.value = 0
       fieldGroups.value = []
       currentStage.value = null
       visibleFields.value = []
@@ -285,6 +295,60 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
     const total = requiredFields.value.length
     const completed = Object.values(completionStatus.value).filter(Boolean).length
     completionRate.value = total > 0 ? Math.round((completed / total) * 100) : 0
+  }
+  
+  // 필드 수정 요청
+  const requestFieldModification = async (fieldKey: string, newValue: any) => {
+    if (DEBUG_MODE) {
+      console.log('[SlotFilling] Requesting field modification:', { fieldKey, newValue })
+    }
+    
+    modificationPending.value = true
+    selectedFieldForModification.value = fieldKey
+    
+    try {
+      // chatStore를 통해 WebSocket으로 수정 요청 전송
+      // 실제 구현은 chatStore에서 처리
+      const chatStore = await import('@/stores/chatStore').then(m => m.useChatStore())
+      await chatStore.sendFieldModificationRequest(fieldKey, newValue, collectedInfo.value[fieldKey])
+      
+      return true
+    } catch (error) {
+      console.error('[SlotFilling] Failed to send modification request:', error)
+      modificationPending.value = false
+      selectedFieldForModification.value = null
+      return false
+    }
+  }
+  
+  // 수정 응답 처리
+  const handleModificationResponse = (response: any) => {
+    if (DEBUG_MODE) {
+      console.log('[SlotFilling] Handling modification response:', response)
+    }
+    
+    modificationPending.value = false
+    
+    if (response.success && response.field === selectedFieldForModification.value) {
+      // 성공적으로 수정된 경우 로컬 상태 업데이트
+      updateFieldValue(response.field, response.newValue)
+      selectedFieldForModification.value = null
+      
+      if (DEBUG_MODE) {
+        console.log('[SlotFilling] Field modification successful:', response.field)
+      }
+    } else if (!response.success) {
+      console.error('[SlotFilling] Field modification failed:', response.error)
+      selectedFieldForModification.value = null
+    }
+  }
+  
+  // 수정 모드 토글
+  const toggleModificationMode = () => {
+    modificationMode.value = !modificationMode.value
+    if (!modificationMode.value) {
+      selectedFieldForModification.value = null
+    }
   }
   
   // localStorage 관련 함수들
@@ -384,10 +448,15 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
     collectedInfo,
     completionStatus,
     completionRate,
+    totalRequiredCount,
+    completedRequiredCount,
     fieldGroups,
     currentStage,
     visibleFields,
     fieldsByDepth,
+    modificationMode,
+    selectedFieldForModification,
+    modificationPending,
 
     // Getters
     getState,
@@ -401,6 +470,9 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
     updateFieldValue,
     removeFieldValue,
     computeFieldsByDepth,
+    requestFieldModification,
+    handleModificationResponse,
+    toggleModificationMode,
     
     // localStorage 관련 (선택적 사용)
     saveToLocalStorage,

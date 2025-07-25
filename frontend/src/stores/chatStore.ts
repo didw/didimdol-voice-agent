@@ -254,12 +254,37 @@ export const useChatStore = defineStore("chat", {
                 this.error = "정보 수집 상태 업데이트 중 오류가 발생했습니다.";
               }
               break;
+            case "field_modification_response":
+              try {
+                const slotFillingStore = useSlotFillingStore();
+                slotFillingStore.handleModificationResponse(data);
+                
+                // 수정 응답에 따른 사용자 피드백
+                if (data.success) {
+                  this.addMessage("ai", `${data.field} 필드가 성공적으로 수정되었습니다.`);
+                } else {
+                  this.addMessage("ai", `${data.field} 필드 수정에 실패했습니다: ${data.error || '알 수 없는 오류'}`);
+                }
+                
+                this.isProcessingLLM = false;
+              } catch (error) {
+                console.error("Error processing field modification response:", error);
+                this.error = "필드 수정 응답 처리 중 오류가 발생했습니다.";
+              }
+              break;
             case "debug_slot_filling":
               console.log("===== DEBUG SLOT FILLING MESSAGE =====");
               console.log("Debug message received:", data);
               console.log("Data hash:", data.data_hash);
               console.log("Summary:", data.summary);
               console.log("===== END DEBUG MESSAGE =====");
+              break;
+            case "test_websocket_connection":
+              console.log("🔥🔥🔥 TEST WEBSOCKET MESSAGE RECEIVED!");
+              console.log("Test message data:", data);
+              console.log("Session ID:", data.session_id);
+              console.log("Timestamp:", data.timestamp);
+              console.log("🔥🔥🔥 WEBSOCKET CONNECTION IS WORKING!");
               break;
             case "error":
               this.error = data.message;
@@ -888,6 +913,62 @@ export const useChatStore = defineStore("chat", {
         this.addMessage("user", `${field} 수정: ${newValue}`);
         this.isProcessingLLM = true;
       }
+    },
+    
+    // Slot Filling 필드 수정 요청 (새로운 메서드)
+    async sendFieldModificationRequest(fieldKey: string, newValue: any, currentValue?: any) {
+      if (!this.webSocket || this.webSocket.readyState !== WebSocket.OPEN) {
+        throw new Error('WebSocket이 연결되어 있지 않습니다.');
+      }
+      
+      // 사용자 메시지로 수정 요청 표시
+      const fieldName = fieldKey.replace(/_/g, ' ');
+      const displayValue = typeof newValue === 'boolean' ? (newValue ? '예' : '아니오') : newValue;
+      this.addMessage("user", `${fieldName} 수정 요청: ${displayValue}`);
+      
+      // WebSocket으로 수정 요청 전송
+      this.webSocket.send(
+        JSON.stringify({
+          type: "field_modification_request",
+          field: fieldKey,
+          newValue: newValue,
+          currentValue: currentValue
+        })
+      );
+      
+      this.isProcessingLLM = true;
+      
+      // Promise를 반환하여 응답 대기 가능하도록
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('수정 요청 응답 시간 초과'));
+        }, 10000); // 10초 타임아웃
+        
+        // 임시로 응답 처리 (실제로는 WebSocket 메시지 핸들러에서 처리)
+        const messageHandler = (event: MessageEvent) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'field_modification_response' && data.field === fieldKey) {
+              clearTimeout(timeout);
+              resolve(data);
+            }
+          } catch (error) {
+            // JSON 파싱 오류는 무시
+          }
+        };
+        
+        // 일시적으로 이벤트 리스너 추가
+        if (this.webSocket) {
+          this.webSocket.addEventListener('message', messageHandler);
+          
+          // 타임아웃이나 성공 시 리스너 제거
+          setTimeout(() => {
+            if (this.webSocket) {
+              this.webSocket.removeEventListener('message', messageHandler);
+            }
+          }, 10000);
+        }
+      });
     },
     
     disconnectWebSocket() {

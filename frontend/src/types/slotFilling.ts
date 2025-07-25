@@ -43,9 +43,39 @@ export interface SlotFillingUpdate {
   collectedInfo: Record<string, any>
   completionStatus: Record<string, boolean>
   completionRate: number
+  totalRequiredCount?: number  // 전체 필수 필드 수
+  completedRequiredCount?: number  // 완료된 필수 필드 수
   fieldGroups?: FieldGroup[]
   currentStage?: CurrentStageInfo
 }
 
 // 하위 호환성을 위한 별칭
 export type RequiredField = SmartField
+
+// WebSocket Message Types
+export enum SlotFillingMessageType {
+  UPDATE = 'slot_filling_update',
+  MODIFICATION_REQUEST = 'field_modification_request',
+  MODIFICATION_RESPONSE = 'field_modification_response',
+  STAGE_CHANGED = 'stage_changed'
+}
+
+export interface FieldModificationRequest {
+  type: 'field_modification_request'
+  field: string
+  newValue: any
+  currentValue?: any
+}
+
+export interface FieldModificationResponse {
+  type: 'field_modification_response'
+  success: boolean
+  field: string
+  newValue?: any
+  error?: string
+}
+
+export interface SlotFillingDebugHistory {
+  timestamp: Date
+  data: SlotFillingUpdate
+}

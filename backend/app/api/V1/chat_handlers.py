@@ -112,14 +112,15 @@ async def handle_slot_filling_update(
     info_changed = previous_state.get("collected_product_info", {}) != current_collected_info
     scenario_changed = previous_state.get("scenario_data") != current_state.get("active_scenario_data")
     product_type_changed = previous_state.get("product_type") != current_state.get("current_product_type")
+    stage_changed = previous_state.get("current_scenario_stage_id") != current_scenario_stage
     scenario_active = current_state.get("active_scenario_data") is not None
     is_info_collection_stage = (current_scenario_stage in info_collection_stages or 
                                current_state.get("current_product_type") == "deposit_account")
     
-    print(f"[{session_id}] ⭐ Conditions - Info:{info_changed}, Scenario:{scenario_changed}, Product:{product_type_changed}, Active:{scenario_active}, Stage:{is_info_collection_stage}")
+    print(f"[{session_id}] ⭐ Conditions - Info:{info_changed}, Scenario:{scenario_changed}, Product:{product_type_changed}, Stage:{stage_changed}, Active:{scenario_active}, InfoStage:{is_info_collection_stage}")
     
     should_send = should_send_slot_filling_update(
-        info_changed, scenario_changed, product_type_changed,
+        info_changed, scenario_changed, product_type_changed, stage_changed,
         scenario_active, is_info_collection_stage
     )
     print(f"[{session_id}] ⭐ should_send_slot_filling_update result: {should_send}")

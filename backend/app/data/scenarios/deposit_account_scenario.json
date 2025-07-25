@@ -113,6 +113,7 @@
       "type": "boolean",
       "default": true,
       "description": "중요거래 알림 신청 여부",
+      "extraction_prompt": "고객이 중요거래 알림에 대해 '네', '신청할게요', '필요해요', '받을게요' 등을 말하면 true로 추출하세요. '아니요', '안할게요', '필요없어요' 등을 말하면 false로 추출하세요.",
       "show_when": "use_internet_banking == true",
       "parent_field": "use_internet_banking"
     },
@@ -123,6 +124,7 @@
       "type": "boolean",
       "default": true,
       "description": "출금내역 알림 신청 여부",
+      "extraction_prompt": "고객이 출금내역 알림에 대해 '네', '신청할게요', '필요해요', '받을게요' 등을 말하면 true로 추출하세요. '아니요', '안할게요', '필요없어요' 등을 말하면 false로 추출하세요.",
       "show_when": "use_internet_banking == true",
       "parent_field": "use_internet_banking"
     },
@@ -133,6 +135,7 @@
       "type": "boolean",
       "default": false,
       "description": "해외IP 제한 신청 여부",
+      "extraction_prompt": "고객이 해외IP 제한에 대해 '네', '제한할게요', '차단해주세요', '막아주세요' 등을 말하면 true로 추출하세요. '아니요', '안할게요', '필요없어요' 등을 말하면 false로 추출하세요.",
       "show_when": "use_internet_banking == true",
       "parent_field": "use_internet_banking"
     },
