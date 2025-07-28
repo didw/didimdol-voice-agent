@@ -255,7 +255,7 @@
       "id": "customer_info_check",
       "total_cnt": 7,
       "response_type": "narrative",
-      "prompt": "먼저 고객님의 개인정보를 확인하겠습니다. 제가 가지고 있는 정보는 다음과 같습니다. 이 내용이 모두 맞으신가요?\n\n- 이름: 김신한\n- 영문이름: KIM SHINHAN\n- 주민등록번호: 800101-1234567\n- 휴대폰번호: 010-1234-5678\n- 이메일: shinhan01@naver.com\n- 집주소: 서울특별시 종로구 숭인동 123\n- 직장주소: 서울특별시 중구 삼각동 123",
+      "prompt": "먼저 고객님의 개인정보를 확인하겠습니다. 제가 가지고 있는 정보는 다음과 같습니다. 이 내용이 모두 맞으신가요?\n\n- 이름: 김신한  \n- 영문이름: KIM SHINHAN  \n- 주민등록번호: 800101-1234567  \n- 휴대폰번호: 010-1234-5678  \n- 이메일: shinhan01@naver.com  \n- 집주소: 서울특별시 종로구 숭인동 123  \n- 직장주소: 서울특별시 중구 삼각동 123",
       "display_fields": ["customer_name", "english_name", "resident_number", "phone_number", "email", "address", "work_address"],
       "is_question": true,
       "input_type": "yes_no",

@@ -238,6 +238,19 @@ watch(
   { deep: true, immediate: false } // 'deep' for messages array, 'immediate: false' to run after initial setup
 );
 
+// --- Message formatting function ---
+const formatMessageText = (text: string): string => {
+  if (!text) return ''
+  
+  // Handle various newline patterns
+  let formatted = text
+    .replace(/(\r\n|\r|\n)/g, '<br>')  // Standard newlines
+    .replace(/\\n/g, '<br>')          // Escaped newlines
+    .replace(/\n\n/g, '<br><br>')     // Double newlines
+  
+  return formatted
+}
+
 // --- Watch for user typing to potentially deactivate voice mode ---
 watch(userInputText, (newValue) => {
   if (newValue.length > 0 && isVoiceModeActive.value) {
@@ -333,7 +346,7 @@ watch(userInputText, (newValue) => {
         <div v-else-if="message.text && message.text.trim()">
           <p class="message-text">
             <strong>{{ message.sender === 'user' ? 'You' : 'AI' }}:</strong> 
-            <span v-html="message.text.replace(/\n/g, '<br>')"></span>
+            <span v-html="formatMessageText(message.text)"></span>
             <span
               v-if="message.isStreaming && message.sender === 'ai'"
               class="streaming-cursor"
@@ -612,8 +625,9 @@ watch(userInputText, (newValue) => {
 }
 
 .message-text {
-  white-space: pre-line;
+  white-space: pre-wrap;
   line-height: 1.5;
+  word-break: break-word;
 }
 
 .message.user {

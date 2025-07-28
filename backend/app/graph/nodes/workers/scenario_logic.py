@@ -1663,6 +1663,7 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
     response_type = stage_info.get("response_type", "narrative")
     prompt = stage_info.get("prompt", "")
     
+    
     # CRITICAL DEBUG for ask_security_medium
     if stage_info.get("id") == "ask_security_medium":
         print(f"🚨 BACKEND: ask_security_medium stage processing started")
@@ -1715,10 +1716,14 @@ def format_prompt_with_fields(prompt: str, collected_info: Dict[str, Any], displ
     field_display = []
     
     field_names = {
-        "customer_name": "성함",
-        "phone_number": "연락처", 
-        "customer_phone": "연락처",
-        "address": "집주소"
+        "customer_name": "이름",
+        "english_name": "영문이름", 
+        "resident_number": "주민등록번호",
+        "phone_number": "휴대폰번호", 
+        "customer_phone": "휴대폰번호",
+        "email": "이메일",
+        "address": "집주소",
+        "work_address": "직장주소"
     }
     
     # 기본값 매핑

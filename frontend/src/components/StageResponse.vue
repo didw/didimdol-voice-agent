@@ -2,15 +2,40 @@
   <div class="stage-response" v-if="responseData">
     <!-- Narrative 타입 -->
     <div v-if="responseData.responseType === 'narrative'" class="narrative-response">
-      <p><strong>AI:</strong> {{ responseData.prompt }}</p>
+      <p class="narrative-text">
+        <strong>AI:</strong> 
+        <span v-html="formatPromptText(responseData.prompt)"></span>
+      </p>
     </div>
     
     <!-- Bullet 타입 -->
     <div v-else-if="responseData.responseType === 'bullet'" class="bullet-response">
-      <p><strong>AI:</strong> {{ responseData.prompt }}</p>
+      <p class="bullet-text">
+        <strong>AI:</strong> 
+        <span v-html="formatPromptText(responseData.prompt)"></span>
+      </p>
       
-      <!-- 일반 bullet 응답 처리 (ask_security_medium 포함) -->
-      <div class="choices">
+      <!-- choice_groups가 있는 경우 그룹으로 표시 -->
+      <div v-if="responseData.choiceGroups && responseData.choiceGroups.length > 0" class="choice-groups">
+        <div v-for="group in responseData.choiceGroups" :key="group.title" class="choice-group">
+          <h4 class="group-title">{{ group.title }}</h4>
+          <div class="group-choices">
+            <button 
+              v-for="(choice, index) in (group.items || [])" 
+              :key="choice?.value || choice?.label || index"
+              @click="selectChoice(choice?.value || choice?.label || '')"
+              class="choice-button"
+              :class="{ 'selected': isSelectedChoice(choice) }"
+              :aria-label="`선택: ${choice?.label || choice?.value || '선택지'}`"
+            >
+              {{ choice?.label || choice?.value || `선택지 ${index + 1}` }}
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- 일반 bullet 응답 처리 (choice_groups가 없는 경우) -->
+      <div v-else class="choices">
         <button 
           v-for="(choice, index) in (responseData.choices || [])" 
           :key="choice?.value || choice?.label || index"
@@ -26,7 +51,10 @@
     
     <!-- Boolean 타입 -->
     <div v-else-if="responseData.responseType === 'boolean'" class="boolean-response">
-      <p><strong>AI:</strong> {{ responseData.prompt }}</p>
+      <p class="boolean-text">
+        <strong>AI:</strong> 
+        <span v-html="formatPromptText(responseData.prompt)"></span>
+      </p>
       <div class="boolean-choices">
         <div 
           v-for="choice in responseData.choices" 
@@ -55,8 +83,8 @@
       </button>
     </div>
     
-    <!-- 수정 가능한 필드 표시 -->
-    <div v-if="responseData.modifiableFields && responseData.modifiableFields.length > 0" class="modifiable-info">
+    <!-- 수정 가능한 필드 표시 (customer_info_check 단계 제외) -->
+    <div v-if="responseData.modifiableFields && responseData.modifiableFields.length > 0 && responseData.stageId !== 'customer_info_check'" class="modifiable-info">
       <small>수정하실 항목이 있으시면 말씀해주세요.</small>
     </div>
   </div>
@@ -139,6 +167,17 @@ const updateBoolean = () => {
   console.log('Boolean selections updated:', booleanSelections.value);
 };
 
+// Format prompt text with line breaks
+const formatPromptText = (text: string): string => {
+  if (!text) return '';
+  
+  // Handle various newline patterns
+  return text
+    .replace(/(\r\n|\r|\n)/g, '<br>')  // Standard newlines
+    .replace(/\\n/g, '<br>')            // Escaped newlines
+    .replace(/\n\n/g, '<br><br>');     // Double newlines for paragraphs
+};
+
 const submitBooleanSelections = () => {
   if (!props.responseData) return;
   chatStore.sendBooleanSelections(props.responseData.stageId, booleanSelections.value);
@@ -158,12 +197,49 @@ const submitBooleanSelections = () => {
   line-height: 1.6;
 }
 
+.narrative-text,
+.bullet-text,
+.boolean-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* Bullet 스타일 */
 .choices {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
   margin-top: 1rem;
+}
+
+/* Choice Groups 스타일 */
+.choice-groups {
+  margin-top: 1rem;
+}
+
+.choice-group {
+  margin-bottom: 1.5rem;
+}
+
+.choice-group:last-child {
+  margin-bottom: 0;
+}
+
+.group-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #1976d2;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid #1976d2;
+  letter-spacing: 0.3px;
+}
+
+.group-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-left: 0.5rem;
 }
 
 .choice-button {

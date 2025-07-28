@@ -9,12 +9,19 @@ export interface Choice {
   default?: boolean
 }
 
+export interface ChoiceGroup {
+  title: string
+  items: Choice[]
+}
+
 export interface StageResponseMessage {
   type: 'stage_response'
   stageId: string
   responseType: ResponseType
   prompt: string
   choices?: Choice[]
+  choiceGroups?: ChoiceGroup[]
+  defaultChoice?: string
   skippable: boolean
   modifiableFields?: string[]
 }
