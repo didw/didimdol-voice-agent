@@ -331,8 +331,9 @@ watch(userInputText, (newValue) => {
         </div>
         <!-- 일반 텍스트 메시지 처리 (빈 메시지는 제외) -->
         <div v-else-if="message.text && message.text.trim()">
-          <p>
-            <strong>{{ message.sender === 'user' ? 'You' : 'AI' }}:</strong> {{ message.text }}
+          <p class="message-text">
+            <strong>{{ message.sender === 'user' ? 'You' : 'AI' }}:</strong> 
+            <span v-html="message.text.replace(/\n/g, '<br>')"></span>
             <span
               v-if="message.isStreaming && message.sender === 'ai'"
               class="streaming-cursor"
@@ -608,6 +609,11 @@ watch(userInputText, (newValue) => {
 }
 .message p {
   margin: 0;
+}
+
+.message-text {
+  white-space: pre-line;
+  line-height: 1.5;
 }
 
 .message.user {
