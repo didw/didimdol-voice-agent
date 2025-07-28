@@ -136,6 +136,14 @@
       "extraction_prompt": "고객이 해외IP 제한에 대해 '네', '제한할게요', '차단해주세요', '막아주세요' 등을 말하면 true로 추출하세요. '아니요', '안할게요', '필요없어요' 등을 말하면 false로 추출하세요."
     },
     {
+      "key": "confirm_personal_info",
+      "display_name": "개인정보 확인",
+      "required": true,
+      "type": "boolean",
+      "description": "고객이 개인정보가 맞다고 확인한 여부",
+      "extraction_prompt": "고객이 개인정보 확인에 대해 '네', '맞아요', '맞습니다', '예' 등을 말하면 true로 추출하세요. '아니요', '틀려요', '수정할게요', '다릅니다' 등을 말하면 false로 추출하세요."
+    },
+    {
       "key": "withdrawal_account_registration",
       "display_name": "출금계좌 추가",
       "required": true,
@@ -178,7 +186,7 @@
       "choices": ["5만원 이상 결제 시 발송 (무료)", "모든 내역 발송 (200원, 포인트 우선 차감)", "결제내역 문자 받지 않음"],
       "default": "5만원 이상 결제 시 발송 (무료)",
       "description": "카드사용알림 문자서비스",
-      "extraction_prompt": "고객이 카드 사용 알림에 대해 '5만원', '무료', '모든', '200원', '안받음', '필요없어요' 등을 언급하면 해당하는 선택지를 추출하세요."
+      "extraction_prompt": "고객이 카드 사용 알림에 대해 '5만원', '무료', '5만원 이상'을 언급하면 '5만원 이상 결제 시 발송 (무료)', '모든', '전체', '모든 내역', '200원'을 언급하면 '모든 내역 발송 (200원, 포인트 우선 차감)', '안받음', '필요없어요', '받지 않음'을 언급하면 '결제내역 문자 받지 않음'으로 추출하세요."
     },
     {
       "key": "card_password_same_as_account",
@@ -198,12 +206,12 @@
     {
       "id": "account_settings",
       "name": "계좌 설정",
-      "fields": ["withdrawal_account_registration"]
+      "fields": []
     },
     {
       "id": "internet_banking",
       "name": "인터넷뱅킹 설정",
-      "fields": ["security_medium", "other_otp_info", "transfer_limit_per_time", "transfer_limit_per_day", "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
+      "fields": ["security_medium", "other_otp_info", "transfer_limit_per_time", "transfer_limit_per_day", "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction", "withdrawal_account_registration"]
     },
     {
       "id": "check_card",
@@ -251,7 +259,7 @@
       "display_fields": ["customer_name", "english_name", "resident_number", "phone_number", "email", "address", "work_address"],
       "is_question": true,
       "input_type": "yes_no",
-      "expected_info_key": null,
+      "expected_info_key": "confirm_personal_info",
       "visible_groups": ["basic_info"],
       "modifiable_fields": ["customer_name", "english_name", "resident_number", "phone_number", "email", "address", "work_address"],
       "skippable": false,
@@ -284,24 +292,24 @@
       "response_type": "bullet",
       "prompt": "쏠 어플에서도 지금 만든 계좌를 사용하실 수 있도록 도와드릴게요. 보유하신 보안매체 등록해드릴까요?",
       "choices": [
-        {"value": "보유한 보안매체 1 (당행)", "label": "🔐 보유한 보안매체 1 (당행)"},
-        {"value": "보유한 보안매체 2 (타행)", "label": "🏦 보유한 보안매체 2 (타행)"},
-        {"value": "보안카드", "label": "💳 보안카드"},
-        {"value": "신한OTP (10,000원)", "label": "📱 신한OTP (10,000원)"}
+        {"value": "보유한 보안매체 1 (당행)", "label": "보유한 보안매체 1 (당행)"},
+        {"value": "보유한 보안매체 2 (타행)", "label": "보유한 보안매체 2 (타행)"},
+        {"value": "보안카드", "label": "보안카드"},
+        {"value": "신한OTP (10,000원)", "label": "신한OTP (10,000원)"}
       ],
       "choice_groups": [
         {
           "title": "선택 가능한 보안매체",
           "items": [
-            {"value": "보유한 보안매체 1 (당행)", "label": "🔐 보유한 보안매체 1 (당행)"},
-            {"value": "보유한 보안매체 2 (타행)", "label": "🏦 보유한 보안매체 2 (타행)"}
+            {"value": "보유한 보안매체 1 (당행)", "label": "보유한 보안매체 1 (당행)"},
+            {"value": "보유한 보안매체 2 (타행)", "label": "보유한 보안매체 2 (타행)"}
           ]
         },
         {
           "title": "보안매체 새로 발급 받기",
           "items": [
-            {"value": "보안카드", "label": "💳 보안카드"},
-            {"value": "신한OTP (10,000원)", "label": "📱 신한OTP (10,000원)"}
+            {"value": "보안카드", "label": "보안카드"},
+            {"value": "신한OTP (10,000원)", "label": "신한OTP (10,000원)"}
           ]
         }
       ],
@@ -372,7 +380,7 @@
       "is_question": true,
       "input_type": "yes_no",
       "expected_info_key": "withdrawal_account_registration",
-      "visible_groups": ["account_settings"],
+      "visible_groups": ["internet_banking"],
       "skippable": true,
       "default_next_stage_id": "ask_card_receive_method"
     },
@@ -386,6 +394,7 @@
         {"value": "집으로 배송", "label": "집으로 배송"},
         {"value": "직장으로 배송", "label": "직장으로 배송"}
       ],
+      "default_choice": "즉시수령",
       "is_question": true,
       "input_type": "choice",
       "expected_info_key": "card_receive_method",
@@ -404,6 +413,7 @@
         {"value": "신한카드1", "label": "신한카드1"},
         {"value": "신한카드2", "label": "신한카드2"}
       ],
+      "default_choice": "S-Line",
       "is_question": true,
       "input_type": "choice",
       "expected_info_key": "card_type",
@@ -421,6 +431,7 @@
         {"value": "이메일", "label": "이메일"},
         {"value": "홈페이지", "label": "홈페이지"}
       ],
+      "default_choice": "휴대폰",
       "is_question": true,
       "input_type": "choice",
       "expected_info_key": "statement_method",
@@ -438,6 +449,7 @@
         {"value": "모든 내역 발송 (200원, 포인트 우선 차감)", "label": "모든 내역 발송 (200원, 포인트 우선 차감)"},
         {"value": "결제내역 문자 받지 않음", "label": "결제내역 문자 받지 않음"}
       ],
+      "default_choice": "5만원 이상 결제 시 발송 (무료)",
       "is_question": true,
       "input_type": "choice",
       "expected_info_key": "card_usage_alert",

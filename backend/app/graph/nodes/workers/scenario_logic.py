@@ -236,7 +236,24 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
         elif user_input and len(user_input.strip()) > 0:
             try:
                 # Entity Agent로 정보 추출 (ScenarioAgent가 추출하지 못한 경우에만)
+                print(f"🤖 [ENTITY_AGENT] About to call entity_agent.process_slot_filling")
+                print(f"  current_stage_id: {current_stage_id}")
+                print(f"  user_input: '{user_input}'")
+                print(f"  collected_info BEFORE Entity Agent: {collected_info}")
+                
                 extraction_result = await entity_agent.process_slot_filling(user_input, required_fields, collected_info)
+                
+                # Entity Agent 결과 디버깅
+                print(f"🤖 [ENTITY_AGENT] Entity Agent completed")
+                print(f"  extraction_result: {extraction_result}")
+                if 'collected_info' in extraction_result:
+                    print(f"  collected_info AFTER Entity Agent: {extraction_result['collected_info']}")
+                    
+                # ask_card_usage_alert 특별 디버깅
+                if current_stage_id == "ask_card_usage_alert":
+                    print(f"🚨🚨🚨 [ENTITY_AGENT_CARD_USAGE] ask_card_usage_alert Entity Agent result:")
+                    print(f"  card_usage_alert before: {collected_info.get('card_usage_alert')}")
+                    print(f"  card_usage_alert after: {extraction_result.get('collected_info', {}).get('card_usage_alert')}")
             except Exception as e:
                 print(f"[ERROR] Entity agent process_slot_filling failed: {type(e).__name__}: {str(e)}")
                 import traceback
@@ -1128,26 +1145,50 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             collected_info[expected_info_key] = default_security_medium
             print(f"🔐 [SECURITY_MEDIUM] Set {expected_info_key} = {default_security_medium} (user said yes)")
     
-    # ask_notification_settings 단계에서 "네" 응답 처리
+    # ask_notification_settings 단계에서 "네" 응답 처리 (Entity Agent 결과가 없는 경우에만)
     if current_stage_id == "ask_notification_settings":
         print(f"🔔 [NOTIFICATION] Processing with input: '{user_input}'")
         
-        if user_input and any(word in user_input for word in ["네", "예", "좋아요", "모두", "전부", "다", "신청", "하겠습니다"]):
-            # 모든 알림을 true로 설정
-            notification_fields = ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
-            print(f"🔔 [NOTIFICATION] User said yes - setting all notifications to true")
+        # Entity Agent가 구체적인 선택을 추출하지 못한 경우에만 "네" 처리
+        notification_fields = ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
+        has_specific_selections = any(field in collected_info for field in notification_fields)
+        
+        if (not has_specific_selections and user_input and 
+            any(word in user_input for word in ["네", "예", "좋아요", "모두", "전부", "다", "신청", "하겠습니다"])):
+            # Entity Agent가 선택을 추출하지 못하고 사용자가 일반적인 동의 표현을 한 경우에만 모든 알림을 true로 설정
+            print(f"🔔 [NOTIFICATION] No specific selections found, user said yes - setting all notifications to true")
             for field in notification_fields:
                 collected_info[field] = True
                 print(f"🔔 [NOTIFICATION] Set {field} = True")
+        elif has_specific_selections:
+            print(f"🔔 [NOTIFICATION] Specific selections found, keeping Entity Agent results")
     
-    # 체크카드 관련 단계에서 "네" 응답 처리
+    # 체크카드 관련 단계에서 "네" 응답 처리 (Entity Agent 결과가 없는 경우에만)
     check_card_stages = ["ask_card_receive_method", "ask_card_type", "ask_statement_method", "ask_card_usage_alert", "ask_card_password"]
     if current_stage_id in check_card_stages:
         print(f"💳 [CHECK_CARD] Processing {current_stage_id} with input: '{user_input}'")
         
         expected_info_key = current_stage_info.get("expected_info_key")
-        if expected_info_key and user_input and any(word in user_input for word in ["네", "예", "좋아요", "그래요", "하겠습니다"]):
-            # 각 단계의 기본값 설정
+        
+        # 더 자세한 디버깅 추가
+        if current_stage_id == "ask_card_usage_alert":
+            print(f"🚨🚨🚨 [CARD_USAGE_ALERT] DETAILED DEBUG:")
+            print(f"  expected_info_key: {expected_info_key}")
+            print(f"  user_input: '{user_input}'")
+            print(f"  collected_info BEFORE check: {collected_info}")
+            print(f"  expected_info_key in collected_info: {expected_info_key in collected_info if expected_info_key else 'N/A'}")
+            if expected_info_key and expected_info_key in collected_info:
+                print(f"  current value: {collected_info[expected_info_key]}")
+        
+        # Entity Agent가 구체적인 선택을 추출한 경우에는 그 값을 우선시
+        if expected_info_key and expected_info_key in collected_info:
+            print(f"💳 [CHECK_CARD] Entity Agent found specific value for {expected_info_key}: {collected_info[expected_info_key]}")
+            # 추가로 "네" 단어가 포함되어 있어도 Entity Agent 결과를 유지하도록 명시적 로그
+            if current_stage_id == "ask_card_usage_alert" and user_input and any(word in user_input for word in ["네", "예", "좋아요", "그래요", "하겠습니다"]):
+                print(f"🚨 [CARD_USAGE_ALERT] User said '네' but Entity Agent extracted specific value - KEEPING Entity Agent result: {collected_info[expected_info_key]}")
+        elif (expected_info_key and user_input and 
+              any(word in user_input for word in ["네", "예", "좋아요", "그래요", "하겠습니다"])):
+            # Entity Agent가 값을 추출하지 못하고 사용자가 일반적인 동의 표현을 한 경우에만 기본값 설정
             default_values = {
                 "card_receive_method": "즉시수령",
                 "card_type": "S-Line", 
@@ -1158,7 +1199,13 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             
             if expected_info_key in default_values:
                 collected_info[expected_info_key] = default_values[expected_info_key]
-                print(f"💳 [CHECK_CARD] Set {expected_info_key} = {default_values[expected_info_key]} (user said yes)")
+                print(f"💳 [CHECK_CARD] No specific selection found, set {expected_info_key} = {default_values[expected_info_key]} (user said yes)")
+        
+        # 최종 상태 디버깅
+        if current_stage_id == "ask_card_usage_alert" and expected_info_key:
+            print(f"🚨🚨🚨 [CARD_USAGE_ALERT] FINAL DEBUG:")
+            print(f"  final {expected_info_key}: {collected_info.get(expected_info_key)}")
+            print(f"  collected_info AFTER: {collected_info}")
     
     # 스테이지 전환 로직 결정
     transitions = current_stage_info.get("transitions", [])
@@ -1404,15 +1451,32 @@ def _handle_field_name_mapping(collected_info: Dict[str, Any]) -> None:
     
 
 
-def _map_entity_to_valid_choice(field_key: str, entity_value: str, stage_info: Dict[str, Any]) -> Optional[str]:
+def _map_entity_to_valid_choice(field_key: str, entity_value, stage_info: Dict[str, Any]) -> Optional[str]:
     """
-    Entity 값을 유효한 choice로 매핑하는 함수
+    Entity 값을 유효한 choice로 매핑하는 함수 (boolean 값도 처리)
     """
-    if not entity_value or not stage_info.get("choices"):
+    if entity_value is None or not stage_info.get("choices"):
         return None
     
     choices = stage_info.get("choices", [])
-    entity_lower = entity_value.lower()
+    
+    # Boolean 값 특별 처리
+    if isinstance(entity_value, bool):
+        if field_key == "card_usage_alert":
+            if entity_value == False:  # False는 "받지 않음"을 의미
+                mapped_value = "결제내역 문자 받지 않음"
+                print(f"🔄 [BOOLEAN_MAPPING] {field_key}: {entity_value} → '{mapped_value}'")
+                return mapped_value
+            else:  # True는 기본값을 의미
+                mapped_value = "5만원 이상 결제 시 발송 (무료)"
+                print(f"🔄 [BOOLEAN_MAPPING] {field_key}: {entity_value} → '{mapped_value}'")
+                return mapped_value
+        # 다른 boolean 필드들에 대한 처리도 필요시 여기에 추가
+        return None
+    
+    # 문자열이 아닌 경우 문자열로 변환
+    entity_str = str(entity_value)
+    entity_lower = entity_str.lower()
     
     # 각 choice와 부분 매칭 시도
     for choice in choices:
@@ -1457,6 +1521,17 @@ def _map_entity_to_valid_choice(field_key: str, entity_value: str, stage_info: D
             "자택": "집으로 배송",
             "회사": "직장으로 배송",
             "직장": "직장으로 배송"
+        },
+        "card_usage_alert": {
+            "5만원": "5만원 이상 결제 시 발송 (무료)",
+            "무료": "5만원 이상 결제 시 발송 (무료)",
+            "모든": "모든 내역 발송 (200원, 포인트 우선 차감)",
+            "전체": "모든 내역 발송 (200원, 포인트 우선 차감)",
+            "200원": "모든 내역 발송 (200원, 포인트 우선 차감)",
+            "안받음": "결제내역 문자 받지 않음",
+            "받지않음": "결제내역 문자 받지 않음",
+            "필요없어요": "결제내역 문자 받지 않음",
+            "안해요": "결제내역 문자 받지 않음"
         }
     }
     
@@ -1619,12 +1694,14 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
         if stage_info.get("default_choice"):
             response_data["default_choice"] = stage_info.get("default_choice")
         
-        # CRITICAL DEBUG for ask_security_medium
-        if stage_info.get("id") == "ask_security_medium":
-            print(f"🚨 BACKEND: ask_security_medium response_data created:")
+        # CRITICAL DEBUG for ask_security_medium and check card stages
+        if stage_info.get("id") in ["ask_security_medium", "ask_card_receive_method", "ask_card_type", "ask_statement_method", "ask_card_usage_alert"]:
+            print(f"🚨 BACKEND: {stage_info.get('id')} response_data created:")
             print(f"  final choices: {response_data['choices']}")
             print(f"  final response_type: {response_data['response_type']}")
             print(f"  final stage_id: {response_data['stage_id']}")
+            print(f"  default_choice from stage_info: {stage_info.get('default_choice')}")
+            print(f"  default_choice in response_data: {response_data.get('default_choice')}")
     
     # 수정 가능한 필드 정보
     if stage_info.get("modifiable_fields"):

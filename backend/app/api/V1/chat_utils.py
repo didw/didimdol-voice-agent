@@ -167,8 +167,11 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
         # 한도계좌 동의 단계
         allowed_fields.add("limit_account_agreement")
     elif current_stage == "customer_info_check":
-        # 고객정보 확인 단계
-        allowed_fields.update(["customer_name", "phone_number", "address", "confirm_personal_info"])
+        # 고객정보 확인 단계 - 모든 기본 개인정보 필드 표시 (confirm_personal_info 제외)
+        allowed_fields.update([
+            "limit_account_agreement", "customer_name", "english_name", "resident_number", 
+            "phone_number", "email", "address", "work_address"
+        ])
     
     # 기본 정보가 확인된 이후에는 기본 필드들 표시 (특정 단계가 아닌 경우)
     if (collected_info.get("confirm_personal_info") and 
@@ -219,10 +222,19 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
             # 개인정보 확인 후 기본 필드 유지
             pass
     
-    # 4. 추가 서비스 선택 후 하위 필드들 표시 (개인정보 단계와 동일한 방식)
+    # 4. 출금계좌 등록 단계 처리
+    if current_stage == "ask_withdrawal_account":
+        allowed_fields.add("withdrawal_account_registration")
+        # 기본 정보도 함께 표시 (이미 수집된 정보들)
+        allowed_fields.update([
+            "limit_account_agreement", "customer_name", "english_name", "resident_number", 
+            "phone_number", "email", "address", "work_address", "confirm_personal_info"
+        ])
+    
+    # 5. 추가 서비스 선택 후 하위 필드들 표시 (개인정보 단계와 동일한 방식)
     # 인터넷뱅킹 관련 모든 단계에서 필드 표시
     internet_banking_stages = ["ask_security_medium", "ask_other_otp_info", "ask_transfer_limit", 
-                              "ask_notification_settings", "ask_internet_banking"]
+                              "ask_notification_settings", "ask_internet_banking", "ask_withdrawal_account"]
     
     # use_internet_banking이 true이거나 인터넷뱅킹 관련 단계에서는 항상 모든 필드 표시
     # 또는 security_medium이 이미 수집되었으면 계속 표시
@@ -232,7 +244,8 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
         "security_medium" in collected_info):
         internet_banking_sub = ["use_internet_banking", "security_medium", "initial_password", "other_otp_info", 
                                "transfer_limit_per_time", "transfer_limit_per_day", 
-                               "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
+                               "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction", 
+                               "withdrawal_account_registration"]
         allowed_fields.update(internet_banking_sub)
     
     # 체크카드 단계이거나 선택했을 때 모든 관련 하위 필드들을 표시

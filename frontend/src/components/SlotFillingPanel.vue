@@ -52,13 +52,23 @@ const isFieldCompleted = (field: SmartField): boolean => {
   // completionStatus만 확인하면 됨
   const isCompleted = completionStatus.value[field.key] || false
   
-  // 디버그: boolean 필드 상태 확인
-  if (field.type === 'boolean' && (field.key === 'use_check_card' || field.key === 'use_internet_banking')) {
-    console.log(`[SlotFillingPanel] ${field.key} completion:`, {
-      completionStatus: completionStatus.value[field.key],
-      collectedValue: collectedInfo.value[field.key],
-      isCompleted
-    })
+  // boolean 필드의 경우 값이 있으면 완료된 것으로 간주 (true든 false든)
+  if (field.type === 'boolean') {
+    const hasValue = collectedInfo.value[field.key] !== undefined && collectedInfo.value[field.key] !== null
+    const finalCompleted = isCompleted || hasValue
+    
+    // 디버그: boolean 필드 상태 확인
+    if (field.key === 'use_check_card' || field.key === 'use_internet_banking' || field.key === 'withdrawal_account_registration') {
+      console.log(`[SlotFillingPanel] ${field.key} completion:`, {
+        completionStatus: completionStatus.value[field.key],
+        collectedValue: collectedInfo.value[field.key],
+        hasValue,
+        isCompleted,
+        finalCompleted
+      })
+    }
+    
+    return finalCompleted
   }
   
   return isCompleted

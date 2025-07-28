@@ -84,9 +84,11 @@ watch(() => props.responseData, (newData) => {
     console.log('  choices.length:', newData.choices?.length);
     console.log('  full data:', newData);
     
-    if (newData.stageId === 'ask_security_medium') {
-      console.log('🚨 ASK_SECURITY_MEDIUM STAGE REACHED!');
-      console.log('  This should show bullet choices but may not be displaying correctly');
+    if (['ask_security_medium', 'ask_card_receive_method', 'ask_card_type', 'ask_statement_method', 'ask_card_usage_alert'].includes(newData.stageId)) {
+      console.log(`🚨 ${newData.stageId.toUpperCase()} STAGE REACHED!`);
+      console.log('  defaultChoice:', newData.defaultChoice);
+      console.log('  choices:', newData.choices);
+      console.log('  responseType:', newData.responseType);
     }
   }
 }, { immediate: true });
