@@ -57,12 +57,23 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
             # confirm_personal_info를 True로 설정하여 다음 단계로
             collected_info["confirm_personal_info"] = True
             
-            next_stage_id = "ask_lifelong_account"
+            # 시나리오 JSON에서 정의된 다음 단계로 이동
+            current_stage_info = active_scenario_data.get("stages", {}).get("customer_info_check", {})
+            transitions = current_stage_info.get("transitions", [])
+            default_next = current_stage_info.get("default_next_stage_id", "ask_security_medium")
+            
+            # 긍정 응답에 해당하는 transition 찾기
+            next_stage_id = default_next
+            for transition in transitions:
+                if "맞다고 확인" in transition.get("condition_description", ""):
+                    next_stage_id = transition.get("next_stage_id", default_next)
+                    break
+            
             # active_scenario_data가 없을 때를 대비한 안전한 처리
             if active_scenario_data and "stages" in active_scenario_data:
-                next_stage_prompt = active_scenario_data.get("stages", {}).get(next_stage_id, {}).get("prompt", "평생계좌번호로 등록하시겠어요?")
+                next_stage_prompt = active_scenario_data.get("stages", {}).get(next_stage_id, {}).get("prompt", "")
             else:
-                next_stage_prompt = "평생계좌번호로 등록하시겠어요?"
+                next_stage_prompt = ""
             
             # 시나리오 프롬프트에 이미 "다음으로"가 있으면 중복 방지
             if next_stage_prompt.startswith("다음으로"):

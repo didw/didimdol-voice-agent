@@ -306,8 +306,19 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                 # confirm_personal_info도 True로 설정
                 collected_info["confirm_personal_info"] = True
                 
-                next_stage_id = "ask_lifelong_account"
-                next_stage_prompt = active_scenario_data.get("stages", {}).get("ask_lifelong_account", {}).get("prompt", "평생계좌번호로 등록하시겠어요?")
+                # 시나리오 JSON에서 정의된 다음 단계로 이동
+                transitions = current_stage_info.get("transitions", [])
+                default_next = current_stage_info.get("default_next_stage_id", "ask_security_medium")
+                
+                # 긍정 응답에 해당하는 transition 찾기
+                next_stage_id = default_next
+                for transition in transitions:
+                    if "맞다고 확인" in transition.get("condition_description", ""):
+                        next_stage_id = transition.get("next_stage_id", default_next)
+                        break
+                
+                next_stage_info = active_scenario_data.get("stages", {}).get(next_stage_id, {})
+                next_stage_prompt = next_stage_info.get("prompt", "")
                 
                 return state.merge_update({
                     "current_scenario_stage_id": next_stage_id,
@@ -519,6 +530,12 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             
         elif current_stage_id == "ask_transfer_limit":
             # 이체한도 설정 단계 처리 - 개선된 버전
+            
+            # "네" 응답 시 최대한도로 설정
+            if user_input and any(word in user_input for word in ["네", "예", "최대로", "최대한도로", "최고로", "좋아요", "그렇게 해주세요"]):
+                collected_info["transfer_limit_per_time"] = 5000
+                collected_info["transfer_limit_per_day"] = 10000
+                print(f"[TRANSFER_LIMIT] User confirmed maximum limits: 1회 5000만원, 1일 10000만원")
             
             # ScenarioAgent의 entities를 먼저 병합 및 필드명 매핑
             if scenario_output and hasattr(scenario_output, 'entities') and scenario_output.entities:
@@ -909,8 +926,19 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         if is_positive_confirmation:
             collected_info["confirm_personal_info"] = True
             
-            next_stage_id = "ask_lifelong_account"
-            next_stage_prompt = active_scenario_data.get("stages", {}).get("ask_lifelong_account", {}).get("prompt", "평생계좌번호로 등록하시겠어요?")
+            # 시나리오 JSON에서 정의된 다음 단계로 이동
+            transitions = current_stage_info.get("transitions", [])
+            default_next = current_stage_info.get("default_next_stage_id", "ask_security_medium")
+            
+            # 긍정 응답에 해당하는 transition 찾기
+            next_stage_id = default_next
+            for transition in transitions:
+                if "맞다고 확인" in transition.get("condition_description", ""):
+                    next_stage_id = transition.get("next_stage_id", default_next)
+                    break
+            
+            next_stage_info = active_scenario_data.get("stages", {}).get(next_stage_id, {})
+            next_stage_prompt = next_stage_info.get("prompt", "")
             
             return state.merge_update({
                 "current_scenario_stage_id": next_stage_id,
@@ -1305,12 +1333,24 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
     response_type = stage_info.get("response_type", "narrative")
     prompt = stage_info.get("prompt", "")
     
+    # Debug: Log original prompt for ask_security_medium
+    if stage_info.get("id") == "ask_security_medium":
+        print(f"[DEBUG] ask_security_medium original prompt length: {len(prompt)}")
+        print(f"[DEBUG] ask_security_medium original prompt: {repr(prompt)}")
+    
     # display_fields가 있는 경우 처리 (bullet 타입)
     if stage_info.get("display_fields"):
         prompt = format_prompt_with_fields(prompt, collected_info, stage_info["display_fields"], scenario_data)
+        if stage_info.get("id") == "ask_security_medium":
+            print(f"[DEBUG] ask_security_medium after format_prompt_with_fields: {repr(prompt)}")
     
     # 템플릿 변수 치환
     prompt = replace_template_variables(prompt, collected_info)
+    
+    # Debug: Log final prompt for ask_security_medium
+    if stage_info.get("id") == "ask_security_medium":
+        print(f"[DEBUG] ask_security_medium final prompt length: {len(prompt)}")
+        print(f"[DEBUG] ask_security_medium final prompt: {repr(prompt)}")
     
     response_data = {
         "stage_id": stage_info.get("id"),
@@ -1322,6 +1362,8 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
     # 선택지가 있는 경우
     if response_type in ["bullet", "boolean"]:
         response_data["choices"] = stage_info.get("choices", [])
+        if stage_info.get("id") == "ask_security_medium":
+            print(f"[DEBUG] ask_security_medium choices: {response_data['choices']}")
     
     # 수정 가능한 필드 정보
     if stage_info.get("modifiable_fields"):
@@ -1354,18 +1396,29 @@ def format_prompt_with_fields(prompt: str, collected_info: Dict[str, Any], displ
             if field.get("key") in display_fields and field.get("default"):
                 default_values[field["key"]] = field["default"]
     
+    # 프롬프트에 이미 필드 정보가 포함되어 있는지 확인
+    # "- 성함:" 같은 패턴이 이미 있으면 중복 추가하지 않음
+    prompt_has_fields = False
     for field_key in display_fields:
-        # 수집된 정보가 있으면 사용, 없으면 기본값 사용
-        value = collected_info.get(field_key)
-        if not value and field_key in default_values:
-            value = default_values[field_key]
-        if not value:
-            value = "미입력"
-            
         field_name = field_names.get(field_key, field_key)
-        field_display.append(f"- {field_name}: {value}")
+        if f"- {field_name}:" in prompt:
+            prompt_has_fields = True
+            break
     
-    if field_display:
-        prompt += "\n" + "\n".join(field_display)
+    # 프롬프트에 필드 정보가 없을 때만 추가
+    if not prompt_has_fields:
+        for field_key in display_fields:
+            # 수집된 정보가 있으면 사용, 없으면 기본값 사용
+            value = collected_info.get(field_key)
+            if not value and field_key in default_values:
+                value = default_values[field_key]
+            if not value:
+                value = "미입력"
+                
+            field_name = field_names.get(field_key, field_key)
+            field_display.append(f"- {field_name}: {value}")
+        
+        if field_display:
+            prompt += "\n" + "\n".join(field_display)
     
     return prompt

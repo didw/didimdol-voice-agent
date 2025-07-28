@@ -337,6 +337,12 @@ def replace_template_variables(template: str, collected_info: Dict) -> str:
     """템플릿 문자열의 변수를 수집된 정보로 치환"""
     import re
     
+    # Debug: Check if this is ask_security_medium
+    is_security_medium = "보안매체" in template and "쏠 어플" in template
+    if is_security_medium:
+        print(f"[DEBUG] replace_template_variables input template length: {len(template)}")
+        print(f"[DEBUG] replace_template_variables input template: {repr(template)}")
+    
     # 수집된 정보의 복사본 생성 (원본 수정 방지)
     info_copy = collected_info.copy()
     
@@ -394,5 +400,10 @@ def replace_template_variables(template: str, collected_info: Dict) -> str:
     
     # 빈 줄 정리
     result = re.sub(r'\n\s*\n\s*\n', '\n\n', result)
+    
+    # Debug: Log final result for ask_security_medium
+    if is_security_medium:
+        print(f"[DEBUG] replace_template_variables output result length: {len(result)}")
+        print(f"[DEBUG] replace_template_variables output result: {repr(result)}")
     
     return result

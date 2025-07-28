@@ -16,7 +16,7 @@ CONFIG_DIR = APP_DIR / "config"
 SCENARIO_FILES: Dict[PRODUCT_TYPES, Path] = {
     "didimdol": DATA_DIR / "scenarios" / "didimdol_loan_scenario.json",
     "jeonse": DATA_DIR / "scenarios" / "jeonse_loan_scenario.json",
-    "deposit_account": DATA_DIR / "scenarios" / "deposit_account_scenario.json",
+    "deposit_account": DATA_DIR / "scenarios" / "deposit_account_scenario_v2.json",
 }
 KNOWLEDGE_BASE_FILES: Dict[str, Path] = {
     "didimdol": DATA_DIR / "docs" / "didimdol.md",

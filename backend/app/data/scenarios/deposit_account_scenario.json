@@ -264,7 +264,7 @@
       "id": "customer_info_check",
       "total_cnt": 3,
       "response_type": "narrative",
-      "prompt": "감사합니다. 그럼 한도계좌로 입출금 통장 개설 도와드릴게요. 제가 가지고 있는 정보는 다음과 같습니다. 아래 내용이 모두 맞으신가요?",
+      "prompt": "먼저 고객님의 개인정보를 확인하겠습니다. 제가 가지고 있는 정보는 다음과 같습니다. 이 내용이 모두 맞으신가요?",
       "display_fields": ["customer_name", "phone_number", "address"],
       "is_question": true,
       "input_type": "yes_no",

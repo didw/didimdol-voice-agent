@@ -42,6 +42,15 @@ async def handle_agent_output_chunk(
             # Send stage response data to client
             stage_data = agent_output_chunk.get("data")
             if stage_data:
+                # Debug: Log stage response data for ask_security_medium
+                if stage_data.get("stage_id") == "ask_security_medium":
+                    print(f"[DEBUG] WebSocket sending ask_security_medium stage_response:")
+                    print(f"[DEBUG] - stage_id: {stage_data.get('stage_id')}")
+                    print(f"[DEBUG] - response_type: {stage_data.get('response_type')}")
+                    print(f"[DEBUG] - prompt length: {len(stage_data.get('prompt', ''))}")
+                    print(f"[DEBUG] - prompt content: {repr(stage_data.get('prompt'))}")
+                    print(f"[DEBUG] - choices: {stage_data.get('choices')}")
+                
                 await manager.send_json_to_client(session_id, {
                     "type": "stage_response",
                     "stageId": stage_data.get("stage_id"),
