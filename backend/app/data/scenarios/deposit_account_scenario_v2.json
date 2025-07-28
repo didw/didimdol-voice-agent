@@ -383,6 +383,89 @@
       "expected_info_key": "card_receive_method",
       "visible_groups": ["check_card"],
       "skippable": false,
+      "transitions": [
+        {
+          "next_stage_id": "ask_card_type",
+          "condition_description": "즉시수령을 선택한 경우",
+          "example_phrases": ["즉시수령", "지금"]
+        },
+        {
+          "next_stage_id": "confirm_home_address",
+          "condition_description": "집으로 배송을 선택한 경우",
+          "example_phrases": ["집으로 배송", "집"]
+        },
+        {
+          "next_stage_id": "confirm_work_address",
+          "condition_description": "직장으로 배송을 선택한 경우",
+          "example_phrases": ["직장으로 배송", "직장"]
+        }
+      ],
+      "default_next_stage_id": "ask_card_type"
+    },
+    "confirm_home_address": {
+      "id": "confirm_home_address",
+      "total_cnt": 0,
+      "response_type": "narrative",
+      "prompt": "등록된 집 주소로 배송해드리겠습니다.\n\n%{address}%\n\n이 주소가 맞으신가요?",
+      "is_question": true,
+      "input_type": "yes_no",
+      "visible_groups": ["check_card"],
+      "transitions": [
+        {
+          "next_stage_id": "ask_card_type",
+          "condition_description": "주소가 맞다고 확인한 경우",
+          "example_phrases": ["네", "맞아요", "예"]
+        },
+        {
+          "next_stage_id": "update_home_address",
+          "condition_description": "주소가 틀리다고 한 경우",
+          "example_phrases": ["아니요", "틀려요", "다른 주소"]
+        }
+      ],
+      "default_next_stage_id": "ask_card_type"
+    },
+    "confirm_work_address": {
+      "id": "confirm_work_address",
+      "total_cnt": 0,
+      "response_type": "narrative",
+      "prompt": "등록된 직장 주소로 배송해드리겠습니다.\n\n%{work_address}%\n\n이 주소가 맞으신가요?",
+      "is_question": true,
+      "input_type": "yes_no",
+      "visible_groups": ["check_card"],
+      "transitions": [
+        {
+          "next_stage_id": "ask_card_type",
+          "condition_description": "주소가 맞다고 확인한 경우",
+          "example_phrases": ["네", "맞아요", "예"]
+        },
+        {
+          "next_stage_id": "update_work_address",
+          "condition_description": "주소가 틀리다고 한 경우",
+          "example_phrases": ["아니요", "틀려요", "다른 주소"]
+        }
+      ],
+      "default_next_stage_id": "ask_card_type"
+    },
+    "update_home_address": {
+      "id": "update_home_address",
+      "total_cnt": 0,
+      "response_type": "narrative",
+      "prompt": "집 주소를 알려주시면 수정하여 배송해드리겠습니다. 새로운 주소를 말씀해주세요.",
+      "is_question": true,
+      "input_type": "text",
+      "expected_info_key": "address",
+      "visible_groups": ["check_card"],
+      "default_next_stage_id": "ask_card_type"
+    },
+    "update_work_address": {
+      "id": "update_work_address",
+      "total_cnt": 0,
+      "response_type": "narrative",
+      "prompt": "직장 주소를 알려주시면 수정하여 배송해드리겠습니다. 새로운 주소를 말씀해주세요.",
+      "is_question": true,
+      "input_type": "text",
+      "expected_info_key": "work_address",
+      "visible_groups": ["check_card"],
       "default_next_stage_id": "ask_card_type"
     },
     "ask_card_type": {

@@ -1267,23 +1267,63 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             # transitions이 없으면 default로 진행
             next_stage_id = default_next
     
-    # Case 2: 분기가 있는 경우 (transitions가 2개 이상) - LLM 판단
+    # Case 2: 분기가 있는 경우 (transitions가 2개 이상)
     else:
-        prompt_template = ALL_PROMPTS.get('main_agent', {}).get('determine_next_scenario_stage', '')
-        llm_prompt = prompt_template.format(
-            active_scenario_name=active_scenario_data.get("scenario_name"),
-            current_stage_id=str(current_stage_id),
-            current_stage_prompt=current_stage_info.get("prompt", "No prompt"),
-            user_input=state.get("stt_result", ""),
-            scenario_agent_intent=scenario_output.get("intent", "N/A") if scenario_output else "N/A",
-            scenario_agent_entities=str(scenario_output.get("entities", {}) if scenario_output else {}),
-            collected_product_info=str(collected_info),
-            formatted_transitions=format_transitions_for_prompt(transitions, current_stage_info.get("prompt", "")),
-            default_next_stage_id=default_next
-        )
-        response = await json_llm.ainvoke([HumanMessage(content=llm_prompt)])
-        decision_data = next_stage_decision_parser.parse(response.content)
-        next_stage_id = decision_data.chosen_next_stage_id
+        # ask_card_receive_method 특별 처리
+        if current_stage_id == "ask_card_receive_method" and "card_receive_method" in collected_info:
+            card_method = collected_info.get("card_receive_method")
+            print(f"📦 [CARD_DELIVERY] Processing card delivery method: {card_method}")
+            
+            # 배송 방법에 따른 분기
+            if card_method == "즉시수령":
+                next_stage_id = "ask_card_type"
+            elif card_method == "집으로 배송":
+                next_stage_id = "confirm_home_address"
+            elif card_method == "직장으로 배송":
+                next_stage_id = "confirm_work_address"
+            else:
+                next_stage_id = default_next
+                
+            print(f"📦 [CARD_DELIVERY] Next stage: {next_stage_id}")
+        # confirm_home_address 특별 처리
+        elif current_stage_id == "confirm_home_address":
+            # 사용자의 확인 응답 처리
+            if user_input and any(word in user_input.lower() for word in ["네", "예", "맞아요", "맞습니다"]):
+                next_stage_id = "ask_card_type"
+                print(f"📦 [ADDRESS_CONFIRM] Home address confirmed, proceeding to card type")
+            elif user_input and any(word in user_input.lower() for word in ["아니요", "아니", "틀려요", "다른", "수정"]):
+                next_stage_id = "update_home_address"
+                print(f"📦 [ADDRESS_CONFIRM] Home address needs update")
+            else:
+                next_stage_id = default_next
+        # confirm_work_address 특별 처리
+        elif current_stage_id == "confirm_work_address":
+            # 사용자의 확인 응답 처리
+            if user_input and any(word in user_input.lower() for word in ["네", "예", "맞아요", "맞습니다"]):
+                next_stage_id = "ask_card_type"
+                print(f"📦 [ADDRESS_CONFIRM] Work address confirmed, proceeding to card type")
+            elif user_input and any(word in user_input.lower() for word in ["아니요", "아니", "틀려요", "다른", "수정"]):
+                next_stage_id = "update_work_address"
+                print(f"📦 [ADDRESS_CONFIRM] Work address needs update")
+            else:
+                next_stage_id = default_next
+        else:
+            # 기타 분기가 있는 경우 LLM 판단
+            prompt_template = ALL_PROMPTS.get('main_agent', {}).get('determine_next_scenario_stage', '')
+            llm_prompt = prompt_template.format(
+                active_scenario_name=active_scenario_data.get("scenario_name"),
+                current_stage_id=str(current_stage_id),
+                current_stage_prompt=current_stage_info.get("prompt", "No prompt"),
+                user_input=state.get("stt_result", ""),
+                scenario_agent_intent=scenario_output.get("intent", "N/A") if scenario_output else "N/A",
+                scenario_agent_entities=str(scenario_output.get("entities", {}) if scenario_output else {}),
+                collected_product_info=str(collected_info),
+                formatted_transitions=format_transitions_for_prompt(transitions, current_stage_info.get("prompt", "")),
+                default_next_stage_id=default_next
+            )
+            response = await json_llm.ainvoke([HumanMessage(content=llm_prompt)])
+            decision_data = next_stage_decision_parser.parse(response.content)
+            next_stage_id = decision_data.chosen_next_stage_id
 
     # --- 로직 전용 스테이지 처리 루프 ---
     while True:
