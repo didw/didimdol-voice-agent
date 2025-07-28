@@ -120,7 +120,6 @@ async def run_agent_streaming(
         yield {"type": "final_state", "data": {"error_message": error_msg, "is_final_turn_response": True}}
         return
 
-    print(f"[run_agent_streaming] BEFORE - current_state_dict collected_product_info: {current_state_dict.get('collected_product_info', {}) if current_state_dict else {}}")
     
     initial_state = cast(AgentState, {
         "session_id": session_id or "default_session",
@@ -145,10 +144,6 @@ async def run_agent_streaming(
         "scenario_awaiting_user_response": current_state_dict.get("scenario_awaiting_user_response", False) if current_state_dict else False,
     })
     
-    print(f"[run_agent_streaming] AFTER - initial_state collected_product_info: {initial_state.get('collected_product_info', {})}")
-    print(f"[run_agent_streaming] RESTORED - waiting_for_additional_modifications: {initial_state.get('waiting_for_additional_modifications')}")
-    print(f"[run_agent_streaming] RESTORED - pending_modifications: {initial_state.get('pending_modifications')}")
-    print(f"[run_agent_streaming] RESTORED - correction_mode: {initial_state.get('correction_mode')}")
 
     log_node_execution("Session", f"product={initial_state['current_product_type']}, stage={initial_state.get('current_scenario_stage_id', 'N/A')}")
 
@@ -157,8 +152,6 @@ async def run_agent_streaming(
 
     try:
         final_state = await app_graph.ainvoke(initial_state)
-        print(f"[run_agent_streaming] final_state type: {type(final_state)}")
-        print(f"[run_agent_streaming] final_state collected_product_info: {final_state.get('collected_product_info', {}) if final_state else {}}")
         
         # Check for stage_response_data and send it first
         if final_state and final_state.get("stage_response_data"):

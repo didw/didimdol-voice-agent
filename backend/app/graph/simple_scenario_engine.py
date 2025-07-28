@@ -13,10 +13,8 @@ class SimpleScenarioEngine:
     def __init__(self, scenario_data: Dict[str, Any] = None):
         if scenario_data:
             self.scenario_data = scenario_data
-            print(f"[DEBUG] SimpleScenarioEngine initialized with provided scenario data")
         else:
             self.scenario_data = self._load_scenario()
-            print(f"[DEBUG] SimpleScenarioEngine initialized with default scenario")
         self.manual = self.scenario_data.get("manual", {})
     
     def _load_scenario(self) -> Dict[str, Any]:
@@ -201,14 +199,11 @@ class SimpleScenarioEngine:
         """필드 값 유효성 검증"""
         field_info = self.get_field_display_info(field_key)
         
-        print(f"[DEBUG] validate_field_value - key: {field_key}, value: {value}, type: {type(value)}")
         
         if not field_info:
-            print(f"[DEBUG] Field {field_key} not found in scenario")
             return False, "알 수 없는 필드입니다."
         
         field_type = field_info.get("type", "text")
-        print(f"[DEBUG] Field {field_key} type: {field_type}")
         
         if field_type == "choice":
             choices = field_info.get("choices", [])
