@@ -70,7 +70,7 @@
               :aria-label="`${choice.label} 토글`"
             />
             <span class="toggle-slider"></span>
-            <span class="toggle-text">{{ booleanSelections[choice.key!] ? '신청' : '미신청' }}</span>
+            <span class="toggle-text">{{ getBooleanText(booleanSelections[choice.key!]) }}</span>
           </label>
         </div>
       </div>
@@ -93,6 +93,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { useChatStore } from '@/stores/chatStore';
+import { useSlotFillingStore } from '@/stores/slotFillingStore';
 import type { StageResponseMessage, Choice } from '@/types/stageResponse';
 
 interface Props {
@@ -112,12 +113,6 @@ watch(() => props.responseData, (newData) => {
     console.log('  choices.length:', newData.choices?.length);
     console.log('  full data:', newData);
     
-    if (['ask_security_medium', 'ask_card_receive_method', 'ask_card_type', 'ask_statement_method', 'ask_card_usage_alert'].includes(newData.stageId)) {
-      console.log(`🚨 ${newData.stageId.toUpperCase()} STAGE REACHED!`);
-      console.log('  defaultChoice:', newData.defaultChoice);
-      console.log('  choices:', newData.choices);
-      console.log('  responseType:', newData.responseType);
-    }
   }
 }, { immediate: true });
 
@@ -181,6 +176,15 @@ const formatPromptText = (text: string): string => {
 const submitBooleanSelections = () => {
   if (!props.responseData) return;
   chatStore.sendBooleanSelections(props.responseData.stageId, booleanSelections.value);
+};
+
+// Get boolean display text from store or use defaults
+const getBooleanText = (value: boolean) => {
+  const slotFillingStore = useSlotFillingStore();
+  const displayLabels = slotFillingStore.displayLabels || {};
+  return value 
+    ? (displayLabels.boolean_true_alt || displayLabels.boolean_true || '신청') 
+    : (displayLabels.boolean_false_alt || displayLabels.boolean_false || '미신청');
 };
 </script>
 

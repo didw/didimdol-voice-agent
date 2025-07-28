@@ -49,6 +49,7 @@ class AgentState(BaseModel):
     session_id: str
     user_input_text: Optional[str] = None
     user_input_audio_b64: Optional[str] = None
+    input_mode: str = "text"  # text, voice, choice, choice_exact, boolean
     
     # --- Turn-specific State ---
     stt_result: Optional[str] = None

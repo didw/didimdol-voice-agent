@@ -159,12 +159,6 @@ async def process_scenario_logic_node(state: AgentState) -> AgentState:
     scenario_name = state.active_scenario_name or "N/A"
     log_node_execution("Scenario_Flow", f"scenario={scenario_name}, stage={current_stage_id}")
     
-    # CRITICAL DEBUG: Function entry point
-    print(f"🚨 SCENARIO_LOGIC FUNCTION STARTED")
-    print(f"  current_stage_id: {current_stage_id}")
-    print(f"  scenario_name: {scenario_name}")
-    print(f"  collected_product_info keys: {list(state.collected_product_info.keys()) if state.collected_product_info else 'None'}")
-    print(f"  user_input: {state.stt_result if hasattr(state, 'stt_result') else 'None'}")
     
     active_scenario_data = get_active_scenario_data(state.to_dict())
     current_stage_id = state.current_scenario_stage_id
@@ -234,42 +228,59 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             # 필드명 매핑 적용
             _handle_field_name_mapping(collected_info)
         elif user_input and len(user_input.strip()) > 0:
-            try:
-                # Entity Agent로 정보 추출 (ScenarioAgent가 추출하지 못한 경우에만)
-                print(f"🤖 [ENTITY_AGENT] About to call entity_agent.process_slot_filling")
-                print(f"  current_stage_id: {current_stage_id}")
-                print(f"  user_input: '{user_input}'")
-                print(f"  collected_info BEFORE Entity Agent: {collected_info}")
+            # 먼저 user_input이 현재 stage의 valid choice 중 하나와 정확히 일치하는지 확인
+            exact_choice_match = False
+            if current_stage_info.get("choices"):
+                choices = current_stage_info.get("choices", [])
+                expected_field = current_stage_info.get("expected_info_key")
                 
-                extraction_result = await entity_agent.process_slot_filling(user_input, required_fields, collected_info)
-                
-                # Entity Agent 결과 디버깅
-                print(f"🤖 [ENTITY_AGENT] Entity Agent completed")
-                print(f"  extraction_result: {extraction_result}")
-                if 'collected_info' in extraction_result:
-                    print(f"  collected_info AFTER Entity Agent: {extraction_result['collected_info']}")
+                for choice in choices:
+                    choice_value = choice.get("value", "") if isinstance(choice, dict) else str(choice)
+                    if user_input.strip() == choice_value:
+                        # 정확한 매치 발견 - Entity Agent를 거치지 않고 직접 저장
+                        print(f"✅ [EXACT_CHOICE_MATCH] Found exact match: '{user_input}' for field '{expected_field}'")
+                        if expected_field:
+                            collected_info[expected_field] = user_input.strip()
+                            extraction_result = {
+                                "collected_info": collected_info,
+                                "extracted_entities": {expected_field: user_input.strip()},
+                                "message": "Exact choice match found"
+                            }
+                            exact_choice_match = True
+                            break
+            
+            if not exact_choice_match:
+                try:
+                    # Entity Agent로 정보 추출 (정확한 choice 매치가 없는 경우에만)
+                    print(f"🤖 [ENTITY_AGENT] About to call entity_agent.process_slot_filling")
+                    print(f"  current_stage_id: {current_stage_id}")
+                    print(f"  user_input: '{user_input}'")
+                    print(f"  collected_info BEFORE Entity Agent: {collected_info}")
                     
-                # ask_card_usage_alert 특별 디버깅
-                if current_stage_id == "ask_card_usage_alert":
-                    print(f"🚨🚨🚨 [ENTITY_AGENT_CARD_USAGE] ask_card_usage_alert Entity Agent result:")
-                    print(f"  card_usage_alert before: {collected_info.get('card_usage_alert')}")
-                    print(f"  card_usage_alert after: {extraction_result.get('collected_info', {}).get('card_usage_alert')}")
-            except Exception as e:
-                print(f"[ERROR] Entity agent process_slot_filling failed: {type(e).__name__}: {str(e)}")
-                import traceback
-                traceback.print_exc()
-                # 에러 발생 시 빈 결과 반환
-                extraction_result = {
-                    "collected_info": collected_info,
-                    "extracted_entities": {},
-                    "message": f"정보 추출 중 오류가 발생했습니다: {str(e)}"
-                }
-            
-            # 추출된 정보 업데이트
-            collected_info = extraction_result["collected_info"]
-            
-            # 필드명 매핑 적용 (Entity Agent 결과에도)
-            _handle_field_name_mapping(collected_info)
+                    extraction_result = await entity_agent.process_slot_filling(user_input, required_fields, collected_info)
+                    
+                    # Entity Agent 결과 디버깅
+                    print(f"🤖 [ENTITY_AGENT] Entity Agent completed")
+                    print(f"  extraction_result: {extraction_result}")
+                    if 'collected_info' in extraction_result:
+                        print(f"  collected_info AFTER Entity Agent: {extraction_result['collected_info']}")
+                        
+                except Exception as e:
+                    print(f"[ERROR] Entity agent process_slot_filling failed: {type(e).__name__}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                    # 에러 발생 시 빈 결과 반환
+                    extraction_result = {
+                        "collected_info": collected_info,
+                        "extracted_entities": {},
+                        "message": f"정보 추출 중 오류가 발생했습니다: {str(e)}"
+                    }
+                
+                # 추출된 정보 업데이트
+                collected_info = extraction_result["collected_info"]
+                
+                # 필드명 매핑 적용 (Entity Agent 결과에도)
+                _handle_field_name_mapping(collected_info)
             
             if extraction_result['extracted_entities']:
                 log_node_execution("Entity_Extract", output_info=f"entities={list(extraction_result['extracted_entities'].keys())}")
@@ -277,9 +288,6 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
         # customer_info_check 단계에서 개인정보 확인 처리
         if current_stage_id == "customer_info_check":
             intent = scenario_output.get("intent", "") if scenario_output else ""
-            print(f"🚨 CUSTOMER_INFO_CHECK PROCESSING")
-            print(f"  user_input: {user_input}")
-            print(f"  intent: {intent}")
             print(f"  waiting_for_additional_modifications: {state.waiting_for_additional_modifications}")
             print(f"  collected_info has customer_name: {bool(collected_info.get('customer_name'))}")
             print(f"  collected_info has phone_number: {bool(collected_info.get('phone_number'))}")
@@ -288,7 +296,6 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             print(f"  pending_modifications: {state.pending_modifications}")
             # 추가 수정사항 대기 중인 경우 먼저 체크
             if state.waiting_for_additional_modifications:
-                print(f"🚨 PATH 1: waiting_for_additional_modifications = True")
                 
                 # 사용자가 추가 수정사항이 없다고 답한 경우
                 if user_input and any(word in user_input for word in ["아니", "아니요", "아니야", "없어", "없습니다", "괜찮", "됐어", "충분"]):
@@ -311,7 +318,6 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             # correction_mode가 활성화된 경우
             # pending_modifications가 있으면 이미 personal_info_correction에서 처리 중이므로 건너뛰기
             elif state.correction_mode and not state.pending_modifications:
-                print(f"🚨 PATH 2: correction_mode = True, no pending_modifications")
                 
                 # 그 외의 경우 personal_info_correction_node로 라우팅
                 return state.merge_update({
@@ -324,7 +330,6 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             # 자연스러운 정보 수정 감지 (correction_mode가 아닌 상태에서도)
             # pending_modifications가 있으면 이미 처리 중이므로 수정 요청으로 감지하지 않음
             elif not state.correction_mode and not state.pending_modifications and _is_info_modification_request(user_input, collected_info):
-                print(f"🚨 PATH 3: Natural modification detected")
                 
                 return state.merge_update({
                     "correction_mode": True,
@@ -340,7 +345,6 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                   (collected_info.get("confirm_personal_info") == True or
                    (user_input and any(word in user_input for word in ["네", "예", "맞아", "맞습니다", "확인"])))):
                 
-                print(f"🚨 PATH 4: Positive confirmation - transitioning to next stage")
                 # confirm_personal_info도 True로 설정
                 collected_info["confirm_personal_info"] = True
                 
@@ -359,9 +363,7 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                 
                 # ask_security_medium 스테이지라면 stage_response_data 생성
                 if next_stage_id == "ask_security_medium":
-                    print(f"🚨 TRANSITIONING TO ask_security_medium - GENERATING STAGE RESPONSE")
                     stage_response_data = generate_stage_response(next_stage_info, collected_info, active_scenario_data)
-                    print(f"🚨 ask_security_medium stage_response_data: {stage_response_data}")
                     
                     return state.merge_update({
                         "current_scenario_stage_id": next_stage_id,
@@ -885,23 +887,13 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
         if next_stage_id != current_stage_id:
             log_node_execution("Stage_Change", f"{current_stage_id} → {next_stage_id}")
         
-        # CRITICAL DEBUG: Stage transition check
-        print(f"🚨 STAGE TRANSITION DEBUG:")
-        print(f"  current_stage_id: {current_stage_id}")
-        print(f"  next_stage_id: {next_stage_id}")
-        print(f"  stage changed: {next_stage_id != current_stage_id}")
         
         # 다음 스테이지의 stage_response_data 생성
         stage_response_data = None
         if next_stage_id and next_stage_id != current_stage_id:
             next_stage_info = active_scenario_data.get("stages", {}).get(next_stage_id, {})
-            print(f"🚨 NEXT STAGE INFO: {next_stage_info.get('id')}, response_type: {next_stage_info.get('response_type')}")
             if "response_type" in next_stage_info:
-                print(f"🚨 GENERATING STAGE RESPONSE for {next_stage_id}")
                 stage_response_data = generate_stage_response(next_stage_info, collected_info, active_scenario_data)
-                print(f"🚨 STAGE RESPONSE GENERATED: {stage_response_data}")
-        else:
-            print(f"🚨 NO STAGE RESPONSE GENERATION - stage not changed or no next_stage_id")
         
         # 스테이지가 변경되지 않은 경우와 사용자 입력이 없는 경우에만 is_final_turn_response를 False로 설정
         is_final_response = True
@@ -938,8 +930,37 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
 async def process_single_info_collection(state: AgentState, active_scenario_data: Dict, current_stage_id: str, current_stage_info: Dict, collected_info: Dict, scenario_output: Optional[ScenarioAgentOutput], user_input: str) -> AgentState:
     """기존 단일 정보 수집 처리"""
     print(f"🔍 PROCESS_SINGLE_INFO_COLLECTION called for stage: {current_stage_id}")
-
-    if scenario_output and scenario_output.get("is_scenario_related"):
+    
+    # choice_exact 모드이거나 user_input이 현재 stage의 choice와 정확히 일치하는 경우 특별 처리
+    if state.get("input_mode") == "choice_exact" or (user_input and current_stage_info.get("choices")):
+        # choices 중에 정확히 일치하는지 확인
+        choices = current_stage_info.get("choices", [])
+        expected_field = current_stage_info.get("expected_info_key")
+        
+        for choice in choices:
+            choice_value = choice.get("value", "") if isinstance(choice, dict) else str(choice)
+            if user_input.strip() == choice_value:
+                # 정확한 매치 발견 - Entity Agent 결과 대신 직접 사용
+                print(f"🎯 [EXACT_MATCH] {expected_field}: '{user_input}' is already a valid choice")
+                if expected_field:
+                    entities = {expected_field: user_input.strip()}
+                    intent = "정보제공"
+                    # scenario_output 재정의
+                    scenario_output = ScenarioAgentOutput(
+                        intent=intent,
+                        entities=entities,
+                        is_scenario_related=True
+                    )
+                    break
+        else:
+            # 정확한 매치가 없는 경우에만 원래 scenario_output 사용
+            if scenario_output and scenario_output.get("is_scenario_related"):
+                entities = scenario_output.get("entities", {})
+                intent = scenario_output.get("intent", "")
+            else:
+                entities = {}
+                intent = ""
+    elif scenario_output and scenario_output.get("is_scenario_related"):
         entities = scenario_output.get("entities", {})
         intent = scenario_output.get("intent", "")
         
@@ -1075,9 +1096,7 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             
             # ask_security_medium 스테이지라면 stage_response_data 생성
             if next_stage_id == "ask_security_medium":
-                print(f"🚨 SINGLE_INFO: ask_security_medium - GENERATING STAGE RESPONSE")
                 stage_response_data = generate_stage_response(next_stage_info, collected_info, active_scenario_data)
-                print(f"🚨 SINGLE_INFO: ask_security_medium stage_response_data: {stage_response_data}")
                 
                 return state.merge_update({
                     "current_scenario_stage_id": next_stage_id,
@@ -1140,8 +1159,8 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         
         expected_info_key = current_stage_info.get("expected_info_key")
         if expected_info_key and user_input and any(word in user_input for word in ["네", "예", "좋아요", "그래요", "하겠습니다", "등록"]):
-            # 기본값: '보유한 보안매체 1 (당행)'
-            default_security_medium = "보유한 보안매체 1 (당행)"
+            # 기본값: '신한 OTP' (scenario의 default_choice 사용)
+            default_security_medium = current_stage_info.get("default_choice", "신한 OTP")
             collected_info[expected_info_key] = default_security_medium
             print(f"🔐 [SECURITY_MEDIUM] Set {expected_info_key} = {default_security_medium} (user said yes)")
     
@@ -1170,28 +1189,16 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         
         expected_info_key = current_stage_info.get("expected_info_key")
         
-        # 더 자세한 디버깅 추가
-        if current_stage_id == "ask_card_usage_alert":
-            print(f"🚨🚨🚨 [CARD_USAGE_ALERT] DETAILED DEBUG:")
-            print(f"  expected_info_key: {expected_info_key}")
-            print(f"  user_input: '{user_input}'")
-            print(f"  collected_info BEFORE check: {collected_info}")
-            print(f"  expected_info_key in collected_info: {expected_info_key in collected_info if expected_info_key else 'N/A'}")
-            if expected_info_key and expected_info_key in collected_info:
-                print(f"  current value: {collected_info[expected_info_key]}")
         
         # Entity Agent가 구체적인 선택을 추출한 경우에는 그 값을 우선시
         if expected_info_key and expected_info_key in collected_info:
             print(f"💳 [CHECK_CARD] Entity Agent found specific value for {expected_info_key}: {collected_info[expected_info_key]}")
-            # 추가로 "네" 단어가 포함되어 있어도 Entity Agent 결과를 유지하도록 명시적 로그
-            if current_stage_id == "ask_card_usage_alert" and user_input and any(word in user_input for word in ["네", "예", "좋아요", "그래요", "하겠습니다"]):
-                print(f"🚨 [CARD_USAGE_ALERT] User said '네' but Entity Agent extracted specific value - KEEPING Entity Agent result: {collected_info[expected_info_key]}")
         elif (expected_info_key and user_input and 
               any(word in user_input for word in ["네", "예", "좋아요", "그래요", "하겠습니다"])):
             # Entity Agent가 값을 추출하지 못하고 사용자가 일반적인 동의 표현을 한 경우에만 기본값 설정
             default_values = {
                 "card_receive_method": "즉시수령",
-                "card_type": "S-Line", 
+                "card_type": "S-Line (후불교통)", 
                 "statement_method": "휴대폰",
                 "card_usage_alert": "5만원 이상 결제 시 발송 (무료)",
                 "card_password_same_as_account": True
@@ -1201,11 +1208,6 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
                 collected_info[expected_info_key] = default_values[expected_info_key]
                 print(f"💳 [CHECK_CARD] No specific selection found, set {expected_info_key} = {default_values[expected_info_key]} (user said yes)")
         
-        # 최종 상태 디버깅
-        if current_stage_id == "ask_card_usage_alert" and expected_info_key:
-            print(f"🚨🚨🚨 [CARD_USAGE_ALERT] FINAL DEBUG:")
-            print(f"  final {expected_info_key}: {collected_info.get(expected_info_key)}")
-            print(f"  collected_info AFTER: {collected_info}")
     
     # 스테이지 전환 로직 결정
     transitions = current_stage_info.get("transitions", [])
@@ -1478,32 +1480,49 @@ def _map_entity_to_valid_choice(field_key: str, entity_value, stage_info: Dict[s
     entity_str = str(entity_value)
     entity_lower = entity_str.lower()
     
+    # 이미 entity_value가 choices 중 하나와 정확히 일치하는 경우 그대로 반환
+    for choice in choices:
+        choice_value = choice.get("value", "") if isinstance(choice, dict) else str(choice)
+        if entity_str == choice_value:
+            print(f"🎯 [EXACT_MATCH] {field_key}: '{entity_value}' is already a valid choice")
+            return choice_value
+    
     # 각 choice와 부분 매칭 시도
     for choice in choices:
         choice_value = choice.get("value", "") if isinstance(choice, dict) else str(choice)
         choice_lower = choice_value.lower()
         
-        # 정확한 매칭
+        # 정확한 매칭 (대소문자 무시)
         if entity_lower == choice_lower:
             return choice_value
         
-        # 부분 매칭 (entity에 choice가 포함되어 있는 경우)
-        if choice_lower in entity_lower:
-            return choice_value
-        
-        # choice에 entity가 포함되어 있는 경우
-        if entity_lower in choice_lower:
+        # entity가 choice의 핵심 부분과 일치하는 경우에만 매칭
+        # 예: "신한 OTP" -> "신한 OTP (비대면 채널용)"
+        # 단, 괄호 앞 부분까지만 비교
+        choice_core = choice_value.split('(')[0].strip().lower()
+        if entity_lower == choice_core:
+            print(f"🔍 [CORE_MATCH] {field_key}: '{entity_value}' matches core of '{choice_value}'")
             return choice_value
     
     # 특별한 매핑 규칙
     mapping_rules = {
         "card_type": {
-            "s-line": "S-Line",
-            "s라인": "S-Line", 
-            "에스라인": "S-Line",
-            "후불교통": "S-Line",
-            "딥드립": "딥드립",
-            "신한카드": "신한카드1"
+            "s-line 후불": "S-Line (후불교통)",
+            "s라인 후불": "S-Line (후불교통)",
+            "에스라인 후불": "S-Line (후불교통)",
+            "후불교통": "S-Line (후불교통)",
+            "s-line 일반": "S-Line (일반)",
+            "s라인 일반": "S-Line (일반)",
+            "에스라인 일반": "S-Line (일반)",
+            "에스라인": "S-Line (후불교통)",  # 기본값은 후불교통
+            "s-line": "S-Line (후불교통)",  # 기본값은 후불교통
+            "s라인": "S-Line (후불교통)",  # 기본값은 후불교통
+            "딥드립 후불": "딥드립 (후불교통)",
+            "딥드립 일반": "딥드립 (일반)",
+            "딥드립": "딥드립 (후불교통)",  # 기본값은 후불교통
+            "신한카드1": "신한카드1",
+            "신한카드2": "신한카드2",
+            "신한카드": "신한카드1"  # 기본값은 신한카드1
         },
         "statement_method": {
             "휴대폰": "휴대폰",
@@ -1532,6 +1551,17 @@ def _map_entity_to_valid_choice(field_key: str, entity_value, stage_info: Dict[s
             "받지않음": "결제내역 문자 받지 않음",
             "필요없어요": "결제내역 문자 받지 않음",
             "안해요": "결제내역 문자 받지 않음"
+        },
+        "security_medium": {
+            "신한 otp": "신한 OTP",
+            "신한otp": "신한 OTP",
+            "otp": "신한 OTP",
+            "하나 otp": "하나 OTP",
+            "하나otp": "하나 OTP",
+            "보안카드": "보안카드",
+            "신한플레이": "신한플레이",
+            "만원": "신한 OTP (10,000원)",
+            "10000원": "신한 OTP (10,000원)"
         }
     }
     
@@ -1539,6 +1569,19 @@ def _map_entity_to_valid_choice(field_key: str, entity_value, stage_info: Dict[s
         for keyword, mapped_value in mapping_rules[field_key].items():
             if keyword in entity_lower:
                 return mapped_value
+    
+    # 매핑되지 않은 경우 원본 값 그대로 반환 (choices에 있는 경우에만)
+    for choice in choices:
+        choice_value = choice.get("value", "") if isinstance(choice, dict) else str(choice)
+        choice_lower = choice_value.lower()
+        
+        # 부분 매칭 (entity에 choice가 포함되어 있는 경우)
+        if choice_lower in entity_lower:
+            return choice_value
+        
+        # choice에 entity가 포함되어 있는 경우
+        if entity_lower in choice_lower:
+            return choice_value
     
     return None
 
@@ -1548,11 +1591,11 @@ def _get_default_value_for_field(field_key: str, stage_info: Dict[str, Any]) -> 
     필드의 기본값을 반환하는 함수
     """
     defaults = {
-        "card_type": "S-Line",
+        "card_type": "S-Line (후불교통)",
         "statement_method": "휴대폰", 
         "card_receive_method": "즉시수령",
         "card_usage_alert": "5만원 이상 결제 시 발송 (무료)",
-        "security_medium": "보유한 보안매체 1 (당행)"
+        "security_medium": "신한 OTP"
     }
     
     return defaults.get(field_key)
@@ -1664,12 +1707,6 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
     prompt = stage_info.get("prompt", "")
     
     
-    # CRITICAL DEBUG for ask_security_medium
-    if stage_info.get("id") == "ask_security_medium":
-        print(f"🚨 BACKEND: ask_security_medium stage processing started")
-        print(f"  response_type: {response_type}")
-        print(f"  choices: {stage_info.get('choices')}")
-        print(f"  choices count: {len(stage_info.get('choices', []))}")
     
     # display_fields가 있는 경우 처리 (bullet 타입)
     if stage_info.get("display_fields"):
@@ -1695,14 +1732,6 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
         if stage_info.get("default_choice"):
             response_data["default_choice"] = stage_info.get("default_choice")
         
-        # CRITICAL DEBUG for ask_security_medium and check card stages
-        if stage_info.get("id") in ["ask_security_medium", "ask_card_receive_method", "ask_card_type", "ask_statement_method", "ask_card_usage_alert"]:
-            print(f"🚨 BACKEND: {stage_info.get('id')} response_data created:")
-            print(f"  final choices: {response_data['choices']}")
-            print(f"  final response_type: {response_data['response_type']}")
-            print(f"  final stage_id: {response_data['stage_id']}")
-            print(f"  default_choice from stage_info: {stage_info.get('default_choice')}")
-            print(f"  default_choice in response_data: {response_data.get('default_choice')}")
     
     # 수정 가능한 필드 정보
     if stage_info.get("modifiable_fields"):

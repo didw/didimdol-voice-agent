@@ -48,6 +48,7 @@ export interface SlotFillingUpdate {
   completedRequiredCount?: number  // 완료된 필수 필드 수
   fieldGroups?: FieldGroup[]
   currentStage?: CurrentStageInfo
+  displayLabels?: Record<string, string>  // 시나리오의 표시 레이블
 }
 
 // 하위 호환성을 위한 별칭

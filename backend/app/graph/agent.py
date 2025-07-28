@@ -111,7 +111,8 @@ async def run_agent_streaming(
     user_input_text: Optional[str] = None,
     user_input_audio_b64: Optional[str] = None,
     session_id: Optional[str] = "default_session",
-    current_state_dict: Optional[Dict[str, Any]] = None
+    current_state_dict: Optional[Dict[str, Any]] = None,
+    input_mode: Optional[str] = "text"
 ) -> AsyncGenerator[Union[Dict[str, Any], str], None]:
     
     if not OPENAI_API_KEY or not json_llm or not generative_llm:
@@ -132,6 +133,8 @@ async def run_agent_streaming(
         "available_product_types": ["didimdol", "jeonse", "deposit_account"],
         "action_plan": [],
         "action_plan_struct": [],
+        # 입력 모드 추가
+        "input_mode": input_mode,
         # 라우터 및 루프 방지
         "router_call_count": current_state_dict.get("router_call_count", 0) if current_state_dict else 0,
         "correction_mode": current_state_dict.get("correction_mode", False) if current_state_dict else False,

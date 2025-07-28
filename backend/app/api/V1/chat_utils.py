@@ -201,7 +201,7 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
     if current_stage == "ask_check_card":
         # ask_check_card 단계에서 체크카드 관련 필드들 모두 표시
         check_card_fields = ["use_check_card", "card_type", "card_receive_method", "card_delivery_location", 
-                           "postpaid_transport", "card_usage_alert", "statement_method"]
+                           "postpaid_transport", "card_usage_alert", "statement_method", "card_password_same_as_account"]
         allowed_fields.update(check_card_fields)
     elif current_stage in ["check_card", "ask_check_card"]:
         allowed_fields.add("use_check_card")
@@ -233,7 +233,7 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
     
     # 5. 추가 서비스 선택 후 하위 필드들 표시 (개인정보 단계와 동일한 방식)
     # 인터넷뱅킹 관련 모든 단계에서 필드 표시
-    internet_banking_stages = ["ask_security_medium", "ask_other_otp_info", "ask_transfer_limit", 
+    internet_banking_stages = ["ask_security_medium", "ask_transfer_limit", 
                               "ask_notification_settings", "ask_internet_banking", "ask_withdrawal_account"]
     
     # use_internet_banking이 true이거나 인터넷뱅킹 관련 단계에서는 항상 모든 필드 표시
@@ -242,7 +242,7 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
         collected_info.get("use_internet_banking") == True or
         expected_info_key == "security_medium" or
         "security_medium" in collected_info):
-        internet_banking_sub = ["use_internet_banking", "security_medium", "initial_password", "other_otp_info", 
+        internet_banking_sub = ["use_internet_banking", "security_medium", "initial_password", 
                                "transfer_limit_per_time", "transfer_limit_per_day", 
                                "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction", 
                                "withdrawal_account_registration"]
@@ -251,12 +251,12 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
     # 체크카드 단계이거나 선택했을 때 모든 관련 하위 필드들을 표시
     # 체크카드 관련 모든 단계에서 하위 필드 표시
     check_card_stages = ["check_card", "ask_check_card", "ask_card_receive_method", "ask_card_delivery_location",
-                        "ask_card_type", "ask_postpaid_transport", "ask_statement_method", "ask_card_usage_alert"]
+                        "ask_card_type", "ask_postpaid_transport", "ask_statement_method", "ask_card_usage_alert", "ask_card_password"]
     
     if current_stage in check_card_stages or collected_info.get("use_check_card") == True:
         # use_check_card 필드도 포함
         check_card_fields = ["use_check_card", "card_type", "card_receive_method", "card_delivery_location", 
-                            "postpaid_transport", "card_usage_alert", "statement_method"]
+                            "postpaid_transport", "card_usage_alert", "statement_method", "card_password_same_as_account"]
         allowed_fields.update(check_card_fields)
         
     # final_summary 단계에서는 모든 그룹의 필드들을 표시 (시나리오 visible_groups 기준)
@@ -415,7 +415,7 @@ def update_slot_filling_with_hierarchy(scenario_data: Dict, collected_info: Dict
     # 🔥 Boolean 필드 문자열 변환 + 누락된 boolean 값 추론
     boolean_field_keys = [f["key"] for f in all_fields if f.get("type") == "boolean"]
     
-    # 🚨 CRITICAL FIX: 누락된 boolean 필드 값 추론
+    # 누락된 boolean 필드 값 추론
     # use_check_card가 없는데 체크카드 관련 필드가 있으면 true로 추론
     if ("use_check_card" not in enhanced_collected_info and 
         any(key in enhanced_collected_info for key in ["card_receive_method", "card_type", "postpaid_transport", "statement_method", "card_usage_alert"])):
@@ -692,7 +692,8 @@ async def send_slot_filling_update(
                 "stageId": current_stage,
                 "visibleGroups": visible_groups,
                 "currentStageGroups": current_stage_groups  # 현재 단계의 그룹만
-            }
+            },
+            "displayLabels": scenario_data.get("display_labels", {})  # 시나리오에서 표시 레이블 추가
         }
         
         # 디버그 로그 추가

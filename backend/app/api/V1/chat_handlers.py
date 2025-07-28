@@ -168,13 +168,21 @@ async def get_agent_generator(
     user_text: str,
     session_id: str,
     current_session_state: Dict[str, Any],
-    websocket: Any
+    websocket: Any,
+    input_mode: str = "text"
 ) -> AsyncGenerator:
     """새로운 LLM 기반 에이전트 사용"""
+    # choice_exact 모드일 때는 간단한 처리만 수행
+    if input_mode == "choice_exact":
+        # 현재 스테이지 정보에 따라 다음 스테이지로 이동하는 로직만 실행
+        # 실제 값은 이미 process_input_through_agent에서 저장됨
+        pass
+    
     # 새로운 LLM 기반 에이전트 사용
     async for chunk in run_agent_streaming(
         user_input_text=user_text,
         session_id=session_id,
-        current_state_dict=current_session_state
+        current_state_dict=current_session_state,
+        input_mode=input_mode
     ):
         yield chunk

@@ -300,9 +300,10 @@ async def handle_user_choice_selection(
     
     print(f"[{session_id}] User choice selection: {stage_id} -> {choice}")
     
-    # 사용자 선택을 에이전트로 전달
+    # Choice selection의 경우, Entity Agent를 거치지 않고 정확한 값을 그대로 사용
+    # input_mode를 "choice_exact"로 설정하여 구분
     await process_input_through_agent(
-        session_id, choice, tts_service, "choice", websocket
+        session_id, choice, tts_service, "choice_exact", websocket
     )
 
 
@@ -381,10 +382,6 @@ async def process_input_through_agent(
     websocket: WebSocket
 ) -> None:
     """에이전트를 통한 입력 처리"""
-    print(f"\n{'='*60}")
-    print(f"[{session_id}] 🚀 DEBUG LOG START - Processing user input")
-    print(f"[{session_id}] User text: '{user_text[:50]}...'")
-    print(f"{'='*60}\n")
     
     current_state = SESSION_STATES.get(session_id)
     if not current_state:
@@ -413,9 +410,29 @@ async def process_input_through_agent(
     }
     
     try:
+        # choice_exact 모드일 때는 특별 처리
+        if input_mode == "choice_exact":
+            # 현재 stage 정보 가져오기
+            current_stage_id = current_state.get("current_scenario_stage_id")
+            scenario_data = current_state.get("active_scenario_data")
+            
+            if scenario_data and current_stage_id:
+                # 직접 collected_product_info에 저장
+                collected_info = current_state.get("collected_product_info", {})
+                stages = scenario_data.get("stages", {})
+                current_stage = stages.get(current_stage_id, {})
+                expected_info_key = current_stage.get("expected_info_key")
+                
+                if expected_info_key:
+                    # 정확한 choice 값을 그대로 저장
+                    collected_info[expected_info_key] = user_text
+                    current_state["collected_product_info"] = collected_info
+                    SESSION_STATES[session_id] = current_state
+                    print(f"[{session_id}] Choice selection directly saved: {expected_info_key} = {user_text}")
+        
         # 에이전트 출력 처리
         async for chunk in get_agent_generator(
-            user_text, session_id, current_state, websocket
+            user_text, session_id, current_state, websocket, input_mode
         ):
             full_ai_response_text, stream_ended, final_data = await handle_agent_output_chunk(
                 chunk, session_id, websocket, SESSION_STATES, full_ai_response_text
@@ -451,9 +468,6 @@ async def process_input_through_agent(
         
         # 디버그 로그 종료 - collected_info 출력
         final_collected_info = current_state.get("collected_product_info", {}) if current_state else {}
-        print(f"\n{'='*60}")
-        print(f"[{session_id}] 🏁 DEBUG LOG END - Processing Complete")
-        print(f"[{session_id}] Final collected_info:")
         if final_collected_info:
             for key, value in final_collected_info.items():
                 print(f"[{session_id}]   - {key}: {value}")
@@ -471,10 +485,6 @@ async def process_input_through_agent(
         print(f"[{session_id}] Agent processing error: {e}")
         # 에러 상황에서도 collected_info 출력
         error_collected_info = current_state.get("collected_product_info", {}) if current_state else {}
-        print(f"\n{'='*60}")
-        print(f"[{session_id}] 🚫 DEBUG LOG END - Error Occurred")
-        print(f"[{session_id}] Error: {str(e)}")
-        print(f"[{session_id}] Final collected_info:")
         if error_collected_info:
             for key, value in error_collected_info.items():
                 print(f"[{session_id}]   - {key}: {value}")

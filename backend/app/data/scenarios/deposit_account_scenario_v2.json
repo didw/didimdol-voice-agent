@@ -5,6 +5,12 @@
   "fallback_message": "죄송합니다, 고객님의 말씀을 정확히 이해하지 못했습니다. 다시 한번 말씀해주시겠어요?",
   "end_conversation_message": "네, 알겠습니다. 상담을 종료합니다. 이용해주셔서 감사합니다. 언제든지 다시 찾아주세요.",
   "end_scenario_message": "상담을 종료하고 입출금 통장 가입을 도와드리겠습니다.",
+  "display_labels": {
+    "boolean_true": "예",
+    "boolean_false": "아니오",
+    "boolean_true_alt": "신청",
+    "boolean_false_alt": "미신청"
+  },
   "required_info_fields": [
     {
       "key": "limit_account_agreement",
@@ -77,7 +83,7 @@
       "display_name": "보안매체",
       "required": true,
       "type": "choice",
-      "choices": ["보유한 보안매체 1 (당행)", "보유한 보안매체 2 (타행)", "보안카드", "신한OTP (10,000원)"],
+      "choices": ["신한 OTP", "하나 OTP", "보안카드", "신한 OTP (10,000원)"],
       "description": "쏠 어플 사용을 위한 보안매체 선택",
       "extraction_prompt": "고객이 보안매체에 대해 언급하면 정확한 선택지를 추출하세요."
     },
@@ -211,7 +217,7 @@
     {
       "id": "internet_banking",
       "name": "인터넷뱅킹 설정",
-      "fields": ["security_medium", "other_otp_info", "transfer_limit_per_time", "transfer_limit_per_day", "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction", "withdrawal_account_registration"]
+      "fields": ["security_medium", "transfer_limit_per_time", "transfer_limit_per_day", "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction", "withdrawal_account_registration"]
     },
     {
       "id": "check_card",
@@ -292,56 +298,33 @@
       "response_type": "bullet",
       "prompt": "쏠 어플에서도 지금 만든 계좌를 사용하실 수 있도록 도와드릴게요. 보유하신 보안매체 등록해드릴까요?",
       "choices": [
-        {"value": "보유한 보안매체 1 (당행)", "label": "보유한 보안매체 1 (당행)"},
-        {"value": "보유한 보안매체 2 (타행)", "label": "보유한 보안매체 2 (타행)"},
+        {"value": "신한 OTP", "label": "신한 OTP"},
+        {"value": "하나 OTP", "label": "하나 OTP"},
         {"value": "보안카드", "label": "보안카드"},
-        {"value": "신한OTP (10,000원)", "label": "신한OTP (10,000원)"}
+        {"value": "신한 OTP (10,000원)", "label": "신한OTP (10,000원)"}
       ],
       "choice_groups": [
         {
-          "title": "선택 가능한 보안매체",
+          "title": "보유 중인 보안매체",
           "items": [
-            {"value": "보유한 보안매체 1 (당행)", "label": "보유한 보안매체 1 (당행)"},
-            {"value": "보유한 보안매체 2 (타행)", "label": "보유한 보안매체 2 (타행)"}
+            {"value": "신한 OTP", "label": "신한 OTP"},
+            {"value": "하나 OTP", "label": "하나 OTP"}
           ]
         },
         {
           "title": "보안매체 새로 발급 받기",
           "items": [
             {"value": "보안카드", "label": "보안카드"},
-            {"value": "신한OTP (10,000원)", "label": "신한OTP (10,000원)"}
+            {"value": "신한 OTP (10,000원)", "label": "신한OTP (10,000원)"}
           ]
         }
       ],
-      "default_choice": "보유한 보안매체 1 (당행)",
+      "default_choice": "신한 OTP",
       "is_question": true,
       "input_type": "choice",
       "expected_info_key": "security_medium",
       "visible_groups": ["internet_banking"],
       "skippable": false,
-      "transitions": [
-        {
-          "next_stage_id": "ask_other_otp_info",
-          "condition_description": "타행 OTP를 선택한 경우",
-          "example_phrases": ["보유한 보안매체 2 (타행)", "타행"]
-        },
-        {
-          "next_stage_id": "ask_transfer_limit",
-          "condition_description": "다른 보안매체를 선택한 경우",
-          "example_phrases": ["보유한 보안매체 1 (당행)", "보안카드", "신한OTP"]
-        }
-      ],
-      "default_next_stage_id": "ask_transfer_limit"
-    },
-    "ask_other_otp_info": {
-      "id": "ask_other_otp_info",
-      "total_cnt": 0,
-      "response_type": "narrative",
-      "prompt": "타행 OTP의 제조사와 일련번호를 말씀해주세요.",
-      "is_question": true,
-      "input_type": "text",
-      "expected_info_key": "other_otp_info",
-      "visible_groups": ["internet_banking"],
       "default_next_stage_id": "ask_transfer_limit"
     },
     "ask_transfer_limit": {
@@ -408,12 +391,14 @@
       "response_type": "bullet",
       "prompt": "후불교통기능이 있는 S-Line 카드로 발급하시겠어요?",
       "choices": [
-        {"value": "S-Line", "label": "S-Line"},
-        {"value": "딥드립", "label": "딥드립"},
+        {"value": "S-Line (후불교통)", "label": "S-Line (후불교통)"},
+        {"value": "S-Line (일반)", "label": "S-Line (일반)"},
+        {"value": "딥드립 (후불교통)", "label": "딥드립 (후불교통)"},
+        {"value": "딥드립 (일반)", "label": "딥드립 (일반)"},
         {"value": "신한카드1", "label": "신한카드1"},
         {"value": "신한카드2", "label": "신한카드2"}
       ],
-      "default_choice": "S-Line",
+      "default_choice": "S-Line (후불교통)",
       "is_question": true,
       "input_type": "choice",
       "expected_info_key": "card_type",

@@ -34,9 +34,11 @@ const completionStatus = computed(() => slotFillingStore.completionStatus)
 const formatFieldValue = (field: SmartField, value: any): string => {
   if (value === null || value === undefined) return ''
   
+  const displayLabels = slotFillingStore.displayLabels || {}
+  
   switch (field.type) {
     case 'boolean':
-      return value ? '예' : '아니오'
+      return value ? (displayLabels.boolean_true || '예') : (displayLabels.boolean_false || '아니오')
     case 'number':
       return field.unit ? `${value.toLocaleString()}${field.unit}` : value.toString()
     case 'choice':
