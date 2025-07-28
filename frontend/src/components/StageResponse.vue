@@ -8,15 +8,18 @@
     <!-- Bullet 타입 -->
     <div v-else-if="responseData.responseType === 'bullet'" class="bullet-response">
       <p><strong>AI:</strong> {{ responseData.prompt }}</p>
+      
+      <!-- 일반 bullet 응답 처리 (ask_security_medium 포함) -->
       <div class="choices">
         <button 
-          v-for="choice in responseData.choices" 
-          :key="choice.value"
-          @click="selectChoice(choice.value || choice.label)"
+          v-for="(choice, index) in (responseData.choices || [])" 
+          :key="choice?.value || choice?.label || index"
+          @click="selectChoice(choice?.value || choice?.label || '')"
           class="choice-button"
-          :aria-label="`선택: ${choice.label}`"
+          :class="{ 'selected': isSelectedChoice(choice) }"
+          :aria-label="`선택: ${choice?.label || choice?.value || '선택지'}`"
         >
-          {{ choice.label }}
+          {{ choice?.label || choice?.value || `선택지 ${index + 1}` }}
         </button>
       </div>
     </div>
@@ -71,7 +74,39 @@ interface Props {
 const props = defineProps<Props>();
 const chatStore = useChatStore();
 
+// CRITICAL DEBUG: Log all stage responses
+watch(() => props.responseData, (newData) => {
+  if (newData) {
+    console.log('🔍 STAGE RESPONSE RECEIVED:');
+    console.log('  stageId:', newData.stageId);
+    console.log('  responseType:', newData.responseType);
+    console.log('  choices:', newData.choices);
+    console.log('  choices.length:', newData.choices?.length);
+    console.log('  full data:', newData);
+    
+    if (newData.stageId === 'ask_security_medium') {
+      console.log('🚨 ASK_SECURITY_MEDIUM STAGE REACHED!');
+      console.log('  This should show bullet choices but may not be displaying correctly');
+    }
+  }
+}, { immediate: true });
+
 const booleanSelections = ref<Record<string, boolean>>({});
+const selectedChoice = ref<string>('');
+
+// 선택된 선택지 확인
+const isSelectedChoice = (choice: Choice) => {
+  const value = choice?.value || choice?.label || '';
+  return selectedChoice.value === value;
+};
+
+// 기본 선택값 설정 (bullet 타입)
+watch(() => props.responseData, (newData) => {
+  if (newData && newData.responseType === 'bullet' && newData.defaultChoice) {
+    selectedChoice.value = newData.defaultChoice;
+    console.log('🎯 Default choice set:', newData.defaultChoice);
+  }
+}, { immediate: true });
 
 // Boolean 초기값 설정
 watch(() => props.responseData, (newData) => {
@@ -92,6 +127,8 @@ const hasAnySelection = computed(() => {
 
 const selectChoice = (value: string) => {
   if (!props.responseData) return;
+  selectedChoice.value = value;
+  console.log('🎯 Choice selected:', value);
   chatStore.sendUserChoice(props.responseData.stageId, value);
 };
 
@@ -140,6 +177,12 @@ const submitBooleanSelections = () => {
 
 .choice-button:hover {
   background-color: #e8f0fe;
+  border-color: #1976d2;
+}
+
+.choice-button.selected {
+  background-color: #1976d2;
+  color: white;
   border-color: #1976d2;
 }
 
@@ -261,6 +304,7 @@ const submitBooleanSelections = () => {
   font-size: 0.875rem;
 }
 
+
 /* 모바일 반응형 */
 @media (max-width: 640px) {
   .choice-button {
@@ -285,5 +329,6 @@ const submitBooleanSelections = () => {
   .toggle-switch input:checked + .toggle-slider:before {
     transform: translateX(1.25rem);
   }
+
 }
 </style>

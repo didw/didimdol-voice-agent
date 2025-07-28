@@ -42,16 +42,7 @@ async def handle_agent_output_chunk(
             # Send stage response data to client
             stage_data = agent_output_chunk.get("data")
             if stage_data:
-                # Debug: Log stage response data for ask_security_medium
-                if stage_data.get("stage_id") == "ask_security_medium":
-                    print(f"[DEBUG] WebSocket sending ask_security_medium stage_response:")
-                    print(f"[DEBUG] - stage_id: {stage_data.get('stage_id')}")
-                    print(f"[DEBUG] - response_type: {stage_data.get('response_type')}")
-                    print(f"[DEBUG] - prompt length: {len(stage_data.get('prompt', ''))}")
-                    print(f"[DEBUG] - prompt content: {repr(stage_data.get('prompt'))}")
-                    print(f"[DEBUG] - choices: {stage_data.get('choices')}")
-                
-                await manager.send_json_to_client(session_id, {
+                websocket_data = {
                     "type": "stage_response",
                     "stageId": stage_data.get("stage_id"),
                     "responseType": stage_data.get("response_type"),
@@ -59,7 +50,15 @@ async def handle_agent_output_chunk(
                     "choices": stage_data.get("choices"),
                     "skippable": stage_data.get("skippable", False),
                     "modifiableFields": stage_data.get("modifiable_fields")
-                })
+                }
+                # choice_groups가 있는 경우 추가
+                if stage_data.get("choice_groups"):
+                    websocket_data["choiceGroups"] = stage_data.get("choice_groups")
+                # default_choice가 있는 경우 추가
+                if stage_data.get("default_choice"):
+                    websocket_data["defaultChoice"] = stage_data.get("default_choice")
+                    
+                await manager.send_json_to_client(session_id, websocket_data)
             return full_ai_response_text, False, None
             
         elif chunk_type == "stream_end":

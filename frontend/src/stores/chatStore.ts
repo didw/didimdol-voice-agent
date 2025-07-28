@@ -306,8 +306,10 @@ export const useChatStore = defineStore("chat", {
                 prompt: data.prompt,
                 choices: data.choices,
                 skippable: data.skippable || false,
-                modifiableFields: data.modifiableFields
-              };
+                modifiableFields: data.modifiableFields,
+                choiceGroups: data.choiceGroups,
+                defaultChoice: data.defaultChoice
+              } as any;
               
               // AI 메시지로 추가 (StageResponse 컴포넌트가 렌더링하도록)
               this.messages.push({

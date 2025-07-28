@@ -158,6 +158,14 @@ async def process_scenario_logic_node(state: AgentState) -> AgentState:
     current_stage_id = state.current_scenario_stage_id or "N/A"
     scenario_name = state.active_scenario_name or "N/A"
     log_node_execution("Scenario_Flow", f"scenario={scenario_name}, stage={current_stage_id}")
+    
+    # CRITICAL DEBUG: Function entry point
+    print(f"🚨 SCENARIO_LOGIC FUNCTION STARTED")
+    print(f"  current_stage_id: {current_stage_id}")
+    print(f"  scenario_name: {scenario_name}")
+    print(f"  collected_product_info keys: {list(state.collected_product_info.keys()) if state.collected_product_info else 'None'}")
+    print(f"  user_input: {state.stt_result if hasattr(state, 'stt_result') else 'None'}")
+    
     active_scenario_data = get_active_scenario_data(state.to_dict())
     current_stage_id = state.current_scenario_stage_id
     
@@ -251,8 +259,19 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
 
         # customer_info_check 단계에서 개인정보 확인 처리
         if current_stage_id == "customer_info_check":
+            intent = scenario_output.get("intent", "") if scenario_output else ""
+            print(f"🚨 CUSTOMER_INFO_CHECK PROCESSING")
+            print(f"  user_input: {user_input}")
+            print(f"  intent: {intent}")
+            print(f"  waiting_for_additional_modifications: {state.waiting_for_additional_modifications}")
+            print(f"  collected_info has customer_name: {bool(collected_info.get('customer_name'))}")
+            print(f"  collected_info has phone_number: {bool(collected_info.get('phone_number'))}")
+            print(f"  confirm_personal_info: {collected_info.get('confirm_personal_info')}")
+            print(f"  correction_mode: {state.correction_mode}")
+            print(f"  pending_modifications: {state.pending_modifications}")
             # 추가 수정사항 대기 중인 경우 먼저 체크
             if state.waiting_for_additional_modifications:
+                print(f"🚨 PATH 1: waiting_for_additional_modifications = True")
                 
                 # 사용자가 추가 수정사항이 없다고 답한 경우
                 if user_input and any(word in user_input for word in ["아니", "아니요", "아니야", "없어", "없습니다", "괜찮", "됐어", "충분"]):
@@ -275,6 +294,7 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             # correction_mode가 활성화된 경우
             # pending_modifications가 있으면 이미 personal_info_correction에서 처리 중이므로 건너뛰기
             elif state.correction_mode and not state.pending_modifications:
+                print(f"🚨 PATH 2: correction_mode = True, no pending_modifications")
                 
                 # 그 외의 경우 personal_info_correction_node로 라우팅
                 return state.merge_update({
@@ -287,6 +307,7 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             # 자연스러운 정보 수정 감지 (correction_mode가 아닌 상태에서도)
             # pending_modifications가 있으면 이미 처리 중이므로 수정 요청으로 감지하지 않음
             elif not state.correction_mode and not state.pending_modifications and _is_info_modification_request(user_input, collected_info):
+                print(f"🚨 PATH 3: Natural modification detected")
                 
                 return state.merge_update({
                     "correction_mode": True,
@@ -298,11 +319,11 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             
             # 이름과 전화번호가 이미 있고, 사용자가 긍정적으로 응답한 경우 바로 다음 단계로
             elif (collected_info.get("customer_name") and 
-                  collected_info.get("customer_phone") and
+                  collected_info.get("phone_number") and
                   (collected_info.get("confirm_personal_info") == True or
                    (user_input and any(word in user_input for word in ["네", "예", "맞아", "맞습니다", "확인"])))):
                 
-                
+                print(f"🚨 PATH 4: Positive confirmation - transitioning to next stage")
                 # confirm_personal_info도 True로 설정
                 collected_info["confirm_personal_info"] = True
                 
@@ -318,17 +339,33 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                         break
                 
                 next_stage_info = active_scenario_data.get("stages", {}).get(next_stage_id, {})
-                next_stage_prompt = next_stage_info.get("prompt", "")
                 
-                return state.merge_update({
-                    "current_scenario_stage_id": next_stage_id,
-                    "collected_product_info": collected_info,
-                    "final_response_text_for_tts": next_stage_prompt,
-                    "is_final_turn_response": True,
-                    "action_plan": [],
-                    "action_plan_struct": [],
-                    "correction_mode": False  # 수정 모드 해제
-                })
+                # ask_security_medium 스테이지라면 stage_response_data 생성
+                if next_stage_id == "ask_security_medium":
+                    print(f"🚨 TRANSITIONING TO ask_security_medium - GENERATING STAGE RESPONSE")
+                    stage_response_data = generate_stage_response(next_stage_info, collected_info, active_scenario_data)
+                    print(f"🚨 ask_security_medium stage_response_data: {stage_response_data}")
+                    
+                    return state.merge_update({
+                        "current_scenario_stage_id": next_stage_id,
+                        "collected_product_info": collected_info,
+                        "stage_response_data": stage_response_data,
+                        "is_final_turn_response": True,
+                        "action_plan": [],
+                        "action_plan_struct": [],
+                        "correction_mode": False  # 수정 모드 해제
+                    })
+                else:
+                    next_stage_prompt = next_stage_info.get("prompt", "")
+                    return state.merge_update({
+                        "current_scenario_stage_id": next_stage_id,
+                        "collected_product_info": collected_info,
+                        "final_response_text_for_tts": next_stage_prompt,
+                        "is_final_turn_response": True,
+                        "action_plan": [],
+                        "action_plan_struct": [],
+                        "correction_mode": False  # 수정 모드 해제
+                    })
             # confirm_personal_info가 false인 경우는 기존 시나리오 전환 로직을 따름
         
         
@@ -528,6 +565,22 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                 else:
                     response_text = generate_check_card_prompt(missing_cc_fields)
             
+        elif current_stage_id == "ask_security_medium":
+            # ask_security_medium 단계 디버깅 및 처리
+            print(f"[DEBUG] ==================== ask_security_medium STAGE REACHED ====================")
+            print(f"[DEBUG] current_stage_info: {current_stage_info}")
+            print(f"[DEBUG] collected_info keys: {list(collected_info.keys()) if collected_info else []}")
+            # 바로 stage response 생성해서 리턴
+            stage_response_data = generate_stage_response(current_stage_info, collected_info, active_scenario_data)
+            print(f"[DEBUG] ask_security_medium stage_response_data: {stage_response_data}")
+            
+            return state.merge_update({
+                "stage_response_data": stage_response_data,
+                "is_final_turn_response": True,
+                "action_plan": [],
+                "action_plan_struct": []
+            })
+        
         elif current_stage_id == "ask_transfer_limit":
             # 이체한도 설정 단계 처리 - 개선된 버전
             
@@ -698,6 +751,13 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             
             print(f"🔥🔥🔥 [FORCE] === UNCONDITIONAL BOOLEAN CONVERSION END ===")
             
+            # === "네" 응답 처리: 모든 알림을 true로 설정 ===
+            if user_input and any(word in user_input for word in ["네", "예", "좋아요", "모두", "전부", "다", "신청", "하겠습니다"]):
+                print(f"🔥 [YES_RESPONSE] User said yes - setting all notifications to true")
+                for field in boolean_fields:
+                    collected_info[field] = True
+                    print(f"🔥 [YES_RESPONSE] Set {field} = True")
+            
             # === 간단한 다음 단계 진행 로직 ===
             if user_input:
                 # 다음 단계로 진행
@@ -735,6 +795,52 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                     "action_plan_struct": [],
                     "router_call_count": 0
                 })
+                
+        elif current_stage_id == "ask_withdrawal_account":
+            # 출금계좌 등록 단계 처리
+            print(f"🏦 [WITHDRAWAL_ACCOUNT] Processing user input: '{user_input}'")
+            print(f"🏦 [WITHDRAWAL_ACCOUNT] Current collected_info: {collected_info}")
+            
+            # "네" 응답 처리
+            if user_input and any(word in user_input for word in ["네", "예", "좋아요", "등록", "신청", "하겠습니다", "도와", "부탁"]):
+                collected_info["withdrawal_account_registration"] = True
+                print(f"🏦 [WITHDRAWAL_ACCOUNT] Set withdrawal_account_registration = True")
+            # "아니요" 응답 처리
+            elif user_input and any(word in user_input for word in ["아니", "아니요", "안", "필요없", "괜찮", "나중에", "안할", "미신청"]):
+                collected_info["withdrawal_account_registration"] = False
+                print(f"🏦 [WITHDRAWAL_ACCOUNT] Set withdrawal_account_registration = False")
+            
+            # 다음 단계로 진행
+            next_stage_id = current_stage_info.get("default_next_stage_id", "ask_card_receive_method")
+            next_stage_info = active_scenario_data.get("stages", {}).get(next_stage_id, {})
+            
+            # 다음 스테이지가 bullet 타입이면 stage_response_data 생성
+            if next_stage_info.get("response_type") == "bullet":
+                stage_response_data = generate_stage_response(next_stage_info, collected_info, active_scenario_data)
+                print(f"🏦 [WITHDRAWAL_ACCOUNT] Generated stage_response_data for {next_stage_id}")
+                
+                return state.merge_update({
+                    "current_scenario_stage_id": next_stage_id,
+                    "collected_product_info": collected_info,
+                    "stage_response_data": stage_response_data,
+                    "is_final_turn_response": True,
+                    "action_plan": [],
+                    "action_plan_struct": [],
+                    "router_call_count": 0
+                })
+            else:
+                next_stage_prompt = next_stage_info.get("prompt", "")
+                response_text = f"출금계좌 등록 설정을 완료했습니다. {next_stage_prompt}"
+                
+                return state.merge_update({
+                    "current_scenario_stage_id": next_stage_id,
+                    "collected_product_info": collected_info,
+                    "final_response_text_for_tts": response_text,
+                    "is_final_turn_response": True,
+                    "action_plan": [],
+                    "action_plan_struct": [],
+                    "router_call_count": 0
+                })
             
         elif current_stage_id == "eligibility_assessment":
             # 자격 검토 완료 후 서류 안내로 자동 진행
@@ -762,12 +868,23 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
         if next_stage_id != current_stage_id:
             log_node_execution("Stage_Change", f"{current_stage_id} → {next_stage_id}")
         
+        # CRITICAL DEBUG: Stage transition check
+        print(f"🚨 STAGE TRANSITION DEBUG:")
+        print(f"  current_stage_id: {current_stage_id}")
+        print(f"  next_stage_id: {next_stage_id}")
+        print(f"  stage changed: {next_stage_id != current_stage_id}")
+        
         # 다음 스테이지의 stage_response_data 생성
         stage_response_data = None
         if next_stage_id and next_stage_id != current_stage_id:
             next_stage_info = active_scenario_data.get("stages", {}).get(next_stage_id, {})
+            print(f"🚨 NEXT STAGE INFO: {next_stage_info.get('id')}, response_type: {next_stage_info.get('response_type')}")
             if "response_type" in next_stage_info:
+                print(f"🚨 GENERATING STAGE RESPONSE for {next_stage_id}")
                 stage_response_data = generate_stage_response(next_stage_info, collected_info, active_scenario_data)
+                print(f"🚨 STAGE RESPONSE GENERATED: {stage_response_data}")
+        else:
+            print(f"🚨 NO STAGE RESPONSE GENERATION - stage not changed or no next_stage_id")
         
         # 스테이지가 변경되지 않은 경우와 사용자 입력이 없는 경우에만 is_final_turn_response를 False로 설정
         is_final_response = True
@@ -803,6 +920,7 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
 
 async def process_single_info_collection(state: AgentState, active_scenario_data: Dict, current_stage_id: str, current_stage_info: Dict, collected_info: Dict, scenario_output: Optional[ScenarioAgentOutput], user_input: str) -> AgentState:
     """기존 단일 정보 수집 처리"""
+    print(f"🔍 PROCESS_SINGLE_INFO_COLLECTION called for stage: {current_stage_id}")
 
     if scenario_output and scenario_output.get("is_scenario_related"):
         entities = scenario_output.get("entities", {})
@@ -846,62 +964,59 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
                     validation_errors = []
                     for key, value in entities.items():
                         if value is not None:
-                            is_valid, error_msg = engine.validate_field_value(key, value)
-                            if is_valid:
-                                collected_info[key] = value
+                            # 특별한 매칭 로직 적용
+                            mapped_value = _map_entity_to_valid_choice(key, value, current_stage_info)
+                            if mapped_value:
+                                collected_info[key] = mapped_value
+                                print(f"✅ [ENTITY_MAPPING] {key}: '{value}' → '{mapped_value}'")
                             else:
-                                validation_errors.append(f"{key}: {error_msg}")
+                                is_valid, error_msg = engine.validate_field_value(key, value)
+                                if is_valid:
+                                    collected_info[key] = value
+                                else:
+                                    print(f"❌ [VALIDATION_ERROR] {key}: {error_msg}")
+                                    # validation 에러가 있어도 무한루프를 방지하기 위해 기본값 사용
+                                    default_value = _get_default_value_for_field(key, current_stage_info)
+                                    if default_value:
+                                        collected_info[key] = default_value
+                                        print(f"🔄 [FALLBACK] {key}: using default '{default_value}'")
                     
-                    # If there are validation errors, provide guidance
-                    if validation_errors:
-                        error_response = "죄송합니다, 말씀하신 내용 중 일부를 다시 확인해주세요:\n"
-                        error_response += "\n".join(validation_errors)
-                        
-                        # Stay on current stage and provide guidance
-                        return state.merge_update({
-                            "current_scenario_stage_id": current_stage_id,
-                            "collected_product_info": collected_info,
-                            "final_response_text_for_tts": error_response,
-                            "is_final_turn_response": True,
-                            "action_plan": state.get("action_plan", []),
-                            "action_plan_struct": state.get("action_plan_struct", [])
-                        })
+                    # validation_errors는 이제 사용하지 않음 (무한루프 방지)
                 else:
                     print(f"--- Entity verification FAILED. Not updating collected info. ---")
             except Exception as e:
                 pass
 
         elif entities:
-            # Validate entities against field choices
-            engine = SimpleScenarioEngine(active_scenario_data)
-            
-            validation_errors = []
+            # Validate entities against field choices with improved mapping
             for key, value in entities.items():
                 if value is not None:
-                    is_valid, error_msg = engine.validate_field_value(key, value)
-                    if is_valid:
-                        collected_info[key] = value
+                    # 특별한 매핑 로직 적용
+                    mapped_value = _map_entity_to_valid_choice(key, value, current_stage_info)
+                    if mapped_value:
+                        collected_info[key] = mapped_value
+                        print(f"✅ [ENTITY_MAPPING] {key}: '{value}' → '{mapped_value}'")
                     else:
-                        validation_errors.append(f"{key}: {error_msg}")
-            
-            # If there are validation errors, provide guidance
-            if validation_errors:
-                error_response = "죄송합니다, 말씀하신 내용 중 일부를 다시 확인해주세요:\n"
-                error_response += "\n".join(validation_errors)
-                
-                # Stay on current stage and provide guidance
-                return state.merge_update({
-                    "current_scenario_stage_id": current_stage_id,
-                    "collected_product_info": collected_info,
-                    "final_response_text_for_tts": error_response,
-                    "is_final_turn_response": True,
-                    "action_plan": state.get("action_plan", []),
-                    "action_plan_struct": state.get("action_plan_struct", [])
-                })
+                        # 기본 validation 시도
+                        engine = SimpleScenarioEngine(active_scenario_data)
+                        is_valid, error_msg = engine.validate_field_value(key, value)
+                        if is_valid:
+                            collected_info[key] = value
+                        else:
+                            print(f"❌ [VALIDATION_ERROR] {key}: {error_msg}")
+                            # validation 에러가 있어도 무한루프를 방지하기 위해 기본값 사용
+                            default_value = _get_default_value_for_field(key, current_stage_info)
+                            if default_value:
+                                collected_info[key] = default_value
+                                print(f"🔄 [FALLBACK] {key}: using default '{default_value}'")
 
     
     # customer_info_check 단계에서 수정 요청 특별 처리
     if current_stage_id == "customer_info_check":
+        print(f"🔍 SINGLE_INFO: customer_info_check processing")
+        print(f"  user_input: {user_input}")
+        print(f"  collected_info keys: {list(collected_info.keys())}")
+        print(f"  scenario_output: {scenario_output}")
         # customer_info_check 단계 진입 시 default 값 설정
         display_fields = current_stage_info.get("display_fields", [])
         if display_fields:
@@ -924,6 +1039,7 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         
         # 긍정적 확인이면 바로 다음 단계로 진행
         if is_positive_confirmation:
+            print(f"🔍 SINGLE_INFO: Positive confirmation detected")
             collected_info["confirm_personal_info"] = True
             
             # 시나리오 JSON에서 정의된 다음 단계로 이동
@@ -937,18 +1053,35 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
                     next_stage_id = transition.get("next_stage_id", default_next)
                     break
             
+            print(f"🔍 SINGLE_INFO: Transitioning to {next_stage_id}")
             next_stage_info = active_scenario_data.get("stages", {}).get(next_stage_id, {})
-            next_stage_prompt = next_stage_info.get("prompt", "")
             
-            return state.merge_update({
-                "current_scenario_stage_id": next_stage_id,
-                "collected_product_info": collected_info,
-                "final_response_text_for_tts": next_stage_prompt,
-                "is_final_turn_response": True,
-                "action_plan": [],
-                "action_plan_struct": [],
-                "correction_mode": False
-            })
+            # ask_security_medium 스테이지라면 stage_response_data 생성
+            if next_stage_id == "ask_security_medium":
+                print(f"🚨 SINGLE_INFO: ask_security_medium - GENERATING STAGE RESPONSE")
+                stage_response_data = generate_stage_response(next_stage_info, collected_info, active_scenario_data)
+                print(f"🚨 SINGLE_INFO: ask_security_medium stage_response_data: {stage_response_data}")
+                
+                return state.merge_update({
+                    "current_scenario_stage_id": next_stage_id,
+                    "collected_product_info": collected_info,
+                    "stage_response_data": stage_response_data,
+                    "is_final_turn_response": True,
+                    "action_plan": [],
+                    "action_plan_struct": [],
+                    "correction_mode": False
+                })
+            else:
+                next_stage_prompt = next_stage_info.get("prompt", "")
+                return state.merge_update({
+                    "current_scenario_stage_id": next_stage_id,
+                    "collected_product_info": collected_info,
+                    "final_response_text_for_tts": next_stage_prompt,
+                    "is_final_turn_response": True,
+                    "action_plan": [],
+                    "action_plan_struct": [],
+                    "correction_mode": False
+                })
         
         # 부정적 응답이나 수정 요청인 경우에만 correction mode 진입
         # 1. 명시적 부정 응답
@@ -983,6 +1116,49 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
                 "router_call_count": 0,
                 "is_final_turn_response": False
             })
+    
+    # ask_security_medium 단계에서 "네" 응답 처리
+    if current_stage_id == "ask_security_medium":
+        print(f"🔐 [SECURITY_MEDIUM] Processing with input: '{user_input}'")
+        
+        expected_info_key = current_stage_info.get("expected_info_key")
+        if expected_info_key and user_input and any(word in user_input for word in ["네", "예", "좋아요", "그래요", "하겠습니다", "등록"]):
+            # 기본값: '보유한 보안매체 1 (당행)'
+            default_security_medium = "보유한 보안매체 1 (당행)"
+            collected_info[expected_info_key] = default_security_medium
+            print(f"🔐 [SECURITY_MEDIUM] Set {expected_info_key} = {default_security_medium} (user said yes)")
+    
+    # ask_notification_settings 단계에서 "네" 응답 처리
+    if current_stage_id == "ask_notification_settings":
+        print(f"🔔 [NOTIFICATION] Processing with input: '{user_input}'")
+        
+        if user_input and any(word in user_input for word in ["네", "예", "좋아요", "모두", "전부", "다", "신청", "하겠습니다"]):
+            # 모든 알림을 true로 설정
+            notification_fields = ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
+            print(f"🔔 [NOTIFICATION] User said yes - setting all notifications to true")
+            for field in notification_fields:
+                collected_info[field] = True
+                print(f"🔔 [NOTIFICATION] Set {field} = True")
+    
+    # 체크카드 관련 단계에서 "네" 응답 처리
+    check_card_stages = ["ask_card_receive_method", "ask_card_type", "ask_statement_method", "ask_card_usage_alert", "ask_card_password"]
+    if current_stage_id in check_card_stages:
+        print(f"💳 [CHECK_CARD] Processing {current_stage_id} with input: '{user_input}'")
+        
+        expected_info_key = current_stage_info.get("expected_info_key")
+        if expected_info_key and user_input and any(word in user_input for word in ["네", "예", "좋아요", "그래요", "하겠습니다"]):
+            # 각 단계의 기본값 설정
+            default_values = {
+                "card_receive_method": "즉시수령",
+                "card_type": "S-Line", 
+                "statement_method": "휴대폰",
+                "card_usage_alert": "5만원 이상 결제 시 발송 (무료)",
+                "card_password_same_as_account": True
+            }
+            
+            if expected_info_key in default_values:
+                collected_info[expected_info_key] = default_values[expected_info_key]
+                print(f"💳 [CHECK_CARD] Set {expected_info_key} = {default_values[expected_info_key]} (user said yes)")
     
     # 스테이지 전환 로직 결정
     transitions = current_stage_info.get("transitions", [])
@@ -1228,6 +1404,85 @@ def _handle_field_name_mapping(collected_info: Dict[str, Any]) -> None:
     
 
 
+def _map_entity_to_valid_choice(field_key: str, entity_value: str, stage_info: Dict[str, Any]) -> Optional[str]:
+    """
+    Entity 값을 유효한 choice로 매핑하는 함수
+    """
+    if not entity_value or not stage_info.get("choices"):
+        return None
+    
+    choices = stage_info.get("choices", [])
+    entity_lower = entity_value.lower()
+    
+    # 각 choice와 부분 매칭 시도
+    for choice in choices:
+        choice_value = choice.get("value", "") if isinstance(choice, dict) else str(choice)
+        choice_lower = choice_value.lower()
+        
+        # 정확한 매칭
+        if entity_lower == choice_lower:
+            return choice_value
+        
+        # 부분 매칭 (entity에 choice가 포함되어 있는 경우)
+        if choice_lower in entity_lower:
+            return choice_value
+        
+        # choice에 entity가 포함되어 있는 경우
+        if entity_lower in choice_lower:
+            return choice_value
+    
+    # 특별한 매핑 규칙
+    mapping_rules = {
+        "card_type": {
+            "s-line": "S-Line",
+            "s라인": "S-Line", 
+            "에스라인": "S-Line",
+            "후불교통": "S-Line",
+            "딥드립": "딥드립",
+            "신한카드": "신한카드1"
+        },
+        "statement_method": {
+            "휴대폰": "휴대폰",
+            "문자": "휴대폰", 
+            "이메일": "이메일",
+            "메일": "이메일",
+            "홈페이지": "홈페이지",
+            "인터넷": "홈페이지"
+        },
+        "card_receive_method": {
+            "즉시": "즉시수령",
+            "바로": "즉시수령",
+            "지금": "즉시수령",
+            "집": "집으로 배송",
+            "자택": "집으로 배송",
+            "회사": "직장으로 배송",
+            "직장": "직장으로 배송"
+        }
+    }
+    
+    if field_key in mapping_rules:
+        for keyword, mapped_value in mapping_rules[field_key].items():
+            if keyword in entity_lower:
+                return mapped_value
+    
+    return None
+
+
+def _get_default_value_for_field(field_key: str, stage_info: Dict[str, Any]) -> Optional[str]:
+    """
+    필드의 기본값을 반환하는 함수
+    """
+    defaults = {
+        "card_type": "S-Line",
+        "statement_method": "휴대폰", 
+        "card_receive_method": "즉시수령",
+        "card_usage_alert": "5만원 이상 결제 시 발송 (무료)",
+        "security_medium": "보유한 보안매체 1 (당행)"
+    }
+    
+    return defaults.get(field_key)
+
+
 def _is_info_modification_request(user_input: str, collected_info: Dict[str, Any]) -> bool:
     """
     자연스러운 정보 수정 요청인지 감지하는 헬퍼 함수
@@ -1333,24 +1588,19 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
     response_type = stage_info.get("response_type", "narrative")
     prompt = stage_info.get("prompt", "")
     
-    # Debug: Log original prompt for ask_security_medium
+    # CRITICAL DEBUG for ask_security_medium
     if stage_info.get("id") == "ask_security_medium":
-        print(f"[DEBUG] ask_security_medium original prompt length: {len(prompt)}")
-        print(f"[DEBUG] ask_security_medium original prompt: {repr(prompt)}")
+        print(f"🚨 BACKEND: ask_security_medium stage processing started")
+        print(f"  response_type: {response_type}")
+        print(f"  choices: {stage_info.get('choices')}")
+        print(f"  choices count: {len(stage_info.get('choices', []))}")
     
     # display_fields가 있는 경우 처리 (bullet 타입)
     if stage_info.get("display_fields"):
         prompt = format_prompt_with_fields(prompt, collected_info, stage_info["display_fields"], scenario_data)
-        if stage_info.get("id") == "ask_security_medium":
-            print(f"[DEBUG] ask_security_medium after format_prompt_with_fields: {repr(prompt)}")
     
     # 템플릿 변수 치환
     prompt = replace_template_variables(prompt, collected_info)
-    
-    # Debug: Log final prompt for ask_security_medium
-    if stage_info.get("id") == "ask_security_medium":
-        print(f"[DEBUG] ask_security_medium final prompt length: {len(prompt)}")
-        print(f"[DEBUG] ask_security_medium final prompt: {repr(prompt)}")
     
     response_data = {
         "stage_id": stage_info.get("id"),
@@ -1362,8 +1612,19 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
     # 선택지가 있는 경우
     if response_type in ["bullet", "boolean"]:
         response_data["choices"] = stage_info.get("choices", [])
+        # choice_groups가 있는 경우 추가
+        if stage_info.get("choice_groups"):
+            response_data["choice_groups"] = stage_info.get("choice_groups", [])
+        # default_choice가 있는 경우 추가
+        if stage_info.get("default_choice"):
+            response_data["default_choice"] = stage_info.get("default_choice")
+        
+        # CRITICAL DEBUG for ask_security_medium
         if stage_info.get("id") == "ask_security_medium":
-            print(f"[DEBUG] ask_security_medium choices: {response_data['choices']}")
+            print(f"🚨 BACKEND: ask_security_medium response_data created:")
+            print(f"  final choices: {response_data['choices']}")
+            print(f"  final response_type: {response_data['response_type']}")
+            print(f"  final stage_id: {response_data['stage_id']}")
     
     # 수정 가능한 필드 정보
     if stage_info.get("modifiable_fields"):
