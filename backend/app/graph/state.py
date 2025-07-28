@@ -130,8 +130,7 @@ class AgentState(BaseModel):
     def merge_update(self, updates: Dict[str, Any]) -> "AgentState":
         """Merge updates and return new instance"""
         if 'collected_product_info' in updates:
-            print(f"[AgentState.merge_update] Updating collected_product_info: {updates['collected_product_info']}")
-            print(f"[AgentState.merge_update] Current collected_product_info BEFORE update: {self.collected_product_info}")
+            pass
         
         # Deep copy를 사용하여 중첩된 dict도 제대로 복사
         from copy import deepcopy
@@ -145,8 +144,7 @@ class AgentState(BaseModel):
         new_state = AgentState(**current_data)
         
         if 'collected_product_info' in updates:
-            print(f"[AgentState.merge_update] After update, new state has collected_product_info: {new_state.collected_product_info}")
-            print(f"[AgentState.merge_update] Verification - are they equal? {new_state.collected_product_info == updates['collected_product_info']}")
+            pass
         
         return new_state
     

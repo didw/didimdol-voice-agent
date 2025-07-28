@@ -42,7 +42,7 @@ async def handle_agent_output_chunk(
             # Send stage response data to client
             stage_data = agent_output_chunk.get("data")
             if stage_data:
-                await manager.send_json_to_client(session_id, {
+                websocket_data = {
                     "type": "stage_response",
                     "stageId": stage_data.get("stage_id"),
                     "responseType": stage_data.get("response_type"),
@@ -50,7 +50,15 @@ async def handle_agent_output_chunk(
                     "choices": stage_data.get("choices"),
                     "skippable": stage_data.get("skippable", False),
                     "modifiableFields": stage_data.get("modifiable_fields")
-                })
+                }
+                # choice_groups가 있는 경우 추가
+                if stage_data.get("choice_groups"):
+                    websocket_data["choiceGroups"] = stage_data.get("choice_groups")
+                # default_choice가 있는 경우 추가
+                if stage_data.get("default_choice"):
+                    websocket_data["defaultChoice"] = stage_data.get("default_choice")
+                    
+                await manager.send_json_to_client(session_id, websocket_data)
             return full_ai_response_text, False, None
             
         elif chunk_type == "stream_end":
@@ -102,7 +110,6 @@ async def handle_slot_filling_update(
     info_collection_stages: list
 ) -> None:
     """슬롯 필링 업데이트 처리"""
-    print(f"[{session_id}] ⭐ handle_slot_filling_update called")
     from .chat_utils import should_send_slot_filling_update, send_slot_filling_update
     
     current_collected_info = current_state.get("collected_product_info", {})
@@ -117,19 +124,16 @@ async def handle_slot_filling_update(
     is_info_collection_stage = (current_scenario_stage in info_collection_stages or 
                                current_state.get("current_product_type") == "deposit_account")
     
-    print(f"[{session_id}] ⭐ Conditions - Info:{info_changed}, Scenario:{scenario_changed}, Product:{product_type_changed}, Stage:{stage_changed}, Active:{scenario_active}, InfoStage:{is_info_collection_stage}")
     
     should_send = should_send_slot_filling_update(
         info_changed, scenario_changed, product_type_changed, stage_changed,
         scenario_active, is_info_collection_stage
     )
-    print(f"[{session_id}] ⭐ should_send_slot_filling_update result: {should_send}")
     
     if should_send:
-        print(f"[{session_id}] ⭐ Calling send_slot_filling_update")
         await send_slot_filling_update(websocket, current_state, session_id)
     else:
-        print(f"[{session_id}] ⭐ NOT sending slot filling update")
+        pass
 
 
 async def process_tts_for_response(

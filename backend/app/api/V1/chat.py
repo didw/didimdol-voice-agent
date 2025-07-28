@@ -381,7 +381,10 @@ async def process_input_through_agent(
     websocket: WebSocket
 ) -> None:
     """에이전트를 통한 입력 처리"""
-    print(f"[{session_id}] Processing input: '{user_text[:30]}...'")
+    print(f"\n{'='*60}")
+    print(f"[{session_id}] 🚀 DEBUG LOG START - Processing user input")
+    print(f"[{session_id}] User text: '{user_text[:50]}...'")
+    print(f"{'='*60}\n")
     
     current_state = SESSION_STATES.get(session_id)
     if not current_state:
@@ -392,7 +395,6 @@ async def process_input_through_agent(
         })
         return
     
-    print(f"[{session_id}] Current SESSION_STATES collected_product_info: {current_state.get('collected_product_info', {})}")
     
     # TTS 취소 플래그 초기화
     SESSION_STATES[session_id]['tts_cancelled'] = False
@@ -400,7 +402,6 @@ async def process_input_through_agent(
     # 새로운 LLM 기반 에이전트 사용
     product_type = current_state.get("current_product_type", "")
     
-    print(f"[{session_id}] Using New LLM-based Agent")
     
     full_ai_response_text = ""
     # deep copy를 사용하여 previous_state 생성
@@ -421,7 +422,6 @@ async def process_input_through_agent(
             )
             
             if final_data:
-                print(f"[{session_id}] Received final_data with collected_product_info: {final_data.get('collected_product_info', {})}")
                 
                 # final_data가 dict인지 확인하고 기존 SESSION_STATES 업데이트
                 if session_id in SESSION_STATES:
@@ -439,8 +439,6 @@ async def process_input_through_agent(
                     SESSION_STATES[session_id] = cast(AgentState, final_data)
                 
                 current_state = SESSION_STATES[session_id]
-                print(f"[{session_id}] SESSION_STATES now has collected_product_info: {SESSION_STATES[session_id].get('collected_product_info', {})}")
-                print(f"[{session_id}] State updated with collected_product_info: {current_state.get('collected_product_info', {})}")
                 
                 # 슬롯 필링 업데이트
                 await handle_slot_filling_update(
@@ -451,6 +449,18 @@ async def process_input_through_agent(
             if stream_ended and chunk.get("type") == "error":
                 break
         
+        # 디버그 로그 종료 - collected_info 출력
+        final_collected_info = current_state.get("collected_product_info", {}) if current_state else {}
+        print(f"\n{'='*60}")
+        print(f"[{session_id}] 🏁 DEBUG LOG END - Processing Complete")
+        print(f"[{session_id}] Final collected_info:")
+        if final_collected_info:
+            for key, value in final_collected_info.items():
+                print(f"[{session_id}]   - {key}: {value}")
+        else:
+            print(f"[{session_id}]   (No data collected)")
+        print(f"{'='*60}\n")
+        
         # TTS 처리
         await process_tts_for_response(
             session_id, full_ai_response_text, tts_service, 
@@ -459,6 +469,18 @@ async def process_input_through_agent(
         
     except Exception as e:
         print(f"[{session_id}] Agent processing error: {e}")
+        # 에러 상황에서도 collected_info 출력
+        error_collected_info = current_state.get("collected_product_info", {}) if current_state else {}
+        print(f"\n{'='*60}")
+        print(f"[{session_id}] 🚫 DEBUG LOG END - Error Occurred")
+        print(f"[{session_id}] Error: {str(e)}")
+        print(f"[{session_id}] Final collected_info:")
+        if error_collected_info:
+            for key, value in error_collected_info.items():
+                print(f"[{session_id}]   - {key}: {value}")
+        else:
+            print(f"[{session_id}]   (No data collected)")
+        print(f"{'='*60}\n")
         # WebSocket이 이미 닫혔을 수 있으므로 에러 메시지 전송을 시도하지 않음
         try:
             if session_id in manager.active_connections:

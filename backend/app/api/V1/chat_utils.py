@@ -66,7 +66,6 @@ def evaluate_single_condition(condition: str, collected_info: Dict[str, Any]) ->
         field_name = condition.replace(' != null', '').strip()
         value = collected_info.get(field_name)
         result = value is not None and value != '' and value != False
-        print(f"[DEBUG] Condition '{condition}' evaluated to {result} (value: {value})")
         return result
     
     # field == null 패턴  
@@ -74,7 +73,6 @@ def evaluate_single_condition(condition: str, collected_info: Dict[str, Any]) ->
         field_name = condition.replace(' == null', '').strip()
         value = collected_info.get(field_name)
         result = value is None or value == '' or value == False
-        print(f"[DEBUG] Condition '{condition}' evaluated to {result} (value: {value})")
         return result
     
     # field == value 패턴
@@ -98,7 +96,6 @@ def evaluate_single_condition(condition: str, collected_info: Dict[str, Any]) ->
                     current_str = str(current_value) if current_value is not None else ''
                 result = current_str == expected_value
             
-            print(f"[DEBUG] Condition '{condition}' evaluated to {result} (current: {current_value} [{type(current_value).__name__}], expected: {expected_value})")
             return result
     
     # field != value 패턴
@@ -122,7 +119,6 @@ def evaluate_single_condition(condition: str, collected_info: Dict[str, Any]) ->
                     current_str = str(current_value) if current_value is not None else ''
                 result = current_str != expected_value
             
-            print(f"[DEBUG] Condition '{condition}' evaluated to {result} (current: {current_value} [{type(current_value).__name__}], expected: {expected_value})")
             return result
     
     return True
@@ -137,7 +133,6 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
     visible_fields = []
     stages = scenario_data.get("stages", {})
     
-    print(f"[DEBUG] get_contextual_visible_fields - current_stage: '{current_stage}', collected_info keys: {list(collected_info.keys())}")
     
     # 현재 단계에서 요구하는 필드 확인
     current_stage_info = stages.get(current_stage, {})
@@ -166,15 +161,17 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
     # 1. 단계별로 필요한 필드만 표시 (처음부터 모든 필드를 보여주지 않음)
     # limit_account_guide 단계에서는 아무것도 표시하지 않음
     if current_stage == "limit_account_guide":
-        print(f"[DEBUG] limit_account_guide stage - no fields shown")
         # 빈 리스트를 반환하여 아무것도 표시하지 않음
         return []
     elif current_stage == "limit_account_agreement":
         # 한도계좌 동의 단계
         allowed_fields.add("limit_account_agreement")
     elif current_stage == "customer_info_check":
-        # 고객정보 확인 단계
-        allowed_fields.update(["customer_name", "phone_number", "address", "confirm_personal_info"])
+        # 고객정보 확인 단계 - 모든 기본 개인정보 필드 표시 (confirm_personal_info 제외)
+        allowed_fields.update([
+            "limit_account_agreement", "customer_name", "english_name", "resident_number", 
+            "phone_number", "email", "address", "work_address"
+        ])
     
     # 기본 정보가 확인된 이후에는 기본 필드들 표시 (특정 단계가 아닌 경우)
     if (collected_info.get("confirm_personal_info") and 
@@ -186,36 +183,28 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
     # 2. 현재 단계의 필드 추가
     if expected_info_key:
         allowed_fields.add(expected_info_key)
-        print(f"[DEBUG] Added current stage field: {expected_info_key}")
     
     # 평생계좌 사용 여부 단계
     if current_stage == "ask_lifelong_account":
         allowed_fields.add("use_lifelong_account")
         # 기본 정보도 함께 표시
         allowed_fields.update(["customer_name", "phone_number", "address"])
-        print(f"[DEBUG] Added use_lifelong_account and basic info for ask_lifelong_account stage")
     
     # 2-1. 현재 단계가 인터넷뱅킹이나 체크카드면 해당 메인 필드도 추가
-    print(f"[DEBUG] Checking stage-specific fields for stage: {current_stage}")
     
     if current_stage == "ask_internet_banking":
         # ask_internet_banking 단계에서는 use_internet_banking만 표시
         allowed_fields.add("use_internet_banking")
-        print(f"[DEBUG] Stage is ask_internet_banking - Added use_internet_banking field only")
     elif current_stage == "internet_banking":
         allowed_fields.add("use_internet_banking")
-        print(f"[DEBUG] Added use_internet_banking for internet_banking stage")
     
     if current_stage == "ask_check_card":
         # ask_check_card 단계에서 체크카드 관련 필드들 모두 표시
         check_card_fields = ["use_check_card", "card_type", "card_receive_method", "card_delivery_location", 
                            "postpaid_transport", "card_usage_alert", "statement_method"]
         allowed_fields.update(check_card_fields)
-        print(f"[DEBUG] Stage is ask_check_card - Added all {len(check_card_fields)} check card fields")
-        print(f"[DEBUG] Check card fields added: {check_card_fields}")
     elif current_stage in ["check_card", "ask_check_card"]:
         allowed_fields.add("use_check_card")
-        print(f"[DEBUG] Added use_check_card for check_card/ask_check_card stage")
     elif current_stage == "ask_notification_settings":
         # 알림 설정 단계에서 모든 알림 관련 필드 표시
         # 인터넷뱅킹 기본 필드도 포함
@@ -223,7 +212,6 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
                               "transfer_limit_per_day", "important_transaction_alert", 
                               "withdrawal_alert", "overseas_ip_restriction"]
         allowed_fields.update(notification_fields)
-        print(f"[DEBUG] Added all internet banking fields for ask_notification_settings stage")
     
     # 3. 진행 상황에 따른 추가 필드 결정 (단계별 표시로 변경되어 대부분 불필요)
     # 특정 단계가 아닌 경우에만 점진적 공개 적용
@@ -232,12 +220,21 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
                            "ask_notification_settings"]:
         if collected_info.get("confirm_personal_info"):
             # 개인정보 확인 후 기본 필드 유지
-            print(f"[DEBUG] Personal info confirmed, maintaining basic fields")
+            pass
     
-    # 4. 추가 서비스 선택 후 하위 필드들 표시 (개인정보 단계와 동일한 방식)
+    # 4. 출금계좌 등록 단계 처리
+    if current_stage == "ask_withdrawal_account":
+        allowed_fields.add("withdrawal_account_registration")
+        # 기본 정보도 함께 표시 (이미 수집된 정보들)
+        allowed_fields.update([
+            "limit_account_agreement", "customer_name", "english_name", "resident_number", 
+            "phone_number", "email", "address", "work_address", "confirm_personal_info"
+        ])
+    
+    # 5. 추가 서비스 선택 후 하위 필드들 표시 (개인정보 단계와 동일한 방식)
     # 인터넷뱅킹 관련 모든 단계에서 필드 표시
     internet_banking_stages = ["ask_security_medium", "ask_other_otp_info", "ask_transfer_limit", 
-                              "ask_notification_settings", "ask_internet_banking"]
+                              "ask_notification_settings", "ask_internet_banking", "ask_withdrawal_account"]
     
     # use_internet_banking이 true이거나 인터넷뱅킹 관련 단계에서는 항상 모든 필드 표시
     # 또는 security_medium이 이미 수집되었으면 계속 표시
@@ -247,9 +244,9 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
         "security_medium" in collected_info):
         internet_banking_sub = ["use_internet_banking", "security_medium", "initial_password", "other_otp_info", 
                                "transfer_limit_per_time", "transfer_limit_per_day", 
-                               "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
+                               "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction", 
+                               "withdrawal_account_registration"]
         allowed_fields.update(internet_banking_sub)
-        print(f"[DEBUG] Added ALL internet banking sub-fields (stage={current_stage}, use_internet_banking={collected_info.get('use_internet_banking')}, has_security_medium={'security_medium' in collected_info})")
     
     # 체크카드 단계이거나 선택했을 때 모든 관련 하위 필드들을 표시
     # 체크카드 관련 모든 단계에서 하위 필드 표시
@@ -261,7 +258,6 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
         check_card_fields = ["use_check_card", "card_type", "card_receive_method", "card_delivery_location", 
                             "postpaid_transport", "card_usage_alert", "statement_method"]
         allowed_fields.update(check_card_fields)
-        print(f"[DEBUG] Added ALL check card fields (stage={current_stage}): {check_card_fields}")
         
     # final_summary 단계에서는 모든 그룹의 필드들을 표시 (시나리오 visible_groups 기준)
     if current_stage == "final_summary":
@@ -274,10 +270,7 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
             if group.get("id") in visible_groups:
                 group_fields = group.get("fields", [])
                 allowed_fields.update(group_fields)
-                print(f"[DEBUG] final_summary: Added fields from group '{group.get('id')}': {group_fields}")
         
-        print(f"[DEBUG] final_summary stage - total allowed fields: {len(allowed_fields)}")
-        print(f"[DEBUG] final_summary allowed fields: {sorted(allowed_fields)}")
         
     # 5. 추가 조건부 필드들 (보험 등)
     # 여기에 더 많은 서비스별 하위 필드들을 추가할 수 있음
@@ -286,10 +279,7 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
     for field_key in collected_info:
         if field_key not in allowed_fields and collected_info[field_key] is not None:
             allowed_fields.add(field_key)
-            print(f"[DEBUG] Added already collected field: {field_key} = {collected_info[field_key]}")
     
-    print(f"[DEBUG] Final allowed fields for stage '{current_stage}': {sorted(allowed_fields)}")
-    print(f"[DEBUG] Total allowed fields count: {len(allowed_fields)}")
     
     # 조건 검사 및 계층 구조 적용
     for field in required_fields:
@@ -303,30 +293,25 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
             show_when = field.get("show_when")
             if show_when:
                 # 조건부 필드는 조건 평가로 넘어감 (부모 필드 체크 생략)
-                print(f"[DEBUG] Field '{field_key}' has show_when condition, proceeding to evaluation")
                 pass  # 조건 평가로 넘어감
             else:
                 # 조건이 없는 필드만 제한
-                print(f"[DEBUG] Field '{field_key}' not allowed in current stage (no condition)")
                 continue
         else:
-            print(f"[DEBUG] Field '{field_key}' is explicitly allowed for current stage")
+            pass
             
         show_when = field.get("show_when")
         
-        print(f"[DEBUG] Field '{field_key}' - show_when: {show_when}")
         
         # 2. show_when 조건 확인 (개인정보 단계와 동일 - 더 관대한 표시)
         if show_when and not is_allowed:  # allowed 필드는 조건 체크 없이 바로 표시
             is_visible = evaluate_show_when(show_when, collected_info)
-            print(f"[DEBUG] Field '{field_key}' visibility: {is_visible} (collected: {collected_info.get(field_key)})")
             
             # 조건이 만족되지 않아도 부모 필드가 선택되었다면 미리 표시 (값은 "미입력"으로)
             parent_field = field.get("parent_field")
             if not is_visible and parent_field:
                 parent_value = collected_info.get(parent_field)
                 if parent_value == True:  # 부모가 선택되었다면 하위 필드들 미리 표시
-                    print(f"[DEBUG] Field '{field_key}' not visible but parent '{parent_field}' is selected, showing anyway")
                     # 미리 표시하되 조건 미충족 상태로 마킹
                     pass
                 else:
@@ -340,10 +325,7 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
         field_with_hierarchy["is_visible"] = True
         
         visible_fields.append(field_with_hierarchy)
-        print(f"[DEBUG] Field '{field_key}' added to visible fields")
     
-    print(f"[DEBUG] Total contextual visible fields: {len(visible_fields)}")
-    print(f"[DEBUG] Visible field keys: {[f.get('key') for f in visible_fields]}")
     return visible_fields
 
 def get_visible_fields_with_hierarchy(scenario_data: Dict, collected_info: Dict) -> List[Dict]:
@@ -399,8 +381,6 @@ def apply_conditional_defaults(scenario_data: Dict, collected_info: Dict) -> Dic
 
 def update_slot_filling_with_hierarchy(scenario_data: Dict, collected_info: Dict, current_stage: str) -> Dict:
     """실시간으로 계층적 슬롯 필링 상태 계산"""
-    print(f"[update_slot_filling] Starting with current_stage: {current_stage}")
-    print(f"[update_slot_filling] Collected info keys: {list(collected_info.keys())}")
     
     if not scenario_data:
         return {}
@@ -434,40 +414,31 @@ def update_slot_filling_with_hierarchy(scenario_data: Dict, collected_info: Dict
     
     # 🔥 Boolean 필드 문자열 변환 + 누락된 boolean 값 추론
     boolean_field_keys = [f["key"] for f in all_fields if f.get("type") == "boolean"]
-    print(f"🔥🔥🔥 [BOOLEAN CONVERT] Processing boolean fields: {boolean_field_keys}")
-    print(f"🔥🔥🔥 [BOOLEAN CONVERT] Current collected_info: {enhanced_collected_info}")
     
     # 🚨 CRITICAL FIX: 누락된 boolean 필드 값 추론
     # use_check_card가 없는데 체크카드 관련 필드가 있으면 true로 추론
     if ("use_check_card" not in enhanced_collected_info and 
         any(key in enhanced_collected_info for key in ["card_receive_method", "card_type", "postpaid_transport", "statement_method", "card_usage_alert"])):
         enhanced_collected_info["use_check_card"] = True
-        print(f"🚨 [BOOLEAN INFER] use_check_card 값이 누락됨 → 체크카드 관련 필드 존재로 true 추론")
     
     # use_internet_banking이 없는데 인터넷뱅킹 관련 필드가 있으면 true로 추론
     if ("use_internet_banking" not in enhanced_collected_info and 
         any(key in enhanced_collected_info for key in ["security_medium", "transfer_limit_per_time", "transfer_limit_per_day", "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"])):
         enhanced_collected_info["use_internet_banking"] = True
-        print(f"🚨 [BOOLEAN INFER] use_internet_banking 값이 누락됨 → 인터넷뱅킹 관련 필드 존재로 true 추론")
     
     for field_key in boolean_field_keys:
         if field_key in enhanced_collected_info and isinstance(enhanced_collected_info[field_key], str):
             str_value = enhanced_collected_info[field_key].strip()
-            print(f"🔥🔥🔥 [BOOLEAN CONVERT] Converting {field_key}: '{str_value}'")
             
             if str_value in ["신청", "네", "예", "좋아요", "동의", "하겠습니다", "필요해요", "받을게요"]:
                 enhanced_collected_info[field_key] = True
-                print(f"🔥🔥🔥 [BOOLEAN CONVERT] ✅ {field_key}: '{str_value}' → True")
             elif str_value in ["미신청", "아니요", "아니", "싫어요", "거부", "안할게요", "필요없어요", "안받을게요"]:
                 enhanced_collected_info[field_key] = False
-                print(f"🔥🔥🔥 [BOOLEAN CONVERT] ✅ {field_key}: '{str_value}' → False")
             else:
-                print(f"🔥🔥🔥 [BOOLEAN CONVERT] ❌ Unknown boolean value: {field_key} = '{str_value}' (keeping as string)")
+                pass
         elif field_key in enhanced_collected_info:
             value = enhanced_collected_info[field_key]
-            print(f"🔥🔥🔥 [BOOLEAN CONVERT] {field_key} = {value} (type: {type(value).__name__}) - no conversion needed")
     
-    print(f"🔥🔥🔥 [BOOLEAN CONVERT] After conversion: {enhanced_collected_info}")
     
     completion_status = {}
     
@@ -515,29 +486,6 @@ def update_slot_filling_with_hierarchy(scenario_data: Dict, collected_info: Dict
         is_completed = is_field_completed(field, enhanced_collected_info)
         completion_status[field_key] = is_completed
         
-        # 디버그: boolean 필드 상태 확인
-        if field.get("type") == "boolean" and field_key in ["use_check_card", "use_internet_banking"]:
-            print(f"🔍 DEBUG: {field_key} completion status:")
-            print(f"  - raw value: {enhanced_collected_info.get(field_key)}")
-            print(f"  - value type: {type(enhanced_collected_info.get(field_key))}")
-            print(f"  - is_completed calculation: {is_completed}")
-            print(f"  - completion_status result: {completion_status[field_key]}")
-            print(f"  - field definition: {field}")
-            
-            # is_field_completed 함수의 내부 로직도 확인
-            value = enhanced_collected_info.get(field_key)
-            if value is None:
-                print(f"  - REASON: value is None")
-            elif field.get("type") == "boolean":
-                if isinstance(value, bool):
-                    print(f"  - REASON: Boolean value {value} → completion=True")
-                elif isinstance(value, str):
-                    normalized_value = value.strip().lower()
-                    valid_strings = ["신청", "미신청", "true", "false", "네", "아니요", "예", "아니", "좋아요", "싫어요", "동의", "거부"]
-                    is_valid = normalized_value in valid_strings
-                    print(f"  - REASON: String value '{value}' (normalized: '{normalized_value}') → valid={is_valid}")
-                else:
-                    print(f"  - REASON: Invalid type {type(value)} for boolean field")
     
     # 완료율 계산 - 실제로 표시되는 필드만 기준으로 계산
     # visible_fields 중 required=true인 필드만 계산
@@ -558,40 +506,20 @@ def update_slot_filling_with_hierarchy(scenario_data: Dict, collected_info: Dict
         field_key = field["key"]
         if completion_status.get(field_key, False):
             completed_required += 1
-            print(f"DEBUG: Field '{field_key}' is completed")
     
     # 완료율 계산
     completion_rate = (completed_required / total_required * 100) if total_required > 0 else 0
     
-    print(f"DEBUG: Total visible required fields: {total_required}")
-    print(f"DEBUG: Completed required fields: {completed_required}")
-    print(f"DEBUG: Excluded fields: {excluded_from_count}")
-    print(f"DEBUG: Countable field keys: {[f['key'] for f in countable_fields]}")
     
     # 조건부 필드 디버그
     if 'card_receive_method' in enhanced_collected_info:
-        print(f"DEBUG: card_receive_method value: {enhanced_collected_info.get('card_receive_method')}")
-        card_delivery_in_visible = any(f['key'] == 'card_delivery_location' for f in visible_fields)
-        card_delivery_in_countable = any(f['key'] == 'card_delivery_location' for f in countable_fields)
-        print(f"DEBUG: card_delivery_location in visible_fields: {card_delivery_in_visible}")
-        print(f"DEBUG: card_delivery_location in countable_fields: {card_delivery_in_countable}")
-        if not card_delivery_in_countable:
-            print(f"DEBUG: card_delivery_location is correctly excluded from total count")
-        else:
-            print(f"DEBUG: WARNING - card_delivery_location is still in countable fields!")
+        pass
     
     # 표시되는 필드 기준 완료율 (이미 위에서 계산됨)
     visible_total_required = total_required
     visible_completed_required = completed_required
     visible_completion_rate = completion_rate
     
-    # 디버그 로그
-    print(f"DEBUG: Total all fields: {len(all_fields)}")
-    print(f"DEBUG: Total required fields (scenario): {total_required}")
-    print(f"DEBUG: Completed required fields: {completed_required}")
-    print(f"DEBUG: Overall completion rate: {completion_rate}")
-    print(f"DEBUG: Visible fields: {len(visible_fields)}")
-    print(f"DEBUG: Visible completion rate: {visible_completion_rate}")
     
     return {
         "visible_fields": visible_fields,
@@ -632,14 +560,10 @@ async def send_slot_filling_update(
 ) -> None:
     """슬롯 필링 상태 업데이트를 WebSocket으로 전송"""
     
-    print(f"[{session_id}] 🔥 SEND_SLOT_FILLING_UPDATE CALLED")
-    print(f"[{session_id}] 🔥 WebSocket object: {type(websocket)}")
-    print(f"[{session_id}] 🔥 State keys: {list(state.keys()) if state else 'None'}")
     
     # 시나리오 데이터 확인
     scenario_data = state.get("active_scenario_data")
     if not scenario_data:
-        print(f"[{session_id}] No active scenario data for slot filling update")
         
         # deposit_account의 경우 기본 시나리오 데이터 생성
         if state.get("current_product_type") == "deposit_account":
@@ -654,13 +578,10 @@ async def send_slot_filling_update(
         field_groups = scenario_data.get("field_groups", [])
         collected_info = state.get("collected_product_info", {})
         current_stage = state.get("current_scenario_stage_id", "")
-        print(f"[{session_id}] send_slot_filling_update - current_stage: {current_stage}")
         
         # card_receive_method 변경 감지 및 로그
         if "card_receive_method" in collected_info:
-            print(f"[{session_id}] 🃏 card_receive_method value: {collected_info['card_receive_method']}")
-            if collected_info["card_receive_method"] == "즉시수령":
-                print(f"[{session_id}] 🃏 즉시수령 selected - card_delivery_location should be excluded")
+            pass
         
         # 각 필드의 수집 상태 확인
         fields_status = []
@@ -703,23 +624,18 @@ async def send_slot_filling_update(
         # 새로운 계층적 슬롯 필링 계산
         try:
             hierarchy_data = update_slot_filling_with_hierarchy(scenario_data, collected_info, current_stage)
-            print(f"[{session_id}] Hierarchy calculation successful: {len(hierarchy_data.get('visible_fields', []))} visible fields")
             # enhanced_collected_info 사용
             if "enhanced_collected_info" in hierarchy_data:
                 collected_info = hierarchy_data["enhanced_collected_info"]
-                print(f"[{session_id}] Using enhanced collected info with defaults")
             
             # 디버깅: card_delivery_location 필드 상태 확인
             visible_fields = hierarchy_data.get('visible_fields', [])
             card_delivery_field = next((f for f in visible_fields if f.get('key') == 'card_delivery_location'), None)
             if card_delivery_field:
-                print(f"[{session_id}] card_delivery_location field is visible")
+                pass
             else:
-                print(f"[{session_id}] card_delivery_location field is NOT visible")
-                print(f"[{session_id}] card_receive_method value: {collected_info.get('card_receive_method')}")
-                print(f"[{session_id}] use_check_card value: {collected_info.get('use_check_card')}")
+                pass
         except Exception as e:
-            print(f"[{session_id}] Error in hierarchy calculation: {e}")
             hierarchy_data = {}
         
         # 계층 정보가 있는 필드들 준비
@@ -780,28 +696,10 @@ async def send_slot_filling_update(
         }
         
         # 디버그 로그 추가
-        print(f"[{session_id}] Enhanced fields count: {len(enhanced_fields)}")
-        print(f"[{session_id}] Visible fields from hierarchy: {len(visible_fields)}")
-        print(f"[{session_id}] Current collected_info keys: {list(collected_info.keys())}")
-        print(f"[{session_id}] Boolean fields status:")
-        print(f"[{session_id}]   use_internet_banking: value={collected_info.get('use_internet_banking')}, completed={slot_filling_data['completionStatus'].get('use_internet_banking')}")
-        print(f"[{session_id}]   use_check_card: value={collected_info.get('use_check_card')}, completed={slot_filling_data['completionStatus'].get('use_check_card')}")
-        print(f"[{session_id}]   use_lifelong_account: value={collected_info.get('use_lifelong_account')}, completed={slot_filling_data['completionStatus'].get('use_lifelong_account')}")
         
-        for field in enhanced_fields[:5]:  # 첫 5개만 로그
-            print(f"[{session_id}] Field: {field['key']} (depth: {field.get('depth', 0)}, showWhen: {field.get('showWhen')})")
-        
-        print(f"[{session_id}] 🚀 ABOUT TO SEND WebSocket message")
-        print(f"[{session_id}] 🚀 Message type: slot_filling_update")
-        print(f"[{session_id}] 🚀 Enhanced fields count: {len(slot_filling_data.get('requiredFields', []))}")
-        print(f"[{session_id}] 🚀 Collected info count: {len(slot_filling_data.get('collectedInfo', {}))}")
-        print(f"[{session_id}] 🚀 Total required count: {slot_filling_data.get('totalRequiredCount', 0)}")
-        print(f"[{session_id}] 🚀 Completed required count: {slot_filling_data.get('completedRequiredCount', 0)}")
         
         try:
             await websocket.send_json(slot_filling_data)
-            print(f"[{session_id}] ✅ WEBSOCKET MESSAGE SENT SUCCESSFULLY")
-            print(f"[{session_id}] ✅ Completion rate: {slot_filling_data['completionRate']:.1f}%")
             
             # 즉시 테스트 메시지 전송하여 WebSocket 연결 확인
             test_message = {
@@ -811,33 +709,12 @@ async def send_slot_filling_update(
                 "session_id": session_id
             }
             await websocket.send_json(test_message)
-            print(f"[{session_id}] ✅ TEST MESSAGE SENT FOR WEBSOCKET VERIFICATION")
             
         except Exception as e:
             print(f"[{session_id}] ❌ WEBSOCKET SEND FAILED: {e}")
             print(f"[{session_id}] ❌ WebSocket state: {websocket.client_state if hasattr(websocket, 'client_state') else 'unknown'}")
             raise
         
-        # DEBUG: 디버깅용 상세 로그
-        print(f"[{session_id}] ===== SLOT FILLING DEBUG =====")
-        print(f"[{session_id}] Product Type: {slot_filling_data['productType']}")
-        print(f"[{session_id}] Current Stage: {slot_filling_data['currentStage']['stageId']}")
-        print(f"[{session_id}] Visible Groups: {slot_filling_data['currentStage']['visibleGroups']}")
-        print(f"[{session_id}] Required Fields Count: {len(slot_filling_data['requiredFields'])}")
-        print(f"[{session_id}] Collected Info Count: {len(slot_filling_data['collectedInfo'])}")
-        print(f"[{session_id}] Completion Rate: {slot_filling_data['completionRate']}")
-        print(f"[{session_id}] Field Groups Count: {len(slot_filling_data.get('fieldGroups', []))}")
-        
-        # 필드별 상세 정보
-        for field in slot_filling_data['requiredFields']:
-            key = field['key']
-            value = slot_filling_data['collectedInfo'].get(key, 'NOT_SET')
-            completed = slot_filling_data['completionStatus'].get(key, False)
-            print(f"[{session_id}] Field '{key}': {value} (completed: {completed})")
-        
-        # 전송할 JSON 데이터 전체 출력
-        print(f"[{session_id}] Full JSON Data: {json.dumps(slot_filling_data, ensure_ascii=False, indent=2)}")
-        print(f"[{session_id}] ===== END DEBUG =====")
         
         # 프론트엔드에서 수신 확인을 위한 디버그 메시지도 함께 전송
         debug_message = {
@@ -882,16 +759,12 @@ async def _send_deposit_account_update(
         
         # 실제 시나리오 데이터에서 필드 가져오기
         scenario_data = state.get("active_scenario_data")
-        print(f"[{session_id}] DEBUG: scenario_data keys: {list(scenario_data.keys()) if scenario_data else 'None'}")
         
         if scenario_data and "required_info_fields" in scenario_data:
             default_fields = scenario_data["required_info_fields"]
-            print(f"[{session_id}] DEBUG: Using required_info_fields, count: {len(default_fields)}")
         elif scenario_data and "slot_fields" in scenario_data:
             default_fields = scenario_data["slot_fields"]
-            print(f"[{session_id}] DEBUG: Using slot_fields, count: {len(default_fields)}")
         else:
-            print(f"[{session_id}] DEBUG: Using fallback fields")
             # 폴백 필드 정의
             default_fields = [
                 {"key": "customer_name", "display_name": "성함", "required": True},
@@ -957,7 +830,6 @@ async def _send_deposit_account_update(
             # enhanced_collected_info 사용
             if "enhanced_collected_info" in hierarchy_data:
                 collected_info = hierarchy_data["enhanced_collected_info"]
-                print(f"[{session_id}] Using enhanced collected info with defaults in deposit account")
         else:
             hierarchy_data = {}
         
