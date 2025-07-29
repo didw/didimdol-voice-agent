@@ -205,7 +205,15 @@ def get_stage_relevant_fields(current_stage_info: Dict, required_fields: List[Di
     expected_key = current_stage_info.get("expected_info_key")
     
     # 특별한 스테이지별 처리
-    if current_stage_id == "ask_transfer_limit":
+    if current_stage_id == "customer_info_check":
+        # 고객정보 확인 단계 - modifiable_fields에 정의된 기본 개인정보만
+        modifiable_fields = current_stage_info.get("modifiable_fields", [])
+        if modifiable_fields:
+            return [f for f in required_fields if f['key'] in modifiable_fields]
+        # fallback: 기본 개인정보 필드만
+        basic_info_fields = ["customer_name", "english_name", "resident_number", "phone_number", "email", "address", "work_address"]
+        return [f for f in required_fields if f['key'] in basic_info_fields]
+    elif current_stage_id == "ask_transfer_limit":
         # 이체한도 관련 필드만
         return [f for f in required_fields if f['key'] in ["transfer_limit_per_time", "transfer_limit_per_day"]]
     elif current_stage_id == "ask_notification_settings":
@@ -920,7 +928,11 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
         stage_response_data = None
         if next_stage_id and next_stage_id != current_stage_id:
             next_stage_info = active_scenario_data.get("stages", {}).get(next_stage_id, {})
-            if "response_type" in next_stage_info:
+            # bullet 또는 boolean 타입이면 stage_response_data 생성
+            if next_stage_info.get("response_type") in ["bullet", "boolean"]:
+                stage_response_data = generate_stage_response(next_stage_info, collected_info, active_scenario_data)
+                print(f"🎯 [STAGE_RESPONSE] Generated stage response data for {next_stage_id} (type: {next_stage_info.get('response_type')})")
+            elif "response_type" in next_stage_info:
                 stage_response_data = generate_stage_response(next_stage_info, collected_info, active_scenario_data)
         
         # 스테이지가 변경되지 않은 경우와 사용자 입력이 없는 경우에만 is_final_turn_response를 False로 설정
@@ -1438,6 +1450,13 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
     # 다음 스테이지의 프롬프트와 response_type 가져오기
     next_stage_prompt = ""
     stage_response_data = None
+    
+    # 현재 스테이지가 사용자 입력 없이 처음 방문이고 bullet/boolean 타입인 경우 stage_response_data 생성
+    if not user_input and determined_next_stage_id == current_stage_id:
+        current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
+        if current_stage_info.get("response_type") in ["bullet", "boolean"]:
+            stage_response_data = generate_stage_response(current_stage_info, collected_info, active_scenario_data)
+            print(f"🎯 [INITIAL_VISIT] Generated stage response data for current stage {current_stage_id} (type: {current_stage_info.get('response_type')})")
     
     # 스테이지별 확인 메시지 추가
     confirmation_msg = ""
