@@ -50,8 +50,27 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
     if state.waiting_for_additional_modifications and current_stage_id == "customer_info_check":
         print(f"[PersonalInfoCorrection] Waiting for additional modifications, user input: '{user_input}'")
         
+        # pending_modifications가 있으면서 추가 수정사항을 대기 중인 특수한 경우
+        # 사용자가 수정 확인 응답 대신 다른 수정 요청을 한 경우
+        if state.pending_modifications and user_input and ("틀" in user_input or "다르" in user_input or "수정" in user_input or "변경" in user_input or "바꿔" in user_input):
+            print(f"[PersonalInfoCorrection] User requesting additional modification while pending modifications exist")
+            # pending_modifications를 먼저 적용하고, 새로운 수정 요청을 처리하도록 아래 로직으로 진행
+            # 기존 pending_modifications 적용
+            from copy import deepcopy
+            updated_info = deepcopy(collected_info)
+            updated_info.update(state.pending_modifications)
+            collected_info = updated_info
+            # 플래그들을 리셋하고 새로운 수정 요청 처리로 진행
+            state = state.merge_update({
+                "collected_product_info": collected_info,
+                "pending_modifications": None,
+                "waiting_for_additional_modifications": None,
+                "correction_mode": True
+            })
+            # 아래의 수정 로직으로 계속 진행
+        
         # 사용자가 "아니요"라고 답한 경우 - 다음 단계로 진행
-        if user_input and any(word in user_input for word in ["아니", "아니요", "아니야", "없어", "없습니다", "괜찮", "됐어", "충분"]):
+        elif user_input and any(word in user_input for word in ["아니", "아니요", "아니야", "없어", "없습니다", "괜찮", "됐어", "충분"]):
             print(f"[PersonalInfoCorrection] User said no additional modifications needed, proceeding to next stage")
             
             # confirm_personal_info를 True로 설정하여 다음 단계로
@@ -192,17 +211,35 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
                 "correction_mode": True
             })
         else:
-            # 사용자가 확인도 거부도 하지 않은 경우 - 다시 질문
-            print(f"[PersonalInfoCorrection] User response unclear, asking again")
-            return state.merge_update({
-                "current_scenario_stage_id": current_stage_id,
-                "final_response_text_for_tts": "변경사항을 확인해주세요. 맞으시면 '네'라고 말씀해주시고, 다시 수정하시려면 '아니요'라고 말씀해주세요.",
-                "is_final_turn_response": True,
-                "action_plan": [],
-                "action_plan_struct": [],
-                "router_call_count": 0,
-                "correction_mode": True
-            })
+            # 사용자가 다른 수정 요청을 한 경우 확인
+            if user_input and ("틀" in user_input or "다르" in user_input or "수정" in user_input or "변경" in user_input or "바꿔" in user_input):
+                print(f"[PersonalInfoCorrection] User requesting different modification, applying pending changes first")
+                # 기존 pending_modifications를 먼저 적용
+                from copy import deepcopy
+                updated_info = deepcopy(collected_info)
+                updated_info.update(state.pending_modifications)
+                
+                # state를 업데이트하고 새로운 수정 요청 처리로 진행
+                state = state.merge_update({
+                    "collected_product_info": updated_info,
+                    "pending_modifications": None,
+                    "original_values_before_modification": None,
+                    "correction_mode": True
+                })
+                collected_info = updated_info
+                # 아래의 수정 로직으로 계속 진행
+            else:
+                # 그 외의 경우 - 다시 질문
+                print(f"[PersonalInfoCorrection] User response unclear, asking again")
+                return state.merge_update({
+                    "current_scenario_stage_id": current_stage_id,
+                    "final_response_text_for_tts": "변경사항을 확인해주세요. 맞으시면 '네'라고 말씀해주시고, 다시 수정하시려면 '아니요'라고 말씀해주세요.",
+                    "is_final_turn_response": True,
+                    "action_plan": [],
+                    "action_plan_struct": [],
+                    "router_call_count": 0,
+                    "correction_mode": True
+                })
     
     # 1. 사용자가 구체적인 수정 정보를 제공한 경우
     if user_input and len(user_input.strip()) > 0:
