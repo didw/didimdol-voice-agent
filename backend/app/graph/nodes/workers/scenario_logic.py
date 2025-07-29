@@ -40,12 +40,14 @@ async def process_partial_response(
     if field_validators is None:
         field_validators = FIELD_VALIDATORS
     
-    # 1. Entity Agent를 통한 개별 필드 추출
+    # 1. Entity Agent를 통한 개별 필드 추출 (유사도 매칭 포함)
     extracted_entities = {}
+    similarity_messages = []
     if user_input:
         try:
-            extraction_result = await entity_agent.extract_entities(user_input, required_fields)
+            extraction_result = await entity_agent.extract_entities_with_similarity(user_input, required_fields)
             extracted_entities = extraction_result.get("extracted_entities", {})
+            similarity_messages = extraction_result.get("similarity_messages", [])
         except Exception as e:
             print(f"[ERROR] Entity extraction error in partial response: {e}")
     
@@ -93,12 +95,13 @@ async def process_partial_response(
     
     # 5. 재질문 생성
     response_text = None
-    if invalid_fields or missing_fields:
+    if invalid_fields or missing_fields or similarity_messages:
         response_text = generate_re_prompt(
             valid_fields, 
             invalid_fields, 
             missing_fields,
-            required_fields
+            required_fields,
+            similarity_messages
         )
     
     return {
@@ -107,7 +110,8 @@ async def process_partial_response(
         "invalid_fields": invalid_fields,
         "missing_fields": missing_fields,
         "response_text": response_text,
-        "is_complete": not (invalid_fields or missing_fields)
+        "is_complete": not (invalid_fields or missing_fields),
+        "similarity_messages": similarity_messages
     }
 
 
@@ -115,7 +119,8 @@ def generate_re_prompt(
     valid_fields: List[str],
     invalid_fields: List[Dict[str, str]],
     missing_fields: List[Dict[str, Any]],
-    all_fields: List[Dict[str, Any]]
+    all_fields: List[Dict[str, Any]],
+    similarity_messages: List[str] = None
 ) -> str:
     """재질문 프롬프트 생성"""
     
@@ -133,6 +138,10 @@ def generate_re_prompt(
             field_names.append(display_name)
         
         response_parts.append(f"{', '.join(field_names)}은(는) 확인했습니다.")
+    
+    # 유사도 매칭 메시지 추가
+    if similarity_messages:
+        response_parts.extend(similarity_messages)
     
     # 유효하지 않은 필드에 대한 재질문
     if invalid_fields:
@@ -195,7 +204,7 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
         "ask_missing_info_group1", "ask_missing_info_group2", "ask_missing_info_group3", 
         "eligibility_assessment", "collect_internet_banking_info", "ask_remaining_ib_info",
         "collect_check_card_info", "ask_remaining_card_info", "ask_notification_settings",
-        "ask_transfer_limit"
+        "ask_transfer_limit", "ask_withdrawal_account"  # ask_withdrawal_account 추가
     ]
     
     if current_stage_id in info_collection_stages:
@@ -585,26 +594,51 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                     response_text = generate_check_card_prompt(missing_cc_fields)
             
         elif current_stage_id == "ask_security_medium":
-            # ask_security_medium 단계 디버깅 및 처리
-            print(f"[DEBUG] ==================== ask_security_medium STAGE REACHED ====================")
-            print(f"[DEBUG] current_stage_info: {current_stage_info}")
-            print(f"[DEBUG] collected_info keys: {list(collected_info.keys()) if collected_info else []}")
-            # 바로 stage response 생성해서 리턴
-            stage_response_data = generate_stage_response(current_stage_info, collected_info, active_scenario_data)
-            print(f"[DEBUG] ask_security_medium stage_response_data: {stage_response_data}")
+            # ask_security_medium 단계 처리
+            print(f"🔐 [SECURITY_MEDIUM] Special handling for ask_security_medium stage")
+            print(f"🔐 [SECURITY_MEDIUM] collected_info: {collected_info}")
+            print(f"🔐 [SECURITY_MEDIUM] security_medium value: {collected_info.get('security_medium', 'NOT_SET')}")
             
-            return state.merge_update({
-                "stage_response_data": stage_response_data,
-                "is_final_turn_response": True,
-                "action_plan": [],
-                "action_plan_struct": []
-            })
+            # security_medium이 수집되었는지 확인
+            if 'security_medium' in collected_info:
+                # 다음 단계로 진행
+                next_stage_id = current_stage_info.get("default_next_stage_id", "ask_transfer_limit")
+                next_stage_info = active_scenario_data.get("stages", {}).get(next_stage_id, {})
+                
+                response_text = f"보안매체를 {collected_info['security_medium']}(으)로 등록하겠습니다. "
+                
+                # 다음 단계 프롬프트 추가
+                next_prompt = next_stage_info.get("prompt", "")
+                response_text += next_prompt
+                
+                print(f"🔐 [SECURITY_MEDIUM] Moving to next stage: {next_stage_id}")
+                
+                return state.merge_update({
+                    "current_scenario_stage_id": next_stage_id,
+                    "collected_product_info": collected_info,
+                    "final_response_text_for_tts": response_text,
+                    "is_final_turn_response": True,
+                    "action_plan": [],
+                    "action_plan_struct": [],
+                    "router_call_count": 0
+                })
+            else:
+                # security_medium이 없으면 stage response 보여주기
+                stage_response_data = generate_stage_response(current_stage_info, collected_info, active_scenario_data)
+                print(f"🔐 [SECURITY_MEDIUM] No security_medium collected, showing stage response")
+                
+                return state.merge_update({
+                    "stage_response_data": stage_response_data,
+                    "is_final_turn_response": True,
+                    "action_plan": [],
+                    "action_plan_struct": []
+                })
         
         elif current_stage_id == "ask_transfer_limit":
             # 이체한도 설정 단계 처리 - 개선된 버전
             
             # "네" 응답 시 최대한도로 설정
-            if user_input and any(word in user_input for word in ["네", "예", "최대로", "최대한도로", "최고로", "좋아요", "그렇게 해주세요"]):
+            if user_input and any(word in user_input for word in ["네", "예", "응", "어", "최대로", "최대한도로", "최고로", "좋아요", "그렇게 해주세요"]):
                 collected_info["transfer_limit_per_time"] = 5000
                 collected_info["transfer_limit_per_day"] = 10000
                 print(f"[TRANSFER_LIMIT] User confirmed maximum limits: 1회 5000만원, 1일 10000만원")
@@ -815,52 +849,6 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                     "router_call_count": 0
                 })
                 
-        elif current_stage_id == "ask_withdrawal_account":
-            # 출금계좌 등록 단계 처리
-            print(f"🏦 [WITHDRAWAL_ACCOUNT] Processing user input: '{user_input}'")
-            print(f"🏦 [WITHDRAWAL_ACCOUNT] Current collected_info: {collected_info}")
-            
-            # "네" 응답 처리
-            if user_input and any(word in user_input for word in ["네", "예", "좋아요", "등록", "신청", "하겠습니다", "도와", "부탁"]):
-                collected_info["withdrawal_account_registration"] = True
-                print(f"🏦 [WITHDRAWAL_ACCOUNT] Set withdrawal_account_registration = True")
-            # "아니요" 응답 처리
-            elif user_input and any(word in user_input for word in ["아니", "아니요", "안", "필요없", "괜찮", "나중에", "안할", "미신청"]):
-                collected_info["withdrawal_account_registration"] = False
-                print(f"🏦 [WITHDRAWAL_ACCOUNT] Set withdrawal_account_registration = False")
-            
-            # 다음 단계로 진행
-            next_stage_id = current_stage_info.get("default_next_stage_id", "ask_card_receive_method")
-            next_stage_info = active_scenario_data.get("stages", {}).get(next_stage_id, {})
-            
-            # 다음 스테이지가 bullet 타입이면 stage_response_data 생성
-            if next_stage_info.get("response_type") == "bullet":
-                stage_response_data = generate_stage_response(next_stage_info, collected_info, active_scenario_data)
-                print(f"🏦 [WITHDRAWAL_ACCOUNT] Generated stage_response_data for {next_stage_id}")
-                
-                return state.merge_update({
-                    "current_scenario_stage_id": next_stage_id,
-                    "collected_product_info": collected_info,
-                    "stage_response_data": stage_response_data,
-                    "is_final_turn_response": True,
-                    "action_plan": [],
-                    "action_plan_struct": [],
-                    "router_call_count": 0
-                })
-            else:
-                next_stage_prompt = next_stage_info.get("prompt", "")
-                response_text = f"출금계좌 등록 설정을 완료했습니다. {next_stage_prompt}"
-                
-                return state.merge_update({
-                    "current_scenario_stage_id": next_stage_id,
-                    "collected_product_info": collected_info,
-                    "final_response_text_for_tts": response_text,
-                    "is_final_turn_response": True,
-                    "action_plan": [],
-                    "action_plan_struct": [],
-                    "router_call_count": 0
-                })
-            
         elif current_stage_id == "eligibility_assessment":
             # 자격 검토 완료 후 서류 안내로 자동 진행
             next_stage_id = "application_documents_guidance"
@@ -1158,11 +1146,19 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         print(f"🔐 [SECURITY_MEDIUM] Processing with input: '{user_input}'")
         
         expected_info_key = current_stage_info.get("expected_info_key")
-        if expected_info_key and user_input and any(word in user_input for word in ["네", "예", "좋아요", "그래요", "하겠습니다", "등록"]):
+        
+        # 긍정 응답 처리 ("응...", "네", "예" 등)
+        if expected_info_key and user_input and any(word in user_input.lower() for word in ["네", "예", "응", "어", "좋아요", "그래요", "하겠습니다", "등록", "좋아", "알겠"]):
             # 기본값: '신한 OTP' (scenario의 default_choice 사용)
             default_security_medium = current_stage_info.get("default_choice", "신한 OTP")
             collected_info[expected_info_key] = default_security_medium
             print(f"🔐 [SECURITY_MEDIUM] Set {expected_info_key} = {default_security_medium} (user said yes)")
+            
+        # 부정 응답 처리
+        elif expected_info_key and user_input and any(word in user_input.lower() for word in ["아니", "안", "싫", "필요없"]):
+            # 부정 응답인 경우 보안카드를 기본으로 설정
+            collected_info[expected_info_key] = "보안카드"
+            print(f"🔐 [SECURITY_MEDIUM] Set {expected_info_key} = 보안카드 (user said no)")
     
     # ask_notification_settings 단계에서 "네" 응답 처리 (Entity Agent 결과가 없는 경우에만)
     if current_stage_id == "ask_notification_settings":
@@ -1173,7 +1169,7 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         has_specific_selections = any(field in collected_info for field in notification_fields)
         
         if (not has_specific_selections and user_input and 
-            any(word in user_input for word in ["네", "예", "좋아요", "모두", "전부", "다", "신청", "하겠습니다"])):
+            any(word in user_input for word in ["네", "예", "응", "어", "좋아요", "모두", "전부", "다", "신청", "하겠습니다"])):
             # Entity Agent가 선택을 추출하지 못하고 사용자가 일반적인 동의 표현을 한 경우에만 모든 알림을 true로 설정
             print(f"🔔 [NOTIFICATION] No specific selections found, user said yes - setting all notifications to true")
             for field in notification_fields:
@@ -1194,7 +1190,7 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         if expected_info_key and expected_info_key in collected_info:
             print(f"💳 [CHECK_CARD] Entity Agent found specific value for {expected_info_key}: {collected_info[expected_info_key]}")
         elif (expected_info_key and user_input and 
-              any(word in user_input for word in ["네", "예", "좋아요", "그래요", "하겠습니다"])):
+              any(word in user_input for word in ["네", "예", "응", "어", "좋아요", "그래요", "하겠습니다"])):
             # Entity Agent가 값을 추출하지 못하고 사용자가 일반적인 동의 표현을 한 경우에만 기본값 설정
             default_values = {
                 "card_receive_method": "즉시수령",
@@ -1208,6 +1204,23 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
                 collected_info[expected_info_key] = default_values[expected_info_key]
                 print(f"💳 [CHECK_CARD] No specific selection found, set {expected_info_key} = {default_values[expected_info_key]} (user said yes)")
         
+    
+    # ask_withdrawal_account 단계 특별 처리
+    if current_stage_id == "ask_withdrawal_account":
+        print(f"🏦 [WITHDRAWAL_ACCOUNT] Processing user input: '{user_input}'")
+        print(f"🏦 [WITHDRAWAL_ACCOUNT] Current collected_info: {collected_info}")
+        print(f"🏦 [WITHDRAWAL_ACCOUNT] withdrawal_account_registration value: {collected_info.get('withdrawal_account_registration', 'NOT_SET')}")
+        
+        # Entity Agent가 처리하지 못한 경우에만 폴백 처리
+        if 'withdrawal_account_registration' not in collected_info and user_input:
+            # "아니요" 응답 처리 - 부정 패턴을 먼저 확인
+            if any(word in user_input for word in ["아니", "아니요", "안", "필요없", "괜찮", "나중에", "안할", "미신청"]):
+                collected_info["withdrawal_account_registration"] = False
+                print(f"🏦 [WITHDRAWAL_ACCOUNT] Fallback: Set withdrawal_account_registration = False")
+            # "네" 응답 처리 - 짧은 응답 포함
+            elif any(word in user_input for word in ["네", "예", "어", "응", "그래", "좋아", "좋아요", "등록", "추가", "신청", "하겠습니다", "도와", "부탁", "해줘", "해주세요", "알겠", "할게"]):
+                collected_info["withdrawal_account_registration"] = True
+                print(f"🏦 [WITHDRAWAL_ACCOUNT] Fallback: Set withdrawal_account_registration = True")
     
     # 스테이지 전환 로직 결정
     transitions = current_stage_info.get("transitions", [])
@@ -1386,6 +1399,58 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
     next_stage_prompt = ""
     stage_response_data = None
     
+    # 스테이지별 확인 메시지 추가
+    confirmation_msg = ""
+    
+    # ask_transfer_limit에서 전환된 경우
+    if current_stage_id == "ask_transfer_limit":
+        per_time = collected_info.get("transfer_limit_per_time")
+        per_day = collected_info.get("transfer_limit_per_day")
+        if per_time and per_day:
+            confirmation_msg = f"1회 이체한도 {per_time:,}만원, 1일 이체한도 {per_day:,}만원으로 설정했습니다. "
+        elif per_time:
+            confirmation_msg = f"1회 이체한도를 {per_time:,}만원으로 설정했습니다. "
+        elif per_day:
+            confirmation_msg = f"1일 이체한도를 {per_day:,}만원으로 설정했습니다. "
+    
+    # ask_notification_settings에서 전환된 경우
+    elif current_stage_id == "ask_notification_settings" and determined_next_stage_id == "ask_withdrawal_account":
+        notification_settings = []
+        if collected_info.get("important_transaction_alert"):
+            notification_settings.append("중요거래 알림")
+        if collected_info.get("withdrawal_alert"):
+            notification_settings.append("출금내역 알림")
+        if collected_info.get("overseas_ip_restriction"):
+            notification_settings.append("해외IP 제한")
+        
+        if notification_settings:
+            confirmation_msg = f"{', '.join(notification_settings)}을 신청했습니다. "
+        else:
+            confirmation_msg = "알림 설정을 완료했습니다. "
+    
+    # ask_card_receive_method에서 전환된 경우
+    elif current_stage_id == "ask_card_receive_method" and collected_info.get("card_receive_method"):
+        card_method = collected_info.get("card_receive_method")
+        if card_method == "즉시수령":
+            confirmation_msg = "즉시 수령 가능한 카드로 발급해드리겠습니다. "
+        elif card_method == "집으로 배송":
+            confirmation_msg = "카드를 집으로 배송해드리겠습니다. "
+        elif card_method == "직장으로 배송":
+            confirmation_msg = "카드를 직장으로 배송해드리겠습니다. "
+    
+    # 다른 체크카드 관련 단계들
+    elif current_stage_id == "ask_card_type" and collected_info.get("card_type"):
+        confirmation_msg = f"{collected_info.get('card_type')} 카드로 발급해드리겠습니다. "
+    elif current_stage_id == "ask_statement_method" and collected_info.get("statement_method"):
+        confirmation_msg = f"명세서는 {collected_info.get('statement_method')}으로 받으시겠습니다. "
+    elif current_stage_id == "ask_card_usage_alert" and collected_info.get("card_usage_alert"):
+        confirmation_msg = f"카드 사용 알림을 설정했습니다. "
+    elif current_stage_id == "ask_card_password" and "card_password_same_as_account" in collected_info:
+        if collected_info.get("card_password_same_as_account"):
+            confirmation_msg = "카드 비밀번호를 계좌 비밀번호와 동일하게 설정하겠습니다. "
+        else:
+            confirmation_msg = "카드 비밀번호를 별도로 설정하겠습니다. "
+    
     if determined_next_stage_id and not str(determined_next_stage_id).startswith("END"):
         next_stage_info = active_scenario_data.get("stages", {}).get(str(determined_next_stage_id), {})
         next_stage_prompt = next_stage_info.get("prompt", "")
@@ -1393,6 +1458,10 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         # final_summary 단계인 경우 템플릿 변수 치환
         if determined_next_stage_id == "final_summary":
             next_stage_prompt = replace_template_variables(next_stage_prompt, collected_info)
+        
+        # 확인 메시지가 있으면 추가
+        if confirmation_msg:
+            next_stage_prompt = confirmation_msg + next_stage_prompt
         
         # response_type이 있는 경우 stage_response_data 생성
         if "response_type" in next_stage_info:
@@ -1450,7 +1519,8 @@ def _handle_field_name_mapping(collected_info: Dict[str, Any]) -> None:
     boolean_fields = [
         "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction",
         "limit_account_agreement", "confirm_personal_info", "use_lifelong_account", 
-        "use_internet_banking", "use_check_card", "postpaid_transport"
+        "use_internet_banking", "use_check_card", "postpaid_transport",
+        "withdrawal_account_registration", "card_password_same_as_account"
     ]
     
     
@@ -1557,6 +1627,9 @@ def _map_entity_to_valid_choice(field_key: str, entity_value, stage_info: Dict[s
             "에스라인": "S-Line (후불교통)",  # 기본값은 후불교통
             "s-line": "S-Line (후불교통)",  # 기본값은 후불교통
             "s라인": "S-Line (후불교통)",  # 기본값은 후불교통
+            "s-line 카드": "S-Line (후불교통)",  # 기본값은 후불교통
+            "s라인 카드": "S-Line (후불교통)",  # 기본값은 후불교통
+            "에스라인 카드": "S-Line (후불교통)",  # 기본값은 후불교통
             "딥드립 후불": "딥드립 (후불교통)",
             "딥드립 일반": "딥드립 (일반)",
             "딥드립": "딥드립 (후불교통)",  # 기본값은 후불교통

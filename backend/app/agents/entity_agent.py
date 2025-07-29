@@ -17,11 +17,14 @@ class EntityRecognitionAgent:
     def __init__(self):
         self.extraction_prompt = self._get_extraction_prompt()
         self.validation_prompt = self._get_validation_prompt()
+        self.similarity_prompt = self._get_similarity_matching_prompt()
         # entity_extraction_prompts.yaml 파일 로드
         config_dir = Path(__file__).parent.parent / "config"
         self.entity_prompts = load_yaml_file(str(config_dir / "entity_extraction_prompts.yaml"))
         
-        # 필드 키 매핑은 더 이상 필요없음 (YAML 파일에서 customer_phone 직접 사용)
+        # 유사도 임계값 설정
+        self.similarity_threshold = 0.7  # 70% 이상의 유사도만 매칭으로 인정
+        self.retry_threshold = 0.3      # 30% 미만은 재질문 필요
     
     def _get_extraction_prompt(self) -> str:
         """엔티티 추출 프롬프트"""
@@ -93,6 +96,38 @@ class EntityRecognitionAgent:
   }},
   "need_clarification": ["field_key1", "field_key2"]
 }}"""
+    
+    def _get_similarity_matching_prompt(self) -> str:
+        """의미 기반 유사도 매칭 프롬프트"""
+        return """당신은 사용자의 입력과 선택지 간의 의미적 유사성을 판단하는 전문가입니다.
+
+**작업:**
+사용자 입력: "{user_input}"
+필드 정보: {field_info}
+선택 가능한 값들: {choices}
+
+**분석 규칙:**
+1. 사용자 입력의 의도와 의미를 정확히 파악하세요
+2. 각 선택지와의 의미적 유사성을 분석하세요
+3. 문맥을 고려하여 가장 적절한 매칭을 찾으세요
+4. 동의어, 유사 표현, 축약어 등을 고려하세요
+
+**유사도 점수 기준:**
+- 1.0: 완전히 동일하거나 명확히 같은 의미
+- 0.8-0.9: 매우 유사하며 같은 의도로 볼 수 있음
+- 0.6-0.7: 유사하나 약간의 차이가 있음
+- 0.4-0.5: 관련은 있으나 차이가 큼
+- 0.0-0.3: 거의 관련 없음
+
+**출력 형식:**
+{{
+  "best_match": "가장 유사한 선택지",
+  "similarity_score": 0.0-1.0,
+  "reasoning": "매칭 이유 설명",
+  "alternative_matches": [
+    {{"value": "대안 선택지", "score": 0.0-1.0}}
+  ]
+}}"""
 
     async def extract_entities(
         self, 
@@ -144,7 +179,10 @@ class EntityRecognitionAgent:
 추출 규칙:
 1. 사용자가 직접 말한 내용만 추출 (추론 금지)
 2. 언급하지 않은 필드는 절대 추출하지 말 것
-3. boolean 타입: 명시적 언급만 (네/예/신청/가입 → true, 아니요/미신청/미가입/안해요 → false)
+3. boolean 타입: 명시적 언급만
+   - 긍정: 네/예/응/어/그래/좋아/알겠/등록/추가/신청/할게/해줘/해주세요/맞아/확인 → true
+   - 부정: 아니/아니요/안/싫/필요없/안할/안해 → false
+   - withdrawal_account_registration의 경우 "등록해줘", "추가해줘" 등도 true로 처리
 4. number 타입: 한국어 숫자 정확히 변환
    - "오백만원" → 500 (만원 단위)
    - "일일" 또는 "1일" → 1일 이체한도
@@ -230,6 +268,54 @@ class EntityRecognitionAgent:
                 "unclear_fields": [f['key'] for f in required_fields if f['key'] not in pattern_results],
                 "reasoning": f"LLM 오류로 패턴 매칭 사용: {str(e)}"
             }
+    
+    async def extract_entities_with_similarity(
+        self, 
+        user_input: str, 
+        required_fields: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """사용자 입력에서 엔티티 추출 - 유사도 매칭 포함"""
+        
+        # 1. 먼저 기존 방식으로 추출 시도
+        extraction_result = await self.extract_entities(user_input, required_fields)
+        extracted_entities = extraction_result.get("extracted_entities", {})
+        
+        # 2. choice 타입 필드 중 추출되지 않은 것들에 대해 유사도 매칭 시도
+        similarity_messages = []
+        for field in required_fields:
+            field_key = field['key']
+            
+            # 이미 추출된 필드는 스킵
+            if field_key in extracted_entities:
+                continue
+                
+            # choice 타입 필드에 대해서만 유사도 매칭
+            if field.get('type') == 'choice' and field.get('choices'):
+                similarity_result = await self.match_with_similarity(user_input, field)
+                
+                if similarity_result['matched']:
+                    # 유사도 매칭 성공
+                    extracted_entities[field_key] = similarity_result['value']
+                    print(f"[EntityAgent] Similarity matched {field_key}: {similarity_result['value']} (score: {similarity_result['score']})")
+                elif similarity_result.get('need_retry') and similarity_result.get('message'):
+                    # 재질문 필요
+                    similarity_messages.append(similarity_result['message'])
+        
+        # 3. 결과 반환
+        result = {
+            "extracted_entities": extracted_entities,
+            "confidence": extraction_result.get("confidence", 0.8),
+            "unclear_fields": [f['key'] for f in required_fields if f['key'] not in extracted_entities],
+            "reasoning": extraction_result.get("reasoning", ""),
+            "similarity_messages": similarity_messages
+        }
+        
+        # 유사도 메시지가 있으면 confidence 조정
+        if similarity_messages:
+            result["confidence"] = min(result["confidence"], 0.6)
+            result["need_clarification"] = True
+        
+        return result
     
     async def validate_entities(
         self, 
@@ -317,20 +403,34 @@ class EntityRecognitionAgent:
         }
         
         # Boolean 필드를 위한 간단한 패턴
-        positive_patterns = ["네", "예", "응", "맞아", "맞습니다", "확인", "동의", "ok", "okay", "ㅇㅇ", "ㅇㅋ"]
-        negative_patterns = ["아니", "아뇨", "아니요", "아니에요", "안", "싫", "no", "ㄴㄴ"]
+        positive_patterns = ["네", "예", "응", "맞아", "맞습니다", "확인", "동의", "ok", "okay", "ㅇㅇ", "ㅇㅋ", 
+                           "어", "그래", "좋아", "알겠", "등록", "추가", "신청", "할게", "해줘", "해주세요"]
+        negative_patterns = ["아니", "아뇨", "아니요", "아니에요", "안", "싫", "no", "ㄴㄴ", "필요없", "안할"]
         
         # Boolean 타입 필드 처리
         if field_key in ["confirm_personal_info", "use_lifelong_account", "use_internet_banking", 
                          "additional_withdrawal_account", "use_check_card", "postpaid_transport",
-                         "same_password_as_account", "card_usage_alert"]:
+                         "same_password_as_account", "card_usage_alert", "withdrawal_account_registration",
+                         "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction",
+                         "card_password_same_as_account", "limit_account_agreement"]:
             user_lower = user_input.lower().strip()
+            
+            # 부정 패턴을 먼저 확인 (더 구체적인 패턴)
+            for pattern in negative_patterns:
+                if pattern in user_lower:
+                    # "할게"가 포함되어 있어도 "안할게"면 false
+                    if pattern == "안할" and "안할" in user_lower:
+                        return "false"
+                    # "필요없"이 포함되어 있으면 false
+                    elif pattern == "필요없" and "필요없" in user_lower:
+                        return "false"
+                    elif pattern in user_lower and pattern not in ["안할", "필요없"]:
+                        return "false"
+            
+            # 긍정 패턴 확인
             for pattern in positive_patterns:
                 if pattern in user_lower:
                     return "true"
-            for pattern in negative_patterns:
-                if pattern in user_lower:
-                    return "false"
         
         if field_key not in patterns:
             return None
@@ -362,7 +462,6 @@ class EntityRecognitionAgent:
                         return str(converted)
                     
                     # 일반 숫자 추출 시도
-                    import re
                     num_match = re.search(r'(\d+)', value)
                     if num_match:
                         return num_match.group(1)
@@ -371,19 +470,118 @@ class EntityRecognitionAgent:
         
         return None
     
+    async def match_with_similarity(
+        self,
+        user_input: str,
+        field: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """LLM을 사용한 의미 기반 유사도 매칭"""
+        
+        # choice 타입이 아니거나 choices가 없으면 스킵
+        if field.get('type') != 'choice' or not field.get('choices'):
+            return {
+                "matched": False,
+                "value": None,
+                "score": 0.0,
+                "need_retry": False
+            }
+        
+        field_info = {
+            "key": field['key'],
+            "display_name": field.get('display_name', field['key']),
+            "description": field.get('description', '')
+        }
+        
+        prompt = self.similarity_prompt.format(
+            user_input=user_input,
+            field_info=json.dumps(field_info, ensure_ascii=False),
+            choices=json.dumps(field['choices'], ensure_ascii=False)
+        )
+        
+        # JSON 응답을 위한 추가 지시
+        prompt += "\n\n반드시 위의 JSON 형식으로 응답해주세요."
+        
+        try:
+            response = await json_llm.ainvoke([HumanMessage(content=prompt)])
+            
+            # JSON 파싱
+            content = response.content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            if content.endswith("```"):
+                content = content[:-3]
+            
+            result = json.loads(content.strip())
+            
+            best_match = result.get("best_match")
+            similarity_score = result.get("similarity_score", 0.0)
+            reasoning = result.get("reasoning", "")
+            
+            print(f"[EntityAgent] Similarity matching for '{user_input}': {best_match} (score: {similarity_score})")
+            print(f"[EntityAgent] Reasoning: {reasoning}")
+            
+            # 유사도 기반 판단
+            if similarity_score >= self.similarity_threshold:
+                # 매칭 성공
+                return {
+                    "matched": True,
+                    "value": best_match,
+                    "score": similarity_score,
+                    "need_retry": False,
+                    "reasoning": reasoning
+                }
+            elif similarity_score < self.retry_threshold:
+                # 유사도가 너무 낮음 - 재질문 필요
+                return {
+                    "matched": False,
+                    "value": None,
+                    "score": similarity_score,
+                    "need_retry": True,
+                    "reasoning": reasoning,
+                    "message": f"입력하신 '{user_input}'는 선택 가능한 옵션과 일치하지 않습니다. {', '.join(field['choices'])} 중에서 선택해주세요."
+                }
+            else:
+                # 애매한 경우 - 추가 확인 필요
+                alternatives = result.get("alternative_matches", [])
+                if alternatives:
+                    alt_text = ", ".join([f"{alt['value']}({alt['score']:.1f})" for alt in alternatives[:2]])
+                    message = f"'{user_input}'를 '{best_match}'로 이해했습니다. 맞으신가요? 혹시 {alt_text} 중 하나를 말씀하신 건가요?"
+                else:
+                    message = f"'{user_input}'를 '{best_match}'로 이해했습니다. 맞으신가요?"
+                
+                return {
+                    "matched": False,
+                    "value": best_match,
+                    "score": similarity_score,
+                    "need_retry": True,
+                    "reasoning": reasoning,
+                    "message": message
+                }
+                
+        except Exception as e:
+            print(f"[EntityAgent] Similarity matching error: {e}")
+            return {
+                "matched": False,
+                "value": None,
+                "score": 0.0,
+                "need_retry": True,
+                "message": f"{field.get('display_name', field['key'])}을(를) 다시 말씀해주세요. 선택 가능한 옵션: {', '.join(field['choices'])}"
+            }
+    
     async def process_slot_filling(
         self, 
         user_input: str, 
         required_fields: List[Dict[str, Any]], 
         collected_info: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """종합적인 Slot Filling 처리"""
+        """종합적인 Slot Filling 처리 - 유사도 매칭 포함"""
         
-        # 1단계: LLM 기반 엔티티 추출
-        extraction_result = await self.extract_entities(user_input, required_fields)
+        # 1단계: LLM 기반 엔티티 추출 (유사도 매칭 포함)
+        extraction_result = await self.extract_entities_with_similarity(user_input, required_fields)
         extracted_entities = extraction_result.get("extracted_entities", {})
+        similarity_messages = extraction_result.get("similarity_messages", [])
         
-        # 2단계: 패턴 기반 보완 (LLM이 놓친 정보)
+        # 2단계: 패턴 기반 보완 (LLM과 유사도 매칭이 놓친 정보)
         for field in required_fields:
             field_key = field['key']
             if field_key not in extracted_entities:
@@ -411,15 +609,23 @@ class EntityRecognitionAgent:
             if field.get('required', False) and field_key not in new_collected_info:
                 missing_fields.append(field)
         
-        return {
+        result = {
             "collected_info": new_collected_info,
             "extracted_entities": extracted_entities,
             "valid_entities": valid_entities,
             "invalid_entities": invalid_entities,
             "missing_fields": missing_fields,
             "extraction_confidence": extraction_result.get("confidence", 0.0),
-            "is_complete": len(missing_fields) == 0
+            "is_complete": len(missing_fields) == 0,
+            "similarity_messages": similarity_messages
         }
+        
+        # 유사도 매칭 메시지가 있으면 need_clarification 추가
+        if similarity_messages:
+            result["need_clarification"] = True
+            result["clarification_message"] = "\n".join(similarity_messages)
+        
+        return result
     
     def generate_missing_info_prompt(self, missing_fields: List[Dict[str, Any]]) -> str:
         """부족한 정보 재질의 메시지 생성"""
