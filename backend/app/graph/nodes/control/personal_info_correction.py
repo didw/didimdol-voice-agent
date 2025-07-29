@@ -27,6 +27,7 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
     print(f"[PersonalInfoCorrection] Pending modifications: {state.pending_modifications}")
     print(f"[PersonalInfoCorrection] Waiting for additional modifications: {state.waiting_for_additional_modifications}")
     print(f"[PersonalInfoCorrection] Correction mode: {state.correction_mode}")
+    print(f"[PersonalInfoCorrection] Current modification context: {state.current_modification_context}")
     
     # 시나리오 데이터 가져오기
     active_scenario_data = get_active_scenario_data(state.to_dict())
@@ -52,7 +53,7 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
         
         # pending_modifications가 있으면서 추가 수정사항을 대기 중인 특수한 경우
         # 사용자가 수정 확인 응답 대신 다른 수정 요청을 한 경우
-        if state.pending_modifications and user_input and ("틀" in user_input or "다르" in user_input or "수정" in user_input or "변경" in user_input or "바꿔" in user_input):
+        if state.pending_modifications and user_input and any(word in user_input for word in ["틀", "다르", "수정", "변경", "바꿔", "바꿀"]):
             print(f"[PersonalInfoCorrection] User requesting additional modification while pending modifications exist")
             # pending_modifications를 먼저 적용하고, 새로운 수정 요청을 처리하도록 아래 로직으로 진행
             # 기존 pending_modifications 적용
@@ -70,7 +71,11 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
             # 아래의 수정 로직으로 계속 진행
         
         # 사용자가 "아니요"라고 답한 경우 - 다음 단계로 진행
-        elif user_input and any(word in user_input for word in ["아니", "아니요", "아니야", "없어", "없습니다", "괜찮", "됐어", "충분"]):
+        # "잘못됐어", "틀렸어" 등은 수정 요청이므로 제외
+        elif user_input and (
+            any(word in user_input for word in ["아니", "아니요", "아니야", "없어", "없습니다", "괜찮", "충분"]) or
+            (user_input.strip() == "됐어" or user_input.strip() == "됐습니다")  # 단독으로 "됐어"만 있는 경우
+        ) and not any(word in user_input for word in ["잘못", "틀렸", "다르", "수정", "변경", "바꿔", "바꿀"]):
             print(f"[PersonalInfoCorrection] User said no additional modifications needed, proceeding to next stage")
             
             # confirm_personal_info를 True로 설정하여 다음 단계로
@@ -113,13 +118,31 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
             })
         
         # 사용자가 추가 수정사항을 말한 경우 - 아래의 수정 로직으로 진행
+        elif user_input and any(word in user_input for word in ["틀", "다르", "수정", "변경", "바꿔", "바꿀"]):
+            print(f"[PersonalInfoCorrection] User requesting additional modification: '{user_input}'")
+            # 추가 수정사항 대기 상태를 해제하고 새로운 수정 요청을 처리
+            state = state.merge_update({
+                "waiting_for_additional_modifications": None,
+                "correction_mode": True
+            })
+            # 아래의 수정 로직으로 계속 진행
         # (기존 로직으로 계속 진행)
     
     # 0-2. pending_modifications가 있는 경우 - 사용자 확인 대기 중
     if state.pending_modifications:
         print(f"[PersonalInfoCorrection] Pending modifications found: {state.pending_modifications}")
-        # 사용자가 확인한 경우
-        if user_input and any(word in user_input for word in ["네", "예", "맞아", "맞습니다", "좋아", "확인", "그래", "어", "응"]):
+        # 사용자가 확인한 경우 - 더 정확한 매칭을 위해 수정 키워드 제외
+        confirmation_words = ["네", "예", "맞아", "맞습니다", "좋아", "확인", "그래"]
+        modification_words = ["바꿔", "바꾸", "수정", "변경", "틀렸", "다르", "잘못"]
+        
+        # 확인 키워드가 있지만 수정 키워드가 없는 경우만 확인으로 처리
+        has_confirmation = any(word in user_input for word in confirmation_words)
+        has_modification = any(word in user_input for word in modification_words)
+        
+        # 단독으로 "어"나 "응"이 있는 경우도 확인으로 처리 (하지만 다른 단어와 함께 있으면 제외)
+        standalone_confirmation = (user_input.strip() in ["어", "응"]) or (len(user_input.strip()) <= 2 and any(word == user_input.strip() for word in ["네", "예"]))
+        
+        if user_input and ((has_confirmation and not has_modification) or standalone_confirmation):
             print(f"[PersonalInfoCorrection] ✅ User confirmed modification")
             print(f"[PersonalInfoCorrection] ✅ BEFORE - collected_info: {collected_info}")
             print(f"[PersonalInfoCorrection] ✅ BEFORE - pending_modifications: {state.pending_modifications}")
@@ -149,6 +172,10 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
                 
                 print(f"[PersonalInfoCorrection] About to return with updated_info: {updated_info}")
                 print(f"[PersonalInfoCorrection] State before merge_update - collected_product_info: {state.collected_product_info}")
+                # 수정 컨텍스트 정리
+                if "_last_modification_context" in updated_info:
+                    del updated_info["_last_modification_context"]
+                
                 result = state.merge_update({
                     "current_scenario_stage_id": current_stage_id,  # 같은 단계 유지
                     "collected_product_info": updated_info,
@@ -213,7 +240,7 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
             })
         else:
             # 사용자가 다른 수정 요청을 한 경우 확인
-            if user_input and ("틀" in user_input or "다르" in user_input or "수정" in user_input or "변경" in user_input or "바꿔" in user_input):
+            if user_input and any(word in user_input for word in ["틀", "다르", "수정", "변경", "바꿔", "바꿀"]):
                 print(f"[PersonalInfoCorrection] User requesting different modification, applying pending changes first")
                 # 기존 pending_modifications를 먼저 적용
                 from copy import deepcopy
@@ -229,38 +256,140 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
                 })
                 collected_info = updated_info
                 # 아래의 수정 로직으로 계속 진행
-            else:
-                # 그 외의 경우 - 다시 질문
-                print(f"[PersonalInfoCorrection] User response unclear, asking again")
-                return state.merge_update({
-                    "current_scenario_stage_id": current_stage_id,
-                    "final_response_text_for_tts": "변경사항을 확인해주세요. 맞으시면 '네'라고 말씀해주시고, 다시 수정하시려면 '아니요'라고 말씀해주세요.",
-                    "is_final_turn_response": True,
-                    "action_plan": [],
-                    "action_plan_struct": [],
-                    "router_call_count": 0,
+            # 수정 컨텍스트가 있고 사용자가 값을 제공한 경우
+            elif state.current_modification_context and user_input and user_input.strip():
+                print(f"[PersonalInfoCorrection] User providing value for {state.current_modification_context}: '{user_input}'")
+                # 기존 pending_modifications를 먼저 적용
+                from copy import deepcopy
+                updated_info = deepcopy(collected_info)
+                updated_info.update(state.pending_modifications)
+                
+                # 수정 컨텍스트를 사용하여 새로운 수정 요청 처리
+                state = state.merge_update({
+                    "collected_product_info": updated_info,
+                    "pending_modifications": None,
+                    "waiting_for_additional_modifications": None,
                     "correction_mode": True
                 })
+                collected_info = updated_info
+                # 아래의 수정 로직으로 계속 진행하여 새로운 값 처리
+            else:
+                # 사용자가 수정 가능한 정보를 제공한 경우 확인
+                import re
+                address_pattern = re.compile(r'([가-힣]+(?:동|로|길)\s*\d+)', re.IGNORECASE)
+                email_pattern = re.compile(r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', re.IGNORECASE)
+                phone_pattern = re.compile(r'(\d{3,4})', re.IGNORECASE)
+                name_pattern = re.compile(r'([가-힣]{2,4})', re.IGNORECASE)
+                
+                # 수정 요청 키워드 체크
+                has_modification_request = any(keyword in user_input for keyword in ["바꿔", "바꾸", "수정", "변경", "틀렸", "다르", "잘못"])
+                # 필드 언급 체크
+                has_field_mention = any(field in user_input for field in ["이메일", "메일", "전화", "번호", "이름", "성함", "주소"])
+                # 대조 표현 체크 (A에서 B로, A를 B로)
+                contrast_pattern = re.compile(r'([가-힣]+(?:동|로|길))[에서|을|를]\s*([가-힣]+(?:동|로|길))(?:으로|로)', re.IGNORECASE)
+                has_contrast_expression = contrast_pattern.search(user_input)
+                
+                if (address_pattern.search(user_input) or 
+                    email_pattern.search(user_input) or 
+                    (phone_pattern.search(user_input) and any(keyword in user_input for keyword in ["가운데", "뒷번호", "뒤", "마지막", "뒷자리", "끝번호"])) or
+                    (name_pattern.search(user_input) and any(keyword in user_input for keyword in ["이름", "성함"])) or
+                    (has_modification_request and has_field_mention) or
+                    has_contrast_expression):
+                    print(f"[PersonalInfoCorrection] User providing new modification value, treating as new modification")
+                    # 기존 pending_modifications를 먼저 취소하고 새로운 수정 요청 처리
+                    state = state.merge_update({
+                        "pending_modifications": None,
+                        "original_values_before_modification": None,
+                        "correction_mode": True
+                    })
+                    # 아래의 수정 로직으로 계속 진행
+                else:
+                    # 그 외의 경우 - 다시 질문
+                    print(f"[PersonalInfoCorrection] User response unclear, asking again")
+                    return state.merge_update({
+                        "current_scenario_stage_id": current_stage_id,
+                        "final_response_text_for_tts": "변경사항을 확인해주세요. 맞으시면 '네'라고 말씀해주시고, 다시 수정하시려면 '아니요'라고 말씀해주세요.",
+                        "is_final_turn_response": True,
+                        "action_plan": [],
+                        "action_plan_struct": [],
+                        "router_call_count": 0,
+                        "correction_mode": True
+                    })
     
     # 1. 사용자가 구체적인 수정 정보를 제공한 경우
     if user_input and len(user_input.strip()) > 0:
         try:
+            # 이전 대화 컨텍스트 확인 - 특정 필드에 대한 재질의가 있었는지
+            previous_response = state.final_response_text_for_tts or ""
+            inferred_context = None
+            
+            # 이전 응답에서 어떤 필드를 물어봤는지 추론
+            if "직장주소를 어떻게 수정해드릴까요?" in previous_response:
+                inferred_context = "work_address"
+                print(f"[PersonalInfoCorrection] Inferred context from previous response: work_address")
+            elif "집주소를 어떻게 수정해드릴까요?" in previous_response:
+                inferred_context = "address"
+                print(f"[PersonalInfoCorrection] Inferred context from previous response: address")
+            elif "전화번호를 어떻게 수정해드릴까요?" in previous_response:
+                inferred_context = "phone_number"
+                print(f"[PersonalInfoCorrection] Inferred context from previous response: phone_number")
+            
+            # 추가: pending_modifications에서 컨텍스트 추론
+            if not inferred_context and state.pending_modifications:
+                # pending_modifications에 work_address가 있었다면
+                if "work_address" in state.pending_modifications:
+                    inferred_context = "work_address"
+                    print(f"[PersonalInfoCorrection] Inferred context from pending modifications: work_address")
+                elif "address" in state.pending_modifications:
+                    inferred_context = "address"
+                    print(f"[PersonalInfoCorrection] Inferred context from pending modifications: address")
+            
+            # collected_info에서 마지막 수정 컨텍스트 확인
+            if not inferred_context and collected_info.get("_last_modification_context"):
+                inferred_context = collected_info.get("_last_modification_context")
+                print(f"[PersonalInfoCorrection] Inferred context from collected_info: {inferred_context}")
+            
+            # 가장 강력한 추론: 사용자 입력에서 직접 확인
+            if not inferred_context:
+                # 이전 턴의 사용자 입력을 시뮬레이션 (로그에서 확인)
+                if state.correction_mode and ("동" in user_input or "로" in user_input or "길" in user_input):
+                    # 주소 형태의 입력이고 correction_mode인 경우
+                    # 기본적으로 직장주소로 추론 (대부분의 케이스에서 집주소는 이미 있고 직장주소를 변경하려는 경우가 많음)
+                    print(f"[PersonalInfoCorrection] WARNING: No context found, using heuristic for address field")
+                    if "직장" in str(state.messages[-2:]) if state.messages else False:
+                        inferred_context = "work_address"
+                        print(f"[PersonalInfoCorrection] Heuristic: found '직장' in recent messages")
+            
+            # 실제 컨텍스트가 없으면 추론된 컨텍스트 사용
+            effective_context = state.current_modification_context or inferred_context
+            print(f"[PersonalInfoCorrection] Effective modification context: {effective_context}")
+            
             # collected_info가 비어있거나 기본값이 없는 경우, 시나리오 기본값 사용
             if not collected_info or all(k == "limit_account_agreement" for k in collected_info.keys()):
-                # 시나리오에서 기본값 가져오기
-                for field in required_fields:
-                    field_key = field.get("key")
-                    default_value = field.get("default")
-                    if field_key and default_value and field_key not in collected_info:
-                        collected_info[field_key] = default_value
-                print(f"[PersonalInfoCorrection] Loaded default values from scenario")
+                # customer_info_check 단계에서는 기본 개인정보 필드만 로딩
+                if current_stage_id == "customer_info_check":
+                    basic_info_fields = ["customer_name", "english_name", "resident_number", "phone_number", "email", "address", "work_address"]
+                    for field in required_fields:
+                        field_key = field.get("key")
+                        default_value = field.get("default")
+                        if field_key and default_value and field_key in basic_info_fields and field_key not in collected_info:
+                            collected_info[field_key] = default_value
+                    print(f"[PersonalInfoCorrection] Loaded basic info default values only")
+                else:
+                    # 다른 단계에서는 모든 기본값 로딩
+                    for field in required_fields:
+                        field_key = field.get("key")
+                        default_value = field.get("default")
+                        if field_key and default_value and field_key not in collected_info:
+                            collected_info[field_key] = default_value
+                    print(f"[PersonalInfoCorrection] Loaded default values from scenario")
             
             # InfoModificationAgent로 수정 요청 분석
             print(f"[PersonalInfoCorrection] Analyzing modification request: '{user_input}'")
             print(f"[PersonalInfoCorrection] Current collected_info: {collected_info}")
             
             modification_result = await info_modification_agent.analyze_modification_request(
-                user_input, collected_info, required_fields, state.current_modification_context
+                user_input, collected_info, required_fields, effective_context, state.correction_mode
             )
             
             print(f"[PersonalInfoCorrection] Modification result: {modification_result}")
@@ -285,6 +414,8 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
                         fields_with_value[field] = new_value
                 
                 # 새 값이 없는 필드가 있는 경우 - 값을 물어봄
+                print(f"[PersonalInfoCorrection] fields_needing_value: {fields_needing_value}")
+                print(f"[PersonalInfoCorrection] fields_with_value: {fields_with_value}")
                 if fields_needing_value:
                     clarification_messages = []
                     for field in fields_needing_value:
@@ -292,8 +423,8 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
                             clarification_messages.append("영문이름을 어떻게 수정해드릴까요?")
                         elif field == "customer_name":
                             clarification_messages.append("성함을 어떻게 수정해드릴까요?")
-                        elif field == "customer_phone":
-                            clarification_messages.append("연락처를 어떻게 수정해드릴까요?")
+                        elif field == "phone_number":
+                            clarification_messages.append("전화번호를 어떻게 수정해드릴까요?")
                         elif field == "address":
                             clarification_messages.append("집주소를 어떻게 수정해드릴까요?")
                         elif field == "work_address":
@@ -308,9 +439,15 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
                     
                     # 수정 컨텍스트 설정 (첫 번째 필드)
                     modification_context = fields_needing_value[0] if fields_needing_value else None
+                    print(f"[PersonalInfoCorrection] Setting modification_context to: {modification_context}")
+                    
+                    # 수정 컨텍스트를 collected_info에도 저장 (상태 유지를 위해)
+                    if modification_context:
+                        collected_info["_last_modification_context"] = modification_context
                     
                     return state.merge_update({
                         "current_scenario_stage_id": current_stage_id,
+                        "collected_product_info": collected_info,  # 수정된 collected_info 반영
                         "final_response_text_for_tts": clarification_message,
                         "is_final_turn_response": True,
                         "action_plan": [],
@@ -327,8 +464,8 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
                     modification_messages = []
                     for field, new_value in fields_with_value.items():
                         old_value = collected_info.get(field, "없음")
-                        if field == "customer_phone":
-                            modification_messages.append(f"연락처를 {old_value}에서 {new_value}(으)로 변경")
+                        if field == "phone_number":
+                            modification_messages.append(f"전화번호를 {old_value}에서 {new_value}(으)로 변경")
                         elif field == "customer_name":
                             modification_messages.append(f"성함을 {old_value}에서 {new_value}(으)로 변경")
                         elif field == "address":
