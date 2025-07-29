@@ -98,7 +98,8 @@ class InfoModificationAgent:
         self, 
         user_input: str, 
         current_info: Dict[str, Any],
-        required_fields: List[Dict[str, Any]]
+        required_fields: List[Dict[str, Any]],
+        modification_context: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         사용자의 수정 요청을 분석하고 적절한 필드 수정을 수행
@@ -107,6 +108,7 @@ class InfoModificationAgent:
             user_input: 사용자의 자연어 입력
             current_info: 현재 수집된 정보
             required_fields: 필드 정의 정보
+            modification_context: 현재 수정 컨텍스트 (이전에 수정하려던 필드)
             
         Returns:
             {
@@ -119,6 +121,7 @@ class InfoModificationAgent:
         print(f"[InfoModAgent] Analyzing: '{user_input}'")
         print(f"[InfoModAgent] Converted: '{convert_korean_to_digits(user_input)}'")
         print(f"[InfoModAgent] Current info: {current_info}")
+        print(f"[InfoModAgent] Modification context: {modification_context}")
         
         # 1. 패턴 기반 매칭
         pattern_matches = self._extract_using_patterns(user_input, current_info)
@@ -129,7 +132,7 @@ class InfoModificationAgent:
         print(f"[InfoModAgent] Context matches: {context_matches}")
         
         # 3. LLM 기반 지능적 분석
-        llm_analysis = await self._analyze_with_llm(user_input, current_info, required_fields)
+        llm_analysis = await self._analyze_with_llm(user_input, current_info, required_fields, modification_context)
         print(f"[InfoModAgent] LLM analysis: {llm_analysis}")
         
         # 4. 결과 통합 및 검증
@@ -282,7 +285,8 @@ class InfoModificationAgent:
         self, 
         user_input: str, 
         current_info: Dict[str, Any], 
-        required_fields: List[Dict[str, Any]]
+        required_fields: List[Dict[str, Any]],
+        modification_context: Optional[str] = None
     ) -> Dict[str, Any]:
         """LLM을 사용한 지능적 분석"""
         
@@ -305,6 +309,8 @@ class InfoModificationAgent:
 
 고객 발화: "{user_input}"
 
+수정 컨텍스트: {f"이전에 '{modification_context}' 필드 수정을 요청했습니다." if modification_context else "없음"}
+
 중요: 한국어 숫자 표현을 정확히 인식해주세요:
 - 영/공 → 0, 일 → 1, 이 → 2, 삼 → 3, 사 → 4, 오 → 5, 육 → 6, 칠 → 7, 팔 → 8, 구 → 9
 - 예: "이이칠구" → "2279", "오육칠팔" → "5678"
@@ -323,6 +329,11 @@ class InfoModificationAgent:
 - "틀렸다", "다르다", "잘못됐다", "아니다" 등의 표현은 수정 요청이지 새로운 값이 아닙니다
 - 이런 경우 new_value는 null로 설정하고, 해당 필드를 수정하려는 의도만 파악하세요
 - 구체적인 새 값이 제공되지 않으면 new_value를 null로 두세요
+
+수정 컨텍스트 활용 지침:
+- 수정 컨텍스트가 있으면, 해당 필드를 우선적으로 고려하세요
+- 예: 수정 컨텍스트가 "work_address"이고 사용자가 "종로동 471로"라고 하면 work_address를 수정
+- 단, 사용자가 명시적으로 다른 필드를 언급하면 그것을 우선하세요
 
 주소 수정 시 특별 지침:
 - 주소의 일부만 변경하는 경우(예: "숭인동 99로"), 기존 주소에서 해당 부분만 수정

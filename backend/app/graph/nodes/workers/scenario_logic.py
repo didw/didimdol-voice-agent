@@ -205,7 +205,15 @@ def get_stage_relevant_fields(current_stage_info: Dict, required_fields: List[Di
     expected_key = current_stage_info.get("expected_info_key")
     
     # 특별한 스테이지별 처리
-    if current_stage_id == "ask_transfer_limit":
+    if current_stage_id == "customer_info_check":
+        # 고객정보 확인 단계 - modifiable_fields에 정의된 기본 개인정보만
+        modifiable_fields = current_stage_info.get("modifiable_fields", [])
+        if modifiable_fields:
+            return [f for f in required_fields if f['key'] in modifiable_fields]
+        # fallback: 기본 개인정보 필드만
+        basic_info_fields = ["customer_name", "english_name", "resident_number", "phone_number", "email", "address", "work_address"]
+        return [f for f in required_fields if f['key'] in basic_info_fields]
+    elif current_stage_id == "ask_transfer_limit":
         # 이체한도 관련 필드만
         return [f for f in required_fields if f['key'] in ["transfer_limit_per_time", "transfer_limit_per_day"]]
     elif current_stage_id == "ask_notification_settings":

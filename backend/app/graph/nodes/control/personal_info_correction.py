@@ -160,7 +160,8 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
                     "action_plan_struct": [],
                     "router_call_count": 0,
                     "correction_mode": False,  # 수정 모드 일시 해제 (다음 턴에서 다시 활성화)
-                    "waiting_for_additional_modifications": True  # 추가 수정사항 대기 플래그
+                    "waiting_for_additional_modifications": True,  # 추가 수정사항 대기 플래그
+                    "current_modification_context": None  # 수정 컨텍스트 클리어
                 })
                 print(f"[PersonalInfoCorrection] After merge_update - result.collected_product_info: {result.collected_product_info}")
                 print(f"[PersonalInfoCorrection] ✅ Successfully applied modifications and returning state")
@@ -259,7 +260,7 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
             print(f"[PersonalInfoCorrection] Current collected_info: {collected_info}")
             
             modification_result = await info_modification_agent.analyze_modification_request(
-                user_input, collected_info, required_fields
+                user_input, collected_info, required_fields, state.current_modification_context
             )
             
             print(f"[PersonalInfoCorrection] Modification result: {modification_result}")
@@ -305,6 +306,9 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
                     
                     clarification_message = " ".join(clarification_messages)
                     
+                    # 수정 컨텍스트 설정 (첫 번째 필드)
+                    modification_context = fields_needing_value[0] if fields_needing_value else None
+                    
                     return state.merge_update({
                         "current_scenario_stage_id": current_stage_id,
                         "final_response_text_for_tts": clarification_message,
@@ -313,7 +317,8 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
                         "action_plan_struct": [],
                         "router_call_count": 0,
                         "correction_mode": True,
-                        "modification_reasoning": reasoning
+                        "modification_reasoning": reasoning,
+                        "current_modification_context": modification_context
                     })
                 
                 # 모든 필드에 새 값이 있는 경우에만 확인 메시지 생성
