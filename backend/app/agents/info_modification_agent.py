@@ -66,12 +66,22 @@ class InfoModificationAgent:
                 r"([가-힣]{2,4})\s*이에요",
                 r"([가-힣]{2,4})\s*예요",
                 r"([가-힣]{2,4})\s*라고\s*해주세요"
+            ],
+            # 주소 관련 패턴
+            "address": [
+                r"(.+동\s*\d+)",  # 동 + 번지
+                r"(.+로\s*\d+)",  # 로 + 번지
+                r"(.+길\s*\d+)",  # 길 + 번지
+                r"주소.+?(.+)",   # 주소는 ~
+                r"집.+?(.+)",     # 집은 ~
             ]
         }
         
         self.context_keywords = {
             "customer_phone": ["전화", "연락처", "휴대폰", "번호", "뒷번호", "뒤", "마지막", "끝번호"],
             "customer_name": ["이름", "성함", "명의", "고객명"],
+            "address": ["주소", "집", "사는곳", "거주지", "집주소"],
+            "work_address": ["직장", "회사", "근무지", "직장주소"],
             "confirm_personal_info": ["확인", "동의", "맞다", "틀리다", "다르다"],
             "use_lifelong_account": ["평생계좌", "평생", "계좌번호"],
             "use_internet_banking": ["인터넷뱅킹", "인뱅", "온라인뱅킹"],
@@ -197,6 +207,27 @@ class InfoModificationAgent:
                             name_value = match.group(1).strip()
                             if len(name_value) >= 2:
                                 matches[field_key] = name_value
+                        elif field_key == "address":
+                            # 주소 추출 - 기존 주소와 병합 처리
+                            new_address_part = match.group(1).strip()
+                            current_address = current_info.get("address", "")
+                            
+                            # 부분 주소인 경우 (동/로/길 + 번지만 있는 경우)
+                            if ("동" in new_address_part or "로" in new_address_part or "길" in new_address_part) and len(new_address_part) < 20:
+                                if current_address and "서울" in current_address:
+                                    # 기존 주소에서 시/구 정보 추출하여 결합
+                                    parts = current_address.split()
+                                    if len(parts) >= 2:
+                                        # 서울특별시 종로구 같은 부분 유지
+                                        prefix = " ".join(parts[:2])
+                                        matches[field_key] = f"{prefix} {new_address_part}"
+                                    else:
+                                        matches[field_key] = new_address_part
+                                else:
+                                    matches[field_key] = new_address_part
+                            else:
+                                # 완전한 새 주소인 경우
+                                matches[field_key] = new_address_part
                         break
         
         return {"extracted": matches, "method": "pattern"}
@@ -286,6 +317,11 @@ class InfoModificationAgent:
 - "틀렸다", "다르다", "잘못됐다", "아니다" 등의 표현은 수정 요청이지 새로운 값이 아닙니다
 - 이런 경우 new_value는 null로 설정하고, 해당 필드를 수정하려는 의도만 파악하세요
 - 구체적인 새 값이 제공되지 않으면 new_value를 null로 두세요
+
+주소 수정 시 특별 지침:
+- 주소의 일부만 변경하는 경우(예: "숭인동 99로"), 기존 주소에서 해당 부분만 수정
+- 예: 기존 "서울특별시 종로구 숭인동 123" → 사용자 "숭인동 99로" → 결과 "서울특별시 종로구 숭인동 99로"
+- 완전히 새로운 주소가 아닌 경우 기존 주소의 구조를 유지하면서 변경된 부분만 반영
 
 답변 형식 (JSON):
 {{
@@ -395,17 +431,33 @@ class InfoModificationAgent:
                 suggestions.append(f"연락처를 {old_value}에서 {new_value}(으)로 변경하시겠어요?")
             elif field == "customer_name":
                 suggestions.append(f"성함을 {old_value}에서 {new_value}(으)로 변경하시겠어요?")
+            elif field == "address":
+                if old_value != "없음" and old_value:
+                    suggestions.append(f"집주소를 {new_value}(으)로 변경하시겠어요?")
+                else:
+                    suggestions.append(f"집주소를 {new_value}(으)로 설정하시겠어요?")
+            elif field == "work_address":
+                if old_value != "없음" and old_value:
+                    suggestions.append(f"직장주소를 {new_value}(으)로 변경하시겠어요?")
+                else:
+                    suggestions.append(f"직장주소를 {new_value}(으)로 설정하시겠어요?")
             else:
                 display_name = self._get_field_display_name(field)
-                suggestions.append(f"{display_name}을(를) '{old_value}'에서 '{new_value}'로 변경하시겠어요?")
+                suggestions.append(f"{display_name}을(를) '{old_value}'에서 '{new_value}'(으)로 변경하시겠어요?")
         
         return suggestions
     
     def _get_field_display_name(self, field_key: str) -> str:
         """필드 키를 한국어 표시명으로 변환"""
         display_names = {
-            "customer_name": "고객명",
+            "customer_name": "성함",
             "customer_phone": "연락처",
+            "english_name": "영문이름",
+            "resident_number": "주민등록번호",
+            "phone_number": "전화번호",
+            "email": "이메일",
+            "address": "집주소",
+            "work_address": "직장주소",
             "confirm_personal_info": "개인정보 확인",
             "use_lifelong_account": "평생계좌 등록",
             "use_internet_banking": "인터넷뱅킹 가입",

@@ -244,6 +244,16 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
     # 1. 사용자가 구체적인 수정 정보를 제공한 경우
     if user_input and len(user_input.strip()) > 0:
         try:
+            # collected_info가 비어있거나 기본값이 없는 경우, 시나리오 기본값 사용
+            if not collected_info or all(k == "limit_account_agreement" for k in collected_info.keys()):
+                # 시나리오에서 기본값 가져오기
+                for field in required_fields:
+                    field_key = field.get("key")
+                    default_value = field.get("default")
+                    if field_key and default_value and field_key not in collected_info:
+                        collected_info[field_key] = default_value
+                print(f"[PersonalInfoCorrection] Loaded default values from scenario")
+            
             # InfoModificationAgent로 수정 요청 분석
             print(f"[PersonalInfoCorrection] Analyzing modification request: '{user_input}'")
             print(f"[PersonalInfoCorrection] Current collected_info: {collected_info}")
@@ -316,6 +326,24 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
                             modification_messages.append(f"연락처를 {old_value}에서 {new_value}(으)로 변경")
                         elif field == "customer_name":
                             modification_messages.append(f"성함을 {old_value}에서 {new_value}(으)로 변경")
+                        elif field == "address":
+                            # 주소 변경 시 기존 주소와 비교하여 변경 부분만 표시
+                            if old_value != "없음" and old_value:
+                                # 기존 주소가 있는 경우
+                                modification_messages.append(f"집주소를 {new_value}(으)로 변경")
+                            else:
+                                modification_messages.append(f"집주소를 {new_value}(으)로 설정")
+                        elif field == "work_address":
+                            if old_value != "없음" and old_value:
+                                modification_messages.append(f"직장주소를 {new_value}(으)로 변경")
+                            else:
+                                modification_messages.append(f"직장주소를 {new_value}(으)로 설정")
+                        elif field == "email":
+                            modification_messages.append(f"이메일을 {old_value}에서 {new_value}(으)로 변경")
+                        elif field == "english_name":
+                            modification_messages.append(f"영문이름을 {old_value}에서 {new_value}(으)로 변경")
+                        elif field == "resident_number":
+                            modification_messages.append(f"주민등록번호를 {old_value}에서 {new_value}(으)로 변경")
                         else:
                             display_name = info_modification_agent._get_field_display_name(field)
                             modification_messages.append(f"{display_name}을(를) {old_value}에서 {new_value}(으)로 변경")
