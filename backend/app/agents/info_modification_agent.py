@@ -69,11 +69,17 @@ class InfoModificationAgent:
             ],
             # 주소 관련 패턴
             "address": [
-                r"(.+동\s*\d+)",  # 동 + 번지
-                r"(.+로\s*\d+)",  # 로 + 번지
-                r"(.+길\s*\d+)",  # 길 + 번지
-                r"주소.+?(.+)",   # 주소는 ~
-                r"집.+?(.+)",     # 집은 ~
+                r"([가-힣]+동\s*\d+)",  # 동 + 번지 (한글만)
+                r"([가-힣]+로\s*\d+)",  # 로 + 번지 (한글만)
+                r"([가-힣]+길\s*\d+)",  # 길 + 번지 (한글만)
+                r"집\s*주소.+?([가-힣]+.+)",   # 집주소는 ~
+                r"집이?\s+([가-힣]+.+)",     # 집은/집이 ~
+            ],
+            "work_address": [
+                r"직장\s*주소.+?([가-힣]+.+)",   # 직장주소는 ~
+                r"회사\s*주소.+?([가-힣]+.+)",   # 회사주소는 ~
+                r"직장이?\s+([가-힣]+.+)",       # 직장은/직장이 ~
+                r"회사가?\s+([가-힣]+.+)",       # 회사가 ~
             ]
         }
         
@@ -207,10 +213,10 @@ class InfoModificationAgent:
                             name_value = match.group(1).strip()
                             if len(name_value) >= 2:
                                 matches[field_key] = name_value
-                        elif field_key == "address":
+                        elif field_key in ["address", "work_address"]:
                             # 주소 추출 - 기존 주소와 병합 처리
                             new_address_part = match.group(1).strip()
-                            current_address = current_info.get("address", "")
+                            current_address = current_info.get(field_key, "")
                             
                             # 부분 주소인 경우 (동/로/길 + 번지만 있는 경우)
                             if ("동" in new_address_part or "로" in new_address_part or "길" in new_address_part) and len(new_address_part) < 20:
@@ -322,6 +328,9 @@ class InfoModificationAgent:
 - 주소의 일부만 변경하는 경우(예: "숭인동 99로"), 기존 주소에서 해당 부분만 수정
 - 예: 기존 "서울특별시 종로구 숭인동 123" → 사용자 "숭인동 99로" → 결과 "서울특별시 종로구 숭인동 99로"
 - 완전히 새로운 주소가 아닌 경우 기존 주소의 구조를 유지하면서 변경된 부분만 반영
+- "직장주소"라는 키워드가 있으면 work_address 필드만 수정하세요
+- "삼각동 724야"처럼 동 이름이 기존 work_address에 있으면 work_address를 수정하세요
+- 동시에 여러 주소를 수정하지 말고, 사용자가 의도한 하나의 주소만 수정하세요
 
 답변 형식 (JSON):
 {{
@@ -385,17 +394,15 @@ class InfoModificationAgent:
                 confidence = max(confidence, 0.8)
                 reasoning_parts.append(f"패턴 매칭: {field} = {value}")
         
-        # 2. LLM 분석 결과 적용 (패턴 매칭이 없거나, LLM이 더 정확한 경우만)
+        # 2. LLM 분석 결과 적용 (LLM을 우선시, 특히 주소의 경우)
         if "target_field" in llm_analysis and "new_value" in llm_analysis:
             field = llm_analysis["target_field"]
             value = llm_analysis["new_value"]
             
-            # 패턴 매칭 결과가 이미 있으면 패턴 매칭 우선 (특히 전화번호의 경우)
-            if field in modified_fields and (field == "customer_phone" or llm_analysis.get("confidence", 0.5) < 0.95):
-                reasoning_parts.append(f"LLM 분석 (패턴 매칭 우선): {llm_analysis.get('reasoning', 'N/A')}")
-            else:
+            # LLM 분석 결과를 우선시 (높은 신뢰도의 경우)
+            if llm_analysis.get("confidence", 0.5) >= 0.8:
                 # 전화번호 특별 처리 - 기존 정보와 조합
-                if field == "customer_phone" and value.startswith("010-xxxx-"):
+                if field == "customer_phone" and value and value.startswith("010-xxxx-"):
                     existing_phone = current_info.get("customer_phone", "")
                     if existing_phone and existing_phone.startswith("010-"):
                         # 기존 번호의 중간 부분 유지
@@ -404,9 +411,29 @@ class InfoModificationAgent:
                             new_last_4 = value.split("-")[-1]
                             value = f"{parts[0]}-{parts[1]}-{new_last_4}"
                 
+                # 주소 필드 중복 처리 방지
+                if field in ["address", "work_address"]:
+                    # 패턴 매칭으로 잘못 추출된 다른 주소 필드 제거
+                    if field == "work_address" and "address" in modified_fields:
+                        # work_address가 타겟이면 address 제거
+                        del modified_fields["address"]
+                        reasoning_parts = [r for r in reasoning_parts if "address" not in r]
+                    elif field == "address" and "work_address" in modified_fields:
+                        # address가 타겟이면 work_address 제거
+                        del modified_fields["work_address"]
+                        reasoning_parts = [r for r in reasoning_parts if "work_address" not in r]
+                
                 modified_fields[field] = value
                 confidence = max(confidence, llm_analysis.get("confidence", 0.5))
                 reasoning_parts.append(f"LLM 분석: {llm_analysis.get('reasoning', 'N/A')}")
+            else:
+                # 신뢰도가 낮으면 패턴 매칭 우선
+                if field not in modified_fields:
+                    modified_fields[field] = value
+                    confidence = max(confidence, llm_analysis.get("confidence", 0.5))
+                    reasoning_parts.append(f"LLM 분석: {llm_analysis.get('reasoning', 'N/A')}")
+                else:
+                    reasoning_parts.append(f"LLM 분석 (패턴 매칭 우선): {llm_analysis.get('reasoning', 'N/A')}")
         
         # 3. 컨텍스트 추론 보조 활용
         if "inferred_field" in context_matches and not modified_fields:
