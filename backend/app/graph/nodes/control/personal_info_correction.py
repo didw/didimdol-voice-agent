@@ -226,54 +226,99 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
             if modified_fields and confidence > 0.6:
                 print(f"[PersonalInfoCorrection] Setting pending modifications for user confirmation: {modified_fields}")
                 
-                # 수정 확인 메시지 생성
-                modification_messages = []
+                # null 값이 있는지 확인 (수정하려는 필드는 알지만 새 값이 없는 경우)
+                fields_needing_value = []
+                fields_with_value = {}
+                
                 for field, new_value in modified_fields.items():
-                    old_value = collected_info.get(field, "없음")
-                    if field == "customer_phone":
-                        modification_messages.append(f"연락처를 {old_value}에서 {new_value}(으)로 변경")
-                    elif field == "customer_name":
-                        modification_messages.append(f"성함을 {old_value}에서 {new_value}(으)로 변경")
+                    if new_value is None or new_value == "null" or new_value == "틀려" or new_value == "다르다":
+                        fields_needing_value.append(field)
                     else:
-                        display_name = info_modification_agent._get_field_display_name(field)
-                        modification_messages.append(f"{display_name}을(를) {old_value}에서 {new_value}(으)로 변경")
+                        fields_with_value[field] = new_value
                 
-                modification_text = ". ".join(modification_messages)
-                confirmation_message = f"네, {modification_text} 맞으실까요?"
+                # 새 값이 없는 필드가 있는 경우 - 값을 물어봄
+                if fields_needing_value:
+                    clarification_messages = []
+                    for field in fields_needing_value:
+                        if field == "english_name":
+                            clarification_messages.append("영문이름을 어떻게 수정해드릴까요?")
+                        elif field == "customer_name":
+                            clarification_messages.append("성함을 어떻게 수정해드릴까요?")
+                        elif field == "customer_phone":
+                            clarification_messages.append("연락처를 어떻게 수정해드릴까요?")
+                        elif field == "address":
+                            clarification_messages.append("집주소를 어떻게 수정해드릴까요?")
+                        elif field == "work_address":
+                            clarification_messages.append("직장주소를 어떻게 수정해드릴까요?")
+                        elif field == "email":
+                            clarification_messages.append("이메일을 어떻게 수정해드릴까요?")
+                        else:
+                            display_name = info_modification_agent._get_field_display_name(field)
+                            clarification_messages.append(f"{display_name}을(를) 어떻게 수정해드릴까요?")
+                    
+                    clarification_message = " ".join(clarification_messages)
+                    
+                    return state.merge_update({
+                        "current_scenario_stage_id": current_stage_id,
+                        "final_response_text_for_tts": clarification_message,
+                        "is_final_turn_response": True,
+                        "action_plan": [],
+                        "action_plan_struct": [],
+                        "router_call_count": 0,
+                        "correction_mode": True,
+                        "modification_reasoning": reasoning
+                    })
                 
-                # 수정된 정보를 즉시 적용하면서 사용자 확인 요청
-                # modified_fields를 collected_info에 즉시 반영
-                from copy import deepcopy
-                updated_info_for_confirmation = deepcopy(collected_info)
+                # 모든 필드에 새 값이 있는 경우에만 확인 메시지 생성
+                if fields_with_value:
+                    # 수정 확인 메시지 생성
+                    modification_messages = []
+                    for field, new_value in fields_with_value.items():
+                        old_value = collected_info.get(field, "없음")
+                        if field == "customer_phone":
+                            modification_messages.append(f"연락처를 {old_value}에서 {new_value}(으)로 변경")
+                        elif field == "customer_name":
+                            modification_messages.append(f"성함을 {old_value}에서 {new_value}(으)로 변경")
+                        else:
+                            display_name = info_modification_agent._get_field_display_name(field)
+                            modification_messages.append(f"{display_name}을(를) {old_value}에서 {new_value}(으)로 변경")
+                    
+                    modification_text = ". ".join(modification_messages)
+                    confirmation_message = f"네, {modification_text} 맞으실까요?"
                 
-                # 원본 값 저장 (롤백을 위해)
-                original_values = {}
-                for field in modified_fields.keys():
-                    if field in collected_info:
-                        original_values[field] = collected_info[field]
+                    # 수정된 정보를 즉시 적용하면서 사용자 확인 요청
+                    # fields_with_value만 collected_info에 즉시 반영
+                    from copy import deepcopy
+                    updated_info_for_confirmation = deepcopy(collected_info)
+                    
+                    # 원본 값 저장 (롤백을 위해)
+                    original_values = {}
+                    for field in fields_with_value.keys():
+                        if field in collected_info:
+                            original_values[field] = collected_info[field]
+                    
+                    # 수정사항 적용 (fields_with_value만)
+                    updated_info_for_confirmation.update(fields_with_value)
                 
-                # 수정사항 적용
-                updated_info_for_confirmation.update(modified_fields)
-                
-                print(f"[PersonalInfoCorrection] Immediately applying modifications to collected_product_info")
-                print(f"[PersonalInfoCorrection] Before: {collected_info}")
-                print(f"[PersonalInfoCorrection] Modified fields: {modified_fields}")
-                print(f"[PersonalInfoCorrection] Original values saved: {original_values}")
-                print(f"[PersonalInfoCorrection] After: {updated_info_for_confirmation}")
-                
-                return state.merge_update({
-                    "current_scenario_stage_id": current_stage_id,
-                    "collected_product_info": updated_info_for_confirmation,  # 수정사항 즉시 반영
-                    "pending_modifications": modified_fields,  # 롤백을 위한 대기 중인 수정사항
-                    "original_values_before_modification": original_values,  # 원본 값 저장
-                    "final_response_text_for_tts": confirmation_message,
-                    "is_final_turn_response": True,
-                    "action_plan": [],
-                    "action_plan_struct": [],
-                    "router_call_count": 0,
-                    "correction_mode": True,  # 수정 모드 유지
-                    "modification_reasoning": reasoning
-                })
+                    print(f"[PersonalInfoCorrection] Immediately applying modifications to collected_product_info")
+                    print(f"[PersonalInfoCorrection] Before: {collected_info}")
+                    print(f"[PersonalInfoCorrection] Modified fields: {fields_with_value}")
+                    print(f"[PersonalInfoCorrection] Original values saved: {original_values}")
+                    print(f"[PersonalInfoCorrection] After: {updated_info_for_confirmation}")
+                    
+                    return state.merge_update({
+                        "current_scenario_stage_id": current_stage_id,
+                        "collected_product_info": updated_info_for_confirmation,  # 수정사항 즉시 반영
+                        "pending_modifications": fields_with_value,  # 롤백을 위한 대기 중인 수정사항
+                        "original_values_before_modification": original_values,  # 원본 값 저장
+                        "final_response_text_for_tts": confirmation_message,
+                        "is_final_turn_response": True,
+                        "action_plan": [],
+                        "action_plan_struct": [],
+                        "router_call_count": 0,
+                        "correction_mode": True,  # 수정 모드 유지
+                        "modification_reasoning": reasoning
+                    })
             
             # 신뢰도가 낮거나 수정 필드를 찾지 못한 경우
             else:

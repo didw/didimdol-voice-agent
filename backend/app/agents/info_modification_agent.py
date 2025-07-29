@@ -282,18 +282,26 @@ class InfoModificationAgent:
 2. 새로운 값이 무엇인지 (한국어 숫자는 아라비아 숫자로 변환)
 3. 추론의 근거
 
+특별 지침:
+- "틀렸다", "다르다", "잘못됐다", "아니다" 등의 표현은 수정 요청이지 새로운 값이 아닙니다
+- 이런 경우 new_value는 null로 설정하고, 해당 필드를 수정하려는 의도만 파악하세요
+- 구체적인 새 값이 제공되지 않으면 new_value를 null로 두세요
+
 답변 형식 (JSON):
 {{
     "target_field": "수정하려는 필드 키",
-    "new_value": "새로운 값",
+    "new_value": "새로운 값 또는 null",
     "confidence": 0.0~1.0,
-    "reasoning": "추론 근거"
+    "reasoning": "추론 근거",
+    "needs_clarification": true/false
 }}
 
 예시:
-- "뒷번호 0987이야" → {{"target_field": "customer_phone", "new_value": "010-xxxx-0987", "confidence": 0.9, "reasoning": "뒷번호 4자리는 전화번호의 마지막 부분"}}
-- "이름은 김철수야" → {{"target_field": "customer_name", "new_value": "김철수", "confidence": 0.95, "reasoning": "명시적으로 이름을 제공"}}
-- "오육칠팔이 아니라 이이오구야" → {{"target_field": "customer_phone", "new_value": "010-xxxx-2259", "confidence": 0.95, "reasoning": "기존 뒷번호 5678을 2259로 수정 요청"}}
+- "뒷번호 0987이야" → {{"target_field": "customer_phone", "new_value": "010-xxxx-0987", "confidence": 0.9, "reasoning": "뒷번호 4자리는 전화번호의 마지막 부분", "needs_clarification": false}}
+- "이름은 김철수야" → {{"target_field": "customer_name", "new_value": "김철수", "confidence": 0.95, "reasoning": "명시적으로 이름을 제공", "needs_clarification": false}}
+- "오육칠팔이 아니라 이이오구야" → {{"target_field": "customer_phone", "new_value": "010-xxxx-2259", "confidence": 0.95, "reasoning": "기존 뒷번호 5678을 2259로 수정 요청", "needs_clarification": false}}
+- "영문이름이 틀려" → {{"target_field": "english_name", "new_value": null, "confidence": 0.8, "reasoning": "영문이름이 틀렸다고 했지만 새로운 값을 제공하지 않음", "needs_clarification": true}}
+- "주소가 다르다" → {{"target_field": "address", "new_value": null, "confidence": 0.8, "reasoning": "주소가 다르다고 했지만 새로운 주소를 제공하지 않음", "needs_clarification": true}}
 """
 
         try:
