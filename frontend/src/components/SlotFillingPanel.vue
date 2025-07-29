@@ -141,14 +141,14 @@ watch(() => slotFillingStore.visibleFields, (newFields, oldFields) => {
           
           if (targetGroup) {
             // 현재 단계 그룹으로 스크롤
-            targetGroup.scrollIntoView({ 
+            (targetGroup as HTMLElement).scrollIntoView({ 
               behavior: 'smooth', 
               block: 'start' 
             })
             
             // 해당 그룹의 모든 필드에 하이라이트 효과
-            const groupFields = targetGroup.querySelectorAll('.field-item')
-            groupFields.forEach((field) => {
+            const groupFields = (targetGroup as HTMLElement).querySelectorAll('.field-item')
+            groupFields.forEach((field: Element) => {
               field.classList.add('newly-added')
               setTimeout(() => {
                 field.classList.remove('newly-added')

@@ -12,7 +12,7 @@ interface Message {
   timestamp: Date;
   isStreaming?: boolean;
   isInterimStt?: boolean;
-  stageResponse?: StageResponseMessage;
+  stageResponse?: StageResponseMessage | null;
 }
 
 interface AudioSegment {
@@ -299,7 +299,7 @@ export const useChatStore = defineStore("chat", {
               break;
             case "stage_response":
               // Stage response를 현재 상태에 저장하고 메시지로도 추가
-              this.currentStageResponse = {
+              this.currentStageResponse = data.stageId ? {
                 type: 'stage_response',
                 stageId: data.stageId,
                 responseType: data.responseType,
@@ -309,7 +309,7 @@ export const useChatStore = defineStore("chat", {
                 modifiableFields: data.modifiableFields,
                 choiceGroups: data.choiceGroups,
                 defaultChoice: data.defaultChoice
-              } as any;
+              } : null;
               
               // AI 메시지로 추가 (StageResponse 컴포넌트가 렌더링하도록)
               this.messages.push({

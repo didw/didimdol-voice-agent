@@ -27,9 +27,9 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
   
   // 성능 최적화 관련 상태
   const lastUpdateHash = ref<string>('')
-  const updateDebounceTimer = ref<number | null>(null)
+  const updateDebounceTimer = ref<ReturnType<typeof setTimeout> | null>(null)
   const fieldVisibilityCache = ref<Map<string, boolean>>(new Map())
-  const cacheCleanupInterval = ref<number | null>(null)
+  const cacheCleanupInterval = ref<ReturnType<typeof setInterval> | null>(null)
   
   // 수정 모드 관련 상태
   const modificationMode = ref<boolean>(false)
