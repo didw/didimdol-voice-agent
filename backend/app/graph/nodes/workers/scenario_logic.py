@@ -33,7 +33,8 @@ async def process_partial_response(
     user_input: str,
     required_fields: List[Dict[str, Any]],
     collected_info: Dict[str, Any],
-    field_validators: Dict[str, Any] = None
+    field_validators: Dict[str, Any] = None,
+    current_stage_info: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """부분 응답 처리 및 유효성 검증 - TRD 4.4 구현"""
     
@@ -45,7 +46,13 @@ async def process_partial_response(
     similarity_messages = []
     if user_input:
         try:
-            extraction_result = await entity_agent.extract_entities_with_similarity(user_input, required_fields)
+            # 현재 스테이지 정보가 있으면 관련 필드만 필터링
+            fields_to_extract = required_fields
+            if current_stage_info:
+                fields_to_extract = get_stage_relevant_fields(current_stage_info, required_fields, stage_id)
+                print(f"[process_partial_response] Filtered fields for stage {stage_id}: {[f['key'] for f in fields_to_extract]}")
+            
+            extraction_result = await entity_agent.extract_entities_with_similarity(user_input, fields_to_extract)
             extracted_entities = extraction_result.get("extracted_entities", {})
             similarity_messages = extraction_result.get("similarity_messages", [])
         except Exception as e:
@@ -192,6 +199,35 @@ async def process_scenario_logic_node(state: AgentState) -> AgentState:
     return result
 
 
+def get_stage_relevant_fields(current_stage_info: Dict, required_fields: List[Dict], current_stage_id: str) -> List[Dict]:
+    """현재 스테이지에서 관련된 필드만 필터링"""
+    # 기본적으로 expected_info_key 필드만 반환
+    expected_key = current_stage_info.get("expected_info_key")
+    
+    # 특별한 스테이지별 처리
+    if current_stage_id == "ask_transfer_limit":
+        # 이체한도 관련 필드만
+        return [f for f in required_fields if f['key'] in ["transfer_limit_per_time", "transfer_limit_per_day"]]
+    elif current_stage_id == "ask_notification_settings":
+        # 알림 설정 관련 필드만
+        return [f for f in required_fields if f['key'] in ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]]
+    elif expected_key:
+        # 기본적으로 expected_info_key에 해당하는 필드만
+        return [f for f in required_fields if f['key'] == expected_key]
+    else:
+        # visible_groups가 있는 경우 해당 그룹의 필드들만
+        visible_groups = current_stage_info.get("visible_groups", [])
+        if visible_groups:
+            stage_fields = []
+            for field in required_fields:
+                field_group = field.get("group")
+                if field_group in visible_groups:
+                    stage_fields.append(field)
+            return stage_fields
+        # 그 외의 경우 모든 필드 (기존 동작)
+        return required_fields
+
+
 async def process_multiple_info_collection(state: AgentState, active_scenario_data: Dict, current_stage_id: str, current_stage_info: Dict, collected_info: Dict, scenario_output: Optional[ScenarioAgentOutput], user_input: str) -> AgentState:
     """다중 정보 수집 처리 (개선된 그룹별 방식)"""
     required_fields = active_scenario_data.get("required_info_fields", [])
@@ -266,7 +302,11 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                     print(f"  user_input: '{user_input}'")
                     print(f"  collected_info BEFORE Entity Agent: {collected_info}")
                     
-                    extraction_result = await entity_agent.process_slot_filling(user_input, required_fields, collected_info)
+                    # 현재 스테이지에 관련된 필드만 필터링
+                    stage_relevant_fields = get_stage_relevant_fields(current_stage_info, required_fields, current_stage_id)
+                    print(f"🤖 [ENTITY_AGENT] Filtered fields for stage: {[f['key'] for f in stage_relevant_fields]}")
+                    
+                    extraction_result = await entity_agent.process_slot_filling(user_input, stage_relevant_fields, collected_info)
                     
                     # Entity Agent 결과 디버깅
                     print(f"🤖 [ENTITY_AGENT] Entity Agent completed")
@@ -1402,8 +1442,12 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
     # 스테이지별 확인 메시지 추가
     confirmation_msg = ""
     
+    # limit_account_guide에서 전환된 경우
+    if current_stage_id == "limit_account_guide" and collected_info.get("limit_account_agreement"):
+        confirmation_msg = "네, 한도계좌로 진행하겠습니다. "
+    
     # ask_transfer_limit에서 전환된 경우
-    if current_stage_id == "ask_transfer_limit":
+    elif current_stage_id == "ask_transfer_limit":
         per_time = collected_info.get("transfer_limit_per_time")
         per_day = collected_info.get("transfer_limit_per_day")
         if per_time and per_day:
@@ -1477,6 +1521,10 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             "action_plan": updated_plan,
             "action_plan_struct": updated_struct
         }
+        
+        # narrative 타입인 경우 prompt도 final_response_text_for_tts에 설정
+        if next_stage_info.get("response_type") == "narrative" and next_stage_prompt:
+            update_dict["final_response_text_for_tts"] = next_stage_prompt
     else:
         update_dict = {
             "collected_product_info": collected_info, 

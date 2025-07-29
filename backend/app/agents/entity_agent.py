@@ -275,6 +275,7 @@ class EntityRecognitionAgent:
         required_fields: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """사용자 입력에서 엔티티 추출 - 유사도 매칭 포함"""
+        print(f"[EntityAgent] extract_entities_with_similarity called with {len(required_fields)} fields: {[f['key'] for f in required_fields]}")
         
         # 1. 먼저 기존 방식으로 추출 시도
         extraction_result = await self.extract_entities(user_input, required_fields)
@@ -575,6 +576,7 @@ class EntityRecognitionAgent:
         collected_info: Dict[str, Any]
     ) -> Dict[str, Any]:
         """종합적인 Slot Filling 처리 - 유사도 매칭 포함"""
+        print(f"[EntityAgent] process_slot_filling called with {len(required_fields)} fields: {[f['key'] for f in required_fields]}")
         
         # 1단계: LLM 기반 엔티티 추출 (유사도 매칭 포함)
         extraction_result = await self.extract_entities_with_similarity(user_input, required_fields)
