@@ -61,6 +61,39 @@ def load_all_scenarios_sync() -> None:
         print(f"CRITICAL ERROR loading scenario files: {e}")
         raise
 
+def reload_scenario_data(product_type: Optional[PRODUCT_TYPES] = None) -> bool:
+    """Reloads scenario data from JSON files. If product_type is specified, only reloads that product."""
+    global ALL_SCENARIOS_DATA
+    try:
+        if product_type:
+            # Reload specific product scenario
+            if product_type in SCENARIO_FILES:
+                file_path = SCENARIO_FILES[product_type]
+                print(f"🔄 Reloading scenario from: {file_path}")
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    new_data = json.load(f)
+                    ALL_SCENARIOS_DATA[product_type] = new_data
+                print(f"✅ Scenario for '{product_type}' reloaded successfully.")
+                print(f"📊 Loaded {len(new_data.get('stages', {}))} stages")
+                # Debug: Show card selection stage choices
+                if 'stages' in new_data and 'card_selection' in new_data['stages']:
+                    card_stage = new_data['stages']['card_selection']
+                    if 'choices' in card_stage:
+                        print(f"🎴 Card choices reloaded:")
+                        for choice in card_stage['choices']:
+                            print(f"   - {choice.get('display', 'Unknown')}")
+            else:
+                print(f"Warning: No scenario file defined for '{product_type}'.")
+                return False
+        else:
+            # Reload all scenarios
+            print("🔄 Reloading all scenario files...")
+            load_all_scenarios_sync()
+        return True
+    except Exception as e:
+        print(f"❌ ERROR reloading scenario data: {e}")
+        return False
+
 async def load_knowledge_base_content_async(product_type: str) -> Optional[str]:
     """Loads a specific knowledge base file into memory if not already loaded."""
     global ALL_KNOWLEDGE_BASES

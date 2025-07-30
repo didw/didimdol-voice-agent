@@ -6,6 +6,7 @@ import { storeToRefs } from 'pinia' // storeToRefs can be useful if not using co
 import SlotFillingPanel from './SlotFillingPanel.vue'
 import SlotFillingDebug from './SlotFillingDebug.vue'
 import StageResponse from './StageResponse.vue'
+import api from '@/services/api'
 
 // Props for layout control
 interface Props {
@@ -132,6 +133,22 @@ const sendMessage = () => {
     // focusInput(); // Focus immediately after sending
   }
 };
+
+// Development mode detection
+const isDevelopment = computed(() => import.meta.env.DEV)
+
+// Development only: Reload scenario data
+const reloadScenarioData = async () => {
+  try {
+    console.log('🔄 Reloading scenario data...')
+    const response = await api.reloadScenario('deposit_account')
+    console.log('✅ Scenario reloaded:', response.data.message)
+    alert('시나리오 데이터가 성공적으로 새로고침되었습니다!')
+  } catch (error) {
+    console.error('❌ Failed to reload scenario:', error)
+    alert('시나리오 데이터 새로고침에 실패했습니다.')
+  }
+}
 
 watch(
   () => chatStore.messages.length, // Watch the number of messages
@@ -391,6 +408,15 @@ watch(userInputText, (newValue) => {
         title="음성 기능 일시 중단"
       >
         <span>🎙️ 일시중단</span>
+      </button>
+      <!-- Development only: Scenario reload button -->
+      <button
+        v-if="isDevelopment"
+        @click="reloadScenarioData"
+        class="reload-button"
+        title="시나리오 데이터 새로고침 (개발용)"
+      >
+        <span>🔄</span>
       </button>
     </div>
   </div>
@@ -730,6 +756,18 @@ watch(userInputText, (newValue) => {
 }
 .input-area button.mic-button:disabled {
   background-color: #90caf9; /* Original disabled mic color */
+}
+
+.input-area button.reload-button {
+  /* Development only: Reload scenario button */
+  background-color: #ff9800; /* Orange for development actions */
+  color: white;
+  margin-left: 5px;
+  transition: background-color 0.2s ease;
+}
+
+.input-area button.reload-button:hover {
+  background-color: #f57c00; /* Darker orange on hover */
 }
 
 .input-area button.mic-active {

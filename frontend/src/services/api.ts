@@ -17,6 +17,16 @@ interface ApiResponse {
   }
 }
 
+interface ReloadScenarioRequest {
+  product_type?: string
+}
+
+interface ReloadScenarioResponse {
+  success: boolean
+  message: string
+  product_type?: string
+}
+
 const apiClient: AxiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1',
   headers: {
@@ -37,5 +47,11 @@ export default {
         responseType: 'blob',
       },
     )
+  },
+
+  reloadScenario(productType?: string): Promise<{ data: ReloadScenarioResponse }> {
+    return apiClient.post('/chat/reload-scenario', {
+      product_type: productType
+    })
   },
 }

@@ -17,8 +17,15 @@ from .chat_handlers import (
     get_agent_generator
 )
 from .chat_utils import get_info_collection_stages, send_slot_filling_update
+from ...graph.utils import reload_scenario_data
+from fastapi import HTTPException
+from pydantic import BaseModel
 
 router = APIRouter()
+
+# Reload scenario request model
+class ReloadScenarioRequest(BaseModel):
+    product_type: Optional[str] = None
 
 
 # 전역 세션 상태
@@ -537,3 +544,34 @@ async def cleanup_session(
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     """WebSocket 엔드포인트 - 세션 ID 기반"""
     await websocket_chat_endpoint(websocket)
+
+
+@router.post("/reload-scenario")
+async def reload_scenario(request: ReloadScenarioRequest = None):
+    """시나리오 데이터를 JSON 파일에서 다시 로드합니다."""
+    try:
+        product_type = request.product_type if request else None
+        success = reload_scenario_data(product_type)
+        
+        if success:
+            message = f"Scenario data reloaded successfully"
+            if product_type:
+                message += f" for product type: {product_type}"
+            else:
+                message += " for all product types"
+            
+            return {
+                "success": True,
+                "message": message,
+                "product_type": product_type
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to reload scenario data for product type: {product_type}"
+            )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error reloading scenario data: {str(e)}"
+        )
