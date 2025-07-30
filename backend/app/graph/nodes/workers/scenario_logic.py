@@ -1011,6 +1011,8 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
             elif any(word in user_lower for word in ["아니", "틀려", "수정", "변경", "다르"]):
                 collected_info["personal_info_confirmed"] = False
                 print(f"[CONFIRM_PERSONAL_INFO] '아니' response -> personal_info_confirmed = False")
+                # 수정 요청 시 특별한 응답 설정
+                state["special_response_for_modification"] = True
         
         # card_password_setting 단계
         elif current_stage_id == "card_password_setting":
@@ -1583,6 +1585,17 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
                         else:
                             next_stage_id = true_next
                     elif confirmed_key == "false":
+                        # 개인정보 수정 요청에 대한 특별한 응답 처리
+                        if state.get("special_response_for_modification"):
+                            print(f"[V3_NEXT_STEP] Special response for personal info modification")
+                            return state.merge_update({
+                                "final_response_text_for_tts": "[은행 고객정보 변경] 화면으로 이동해드리겠습니다.",
+                                "is_final_turn_response": True,
+                                "current_scenario_stage_id": current_stage_id,  # 현재 단계 유지
+                                "action_plan": [],
+                                "action_plan_struct": [],
+                                "special_response_for_modification": False  # 플래그 리셋
+                            })
                         next_stage_id = next_step.get("false", "customer_info_update")
                         print(f"[V3_NEXT_STEP] False branch - next_stage_id: {next_stage_id}")
             elif main_field_key and main_field_key in collected_info:
