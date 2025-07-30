@@ -29,6 +29,18 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
     print(f"[PersonalInfoCorrection] Correction mode: {state.correction_mode}")
     print(f"[PersonalInfoCorrection] Current modification context: {state.current_modification_context}")
     
+    # confirm_personal_info 단계에서 수정 요청이 들어온 경우 특별 처리
+    if current_stage_id == "confirm_personal_info":
+        print(f"[PersonalInfoCorrection] Modification request in confirm_personal_info stage")
+        return state.merge_update({
+            "final_response_text_for_tts": "[은행 고객정보 변경] 화면으로 이동해드리겠습니다.",
+            "is_final_turn_response": True,
+            "correction_mode": False,
+            "action_plan": [],
+            "action_plan_struct": [],
+            "router_call_count": 0
+        })
+    
     # 시나리오 데이터 가져오기
     active_scenario_data = get_active_scenario_data(state.to_dict())
     required_fields = active_scenario_data.get("required_info_fields", []) if active_scenario_data else []

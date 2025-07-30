@@ -996,7 +996,30 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
         
         # confirm_personal_info 단계
         if current_stage_id == "confirm_personal_info":
-            if any(word in user_lower for word in ["네", "예", "응", "어", "그래", "좋아", "맞아", "알겠", "확인"]):
+            # 직접적인 항목 수정 요청 확인 (예: "휴대폰번호 틀렸어", "이름이 잘못됐어")
+            field_names = {
+                "이름": ["이름", "성명"],
+                "영문이름": ["영문이름", "영문명", "영어이름"],
+                "주민번호": ["주민번호", "주민등록번호", "생년월일"],
+                "휴대폰번호": ["휴대폰번호", "전화번호", "핸드폰번호", "폰번호", "연락처"],
+                "이메일": ["이메일", "메일"],
+                "주소": ["주소", "집주소"],
+                "직장주소": ["직장주소", "회사주소", "근무지"]
+            }
+            
+            # 특정 필드가 언급되고 수정 관련 단어가 있는지 확인
+            field_mentioned = False
+            for field, keywords in field_names.items():
+                if any(kw in user_lower for kw in keywords) and any(word in user_lower for word in ["틀렸", "틀려", "잘못", "수정", "변경", "다르"]):
+                    field_mentioned = True
+                    break
+            
+            if field_mentioned:
+                # 특정 항목 수정 요청인 경우
+                collected_info["personal_info_confirmed"] = False
+                print(f"[CONFIRM_PERSONAL_INFO] Specific field modification request detected")
+                state["special_response_for_modification"] = True
+            elif any(word in user_lower for word in ["네", "예", "응", "어", "그래", "좋아", "맞아", "알겠", "확인"]):
                 collected_info["personal_info_confirmed"] = True
                 print(f"[CONFIRM_PERSONAL_INFO] '네' response -> personal_info_confirmed = True")
                 

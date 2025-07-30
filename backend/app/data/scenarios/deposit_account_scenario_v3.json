@@ -50,13 +50,13 @@
       "modifiable": true,
       "modifiable_fields": ["name", "english_name", "ssn", "phone_number", "email", "address", "work_address"],
       "display_fields": {
-        "name": "김신한",
-        "english_name": "KIM SHINHAN",
-        "ssn": "880122-*******",
-        "phone_number": "010-1234-OOOO",
-        "email": "shinhan11@naver.com",
-        "address": "서울 중구 소공로 센트레빌 201동 201호",
-        "work_address": "서울 중구 소공로 35-1 7층"
+        "이름": "김신한",
+        "영문이름": "KIM SHINHAN",
+        "주민번호": "880122-*******",
+        "휴대폰번호": "010-1234-OOOO",
+        "이메일": "shinhan11@naver.com",
+        "주소": "서울 중구 소공로 센트레빌 201동 201호",
+        "직장주소": "서울 중구 소공로 35-1 7층"
       },
       "extraction_prompt": "개인정보 확인 응답을 추출하세요:\\n- \"맞아\", \"네\", \"확인\" → personal_info_confirmed: true\\n- \"아니\", \"틀려\", \"수정\" → personal_info_confirmed: false\\n- 특정 필드 수정 요청 시 해당 필드명과 새 값 추출",
       "next_step": {
