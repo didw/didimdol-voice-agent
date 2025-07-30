@@ -1171,11 +1171,22 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                     print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped to default: {default_value}")
     
     # choice_exact 모드이거나 user_input이 현재 stage의 choice와 정확히 일치하는 경우 특별 처리
-    if state.get("input_mode") == "choice_exact" or (user_input and current_stage_info.get("choices")):
+    if state.get("input_mode") == "choice_exact" or (user_input and (current_stage_info.get("choices") or current_stage_info.get("choice_groups"))):
         # choices 중에 정확히 일치하는지 확인
         choices = current_stage_info.get("choices", [])
-        expected_field_keys = get_expected_field_keys(current_stage_info)
-        expected_field = expected_field_keys[0] if expected_field_keys else None
+        # choice_groups가 있는 경우 모든 choices를 평면화
+        if current_stage_info.get("choice_groups"):
+            for group in current_stage_info.get("choice_groups", []):
+                group_choices = group.get("choices", [])
+                choices.extend(group_choices)
+                print(f"🎯 [CHOICE_GROUPS] Added {len(group_choices)} choices from group '{group.get('group_name', 'Unknown')}'")
+        
+        # Get the first field to collect as the primary field for this choice
+        fields_to_collect = current_stage_info.get("fields_to_collect", [])
+        expected_field = fields_to_collect[0] if fields_to_collect else None
+        
+        print(f"🎯 [EXACT_MATCH] Looking for '{user_input.strip()}' in {len(choices)} total choices")
+        print(f"🎯 [EXACT_MATCH] Expected field: {expected_field}")
         
         for choice in choices:
             choice_value = choice.get("value", "") if isinstance(choice, dict) else str(choice)
@@ -1185,12 +1196,42 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                 if expected_field:
                     entities = {expected_field: user_input.strip()}
                     intent = "정보제공"
+                    
+                    # 선택한 choice의 metadata도 함께 처리 (security_medium_registration 등)
+                    if isinstance(choice, dict) and choice.get("metadata"):
+                        choice_metadata = choice.get("metadata", {})
+                        print(f"🎯 [EXACT_MATCH] Found metadata for choice '{choice_value}': {choice_metadata}")
+                        
+                        # security_medium_registration 단계의 경우 metadata를 entities에 추가
+                        if current_stage_id == "security_medium_registration":
+                            if "transfer_limit_once" in choice_metadata:
+                                entities["transfer_limit_once"] = choice_metadata["transfer_limit_once"]
+                            if "transfer_limit_daily" in choice_metadata:
+                                entities["transfer_limit_daily"] = choice_metadata["transfer_limit_daily"]
+                            print(f"🎯 [EXACT_MATCH] Added transfer limits to entities: {entities}")
+                        
+                        # card_selection 단계의 경우 metadata를 entities에 추가
+                        elif current_stage_id == "card_selection":
+                            if "receipt_method" in choice_metadata:
+                                entities["card_receipt_method"] = choice_metadata["receipt_method"]
+                            if "transit_enabled" in choice_metadata:
+                                entities["transit_function"] = choice_metadata["transit_enabled"]
+                            print(f"🎯 [EXACT_MATCH] Added card metadata to entities: {entities}")
+                    
                     # scenario_output 재정의
                     scenario_output = ScenarioAgentOutput(
                         intent=intent,
                         entities=entities,
                         is_scenario_related=True
                     )
+                    
+                    # choice_exact 모드에서는 즉시 entities를 collected_info에 저장
+                    if state.get("input_mode") == "choice_exact":
+                        print(f"🎯 [CHOICE_EXACT] Exact match found. Storing entities immediately: {entities}")
+                        for key, value in entities.items():
+                            if value is not None:
+                                collected_info[key] = value
+                                print(f"✅ [CHOICE_EXACT_STORED] {key}: '{value}'")
                     break
         else:
             # 정확한 매치가 없는 경우에만 원래 scenario_output 사용
