@@ -1043,28 +1043,58 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
             # V3 시나리오: fields_to_collect를 사용하는 경우
             fields_to_collect = current_stage_info.get("fields_to_collect", [])
             if fields_to_collect:
-                for field_key in fields_to_collect:
-                    if field_key not in collected_info:
-                        # choice_groups에서 기본값 찾기
-                        default_value = None
-                        if current_stage_info.get("choice_groups"):
-                            for group in current_stage_info.get("choice_groups", []):
-                                for choice in group.get("choices", []):
-                                    if choice.get("default"):
+                # security_medium_registration 단계 특별 처리
+                if current_stage_id == "security_medium_registration":
+                    # 기본 보안매체 선택
+                    default_choice = None
+                    default_metadata = None
+                    if current_stage_info.get("choice_groups"):
+                        for group in current_stage_info.get("choice_groups", []):
+                            for choice in group.get("choices", []):
+                                if choice.get("default"):
+                                    default_choice = choice.get("value")
+                                    default_metadata = choice.get("metadata", {})
+                                    break
+                            if default_choice:
+                                break
+                    
+                    if default_choice:
+                        # 각 필드별로 적절한 값 설정
+                        for field_key in fields_to_collect:
+                            if field_key not in collected_info:
+                                if field_key == "security_medium":
+                                    collected_info[field_key] = default_choice
+                                    print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: {default_choice}")
+                                elif field_key == "transfer_limit_once" and default_metadata.get("transfer_limit_once"):
+                                    collected_info[field_key] = default_metadata["transfer_limit_once"]
+                                    print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: {default_metadata['transfer_limit_once']}")
+                                elif field_key == "transfer_limit_daily" and default_metadata.get("transfer_limit_daily"):
+                                    collected_info[field_key] = default_metadata["transfer_limit_daily"]
+                                    print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: {default_metadata['transfer_limit_daily']}")
+                else:
+                    # 다른 단계들은 기존 로직 사용
+                    for field_key in fields_to_collect:
+                        if field_key not in collected_info:
+                            # choice_groups에서 기본값 찾기
+                            default_value = None
+                            if current_stage_info.get("choice_groups"):
+                                for group in current_stage_info.get("choice_groups", []):
+                                    for choice in group.get("choices", []):
+                                        if choice.get("default"):
+                                            default_value = choice.get("value")
+                                            break
+                                    if default_value:
+                                        break
+                            # choices에서 기본값 찾기
+                            elif current_stage_info.get("choices"):
+                                for choice in current_stage_info.get("choices", []):
+                                    if isinstance(choice, dict) and choice.get("default"):
                                         default_value = choice.get("value")
                                         break
-                                if default_value:
-                                    break
-                        # choices에서 기본값 찾기
-                        elif current_stage_info.get("choices"):
-                            for choice in current_stage_info.get("choices", []):
-                                if isinstance(choice, dict) and choice.get("default"):
-                                    default_value = choice.get("value")
-                                    break
-                        
-                        if default_value:
-                            collected_info[field_key] = default_value
-                            print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to default: {default_value}")
+                            
+                            if default_value:
+                                collected_info[field_key] = default_value
+                                print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to default: {default_value}")
             
             # 기존 로직: expected_info_key를 사용하는 경우
             expected_info_key = current_stage_info.get("expected_info_key")
