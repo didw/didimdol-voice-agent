@@ -158,7 +158,8 @@ async def run_agent_streaming(
         
         # Check for stage_response_data and send it first
         if final_state and final_state.get("stage_response_data"):
-            yield {"type": "stage_response", "data": final_state["stage_response_data"]}
+            stage_data = final_state["stage_response_data"]
+            yield {"type": "stage_response", "data": stage_data}
         
         # Only stream text if there's no stage_response_data
         elif final_state and final_state.get("final_response_text_for_tts"):

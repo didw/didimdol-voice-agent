@@ -28,6 +28,21 @@ from .scenario_helpers import (
 from ...validators import FIELD_VALIDATORS, get_validator_for_field
 
 
+def get_expected_field_keys(stage_info: Dict[str, Any]) -> List[str]:
+    """
+    V3 시나리오 호환: fields_to_collect 또는 expected_info_key에서 필드 키 추출
+    """
+    # V3 시나리오: fields_to_collect 사용
+    if stage_info.get("fields_to_collect"):
+        return stage_info["fields_to_collect"]
+    
+    # 기존 시나리오: expected_info_key 사용
+    expected_key = stage_info.get("expected_info_key")
+    if expected_key:
+        return [expected_key]
+    
+    return []
+
 async def process_partial_response(
     stage_id: str,
     user_input: str,
@@ -285,7 +300,8 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             exact_choice_match = False
             if current_stage_info.get("choices"):
                 choices = current_stage_info.get("choices", [])
-                expected_field = current_stage_info.get("expected_info_key")
+                expected_field_keys = get_expected_field_keys(current_stage_info)
+                expected_field = expected_field_keys[0] if expected_field_keys else None
                 
                 for choice in choices:
                     choice_value = choice.get("value", "") if isinstance(choice, dict) else str(choice)
@@ -922,6 +938,9 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
         # 스테이지 변경 시 로그
         if next_stage_id != current_stage_id:
             log_node_execution("Stage_Change", f"{current_stage_id} → {next_stage_id}")
+            # Clear action plan to prevent re-routing when stage changes
+            updated_plan = []
+            updated_struct = []
         
         
         # 다음 스테이지의 stage_response_data 생성
@@ -971,11 +990,112 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
     """기존 단일 정보 수집 처리"""
     print(f"🔍 PROCESS_SINGLE_INFO_COLLECTION called for stage: {current_stage_id}")
     
+    # narrative 타입에서 yes/no 응답 처리 (confirm_personal_info, card_password_setting 등)
+    if user_input and current_stage_info.get("response_type") == "narrative":
+        user_lower = user_input.lower().strip()
+        
+        # confirm_personal_info 단계
+        if current_stage_id == "confirm_personal_info":
+            if any(word in user_lower for word in ["네", "예", "응", "어", "그래", "좋아", "맞아", "알겠", "확인"]):
+                collected_info["personal_info_confirmed"] = True
+                print(f"[CONFIRM_PERSONAL_INFO] '네' response -> personal_info_confirmed = True")
+                
+                # display_fields의 개인정보를 collected_info에 병합
+                if current_stage_info.get("display_fields") and isinstance(current_stage_info["display_fields"], dict):
+                    display_fields = current_stage_info["display_fields"]
+                    for field_key, field_value in display_fields.items():
+                        if field_key not in collected_info:  # 기존 값이 없는 경우에만 추가
+                            collected_info[field_key] = field_value
+                    print(f"[CONFIRM_PERSONAL_INFO] Merged display_fields: {list(display_fields.keys())}")
+                    
+            elif any(word in user_lower for word in ["아니", "틀려", "수정", "변경", "다르"]):
+                collected_info["personal_info_confirmed"] = False
+                print(f"[CONFIRM_PERSONAL_INFO] '아니' response -> personal_info_confirmed = False")
+        
+        # card_password_setting 단계
+        elif current_stage_id == "card_password_setting":
+            if any(word in user_lower for word in ["네", "예", "응", "어", "그래", "좋아", "맞아", "알겠", "동일", "같게"]):
+                collected_info["card_password_same_as_account"] = True
+                print(f"[CARD_PASSWORD] '네' response -> card_password_same_as_account = True")
+            elif any(word in user_lower for word in ["아니", "다르게", "따로", "별도"]):
+                collected_info["card_password_same_as_account"] = False
+                print(f"[CARD_PASSWORD] '아니' response -> card_password_same_as_account = False")
+        
+        # additional_services 단계 - multi_select 처리
+        elif current_stage_id == "additional_services":
+            if any(word in user_lower for word in ["네", "예", "응", "어", "그래", "좋아", "맞아", "알겠", "모두", "전부", "다"]):
+                # 모든 서비스 신청
+                collected_info["important_transaction_alert"] = "신청"
+                collected_info["withdrawal_alert"] = "신청"
+                collected_info["overseas_ip_restriction"] = "신청"
+                print(f"[ADDITIONAL_SERVICES] '네' response -> all services = '신청'")
+            elif any(word in user_lower for word in ["아니", "안", "필요없", "괜찮"]):
+                # 모든 서비스 미신청
+                collected_info["important_transaction_alert"] = "미신청"
+                collected_info["withdrawal_alert"] = "미신청"
+                collected_info["overseas_ip_restriction"] = "미신청"
+                print(f"[ADDITIONAL_SERVICES] '아니' response -> all services = '미신청'")
+    
+    # 사용자가 '네' 응답을 한 경우 기본값 처리 (모든 bullet/choice 단계)
+    if user_input and current_stage_info.get("response_type") in ["bullet", "boolean"]:
+        user_lower = user_input.lower().strip()
+        if any(word in user_lower for word in ["네", "예", "응", "어", "그래", "좋아", "맞아", "알겠", "할게"]):
+            # V3 시나리오: fields_to_collect를 사용하는 경우
+            fields_to_collect = current_stage_info.get("fields_to_collect", [])
+            if fields_to_collect:
+                for field_key in fields_to_collect:
+                    if field_key not in collected_info:
+                        # choice_groups에서 기본값 찾기
+                        default_value = None
+                        if current_stage_info.get("choice_groups"):
+                            for group in current_stage_info.get("choice_groups", []):
+                                for choice in group.get("choices", []):
+                                    if choice.get("default"):
+                                        default_value = choice.get("value")
+                                        break
+                                if default_value:
+                                    break
+                        # choices에서 기본값 찾기
+                        elif current_stage_info.get("choices"):
+                            for choice in current_stage_info.get("choices", []):
+                                if isinstance(choice, dict) and choice.get("default"):
+                                    default_value = choice.get("value")
+                                    break
+                        
+                        if default_value:
+                            collected_info[field_key] = default_value
+                            print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to default: {default_value}")
+            
+            # 기존 로직: expected_info_key를 사용하는 경우
+            expected_info_key = current_stage_info.get("expected_info_key")
+            if expected_info_key and expected_info_key not in collected_info:
+                # choice_groups에서 기본값 찾기
+                default_value = None
+                if current_stage_info.get("choice_groups"):
+                    for group in current_stage_info.get("choice_groups", []):
+                        for choice in group.get("choices", []):
+                            if choice.get("default"):
+                                default_value = choice.get("value")
+                                break
+                        if default_value:
+                            break
+                # choices에서 기본값 찾기
+                elif current_stage_info.get("choices"):
+                    for choice in current_stage_info.get("choices", []):
+                        if isinstance(choice, dict) and choice.get("default"):
+                            default_value = choice.get("value")
+                            break
+                
+                if default_value:
+                    collected_info[expected_info_key] = default_value
+                    print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped to default: {default_value}")
+    
     # choice_exact 모드이거나 user_input이 현재 stage의 choice와 정확히 일치하는 경우 특별 처리
     if state.get("input_mode") == "choice_exact" or (user_input and current_stage_info.get("choices")):
         # choices 중에 정확히 일치하는지 확인
         choices = current_stage_info.get("choices", [])
-        expected_field = current_stage_info.get("expected_info_key")
+        expected_field_keys = get_expected_field_keys(current_stage_info)
+        expected_field = expected_field_keys[0] if expected_field_keys else None
         
         for choice in choices:
             choice_value = choice.get("value", "") if isinstance(choice, dict) else str(choice)
@@ -1212,6 +1332,22 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             collected_info[expected_info_key] = "보안카드"
             print(f"🔐 [SECURITY_MEDIUM] Set {expected_info_key} = 보안카드 (user said no)")
     
+    # additional_services 단계에서 "네" 응답 처리
+    if current_stage_id == "additional_services":
+        print(f"[ADDITIONAL_SERVICES] Processing with input: '{user_input}'")
+        
+        service_fields = ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
+        has_specific_selections = any(field in collected_info for field in service_fields)
+        
+        if (not has_specific_selections and user_input and 
+            any(word in user_input for word in ["네", "예", "응", "어", "좋아요", "모두", "전부", "다", "신청", "하겠습니다"])):
+            # 기본값 적용
+            default_values = current_stage_info.get("default_values", {})
+            for field in service_fields:
+                if field in default_values:
+                    collected_info[field] = default_values[field]
+                    print(f"[ADDITIONAL_SERVICES] Set {field} = {default_values[field]}")
+    
     # ask_notification_settings 단계에서 "네" 응답 처리 (Entity Agent 결과가 없는 경우에만)
     if current_stage_id == "ask_notification_settings":
         print(f"🔔 [NOTIFICATION] Processing with input: '{user_input}'")
@@ -1278,19 +1414,143 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
     transitions = current_stage_info.get("transitions", [])
     default_next = current_stage_info.get("default_next_stage_id", "None")
     
+    # V3 시나리오의 next_step 처리
+    if current_stage_info.get("next_step"):
+        next_step = current_stage_info.get("next_step")
+        print(f"[V3_NEXT_STEP] Stage: {current_stage_id}, next_step: {next_step}")
+        # next_step이 dict 타입인 경우 (값에 따른 분기)
+        if isinstance(next_step, dict):
+            # V3 시나리오 호환: fields_to_collect 또는 expected_info_key 사용
+            expected_field_keys = get_expected_field_keys(current_stage_info)
+            main_field_key = expected_field_keys[0] if expected_field_keys else None
+            print(f"[V3_NEXT_STEP] main_field_key: {main_field_key}, collected_info: {collected_info}")
+            
+            # additional_services 특별 처리 - services_selected 값에 따라 분기
+            if current_stage_id == "additional_services":
+                services_selected = collected_info.get("services_selected")
+                print(f"[V3_NEXT_STEP] additional_services branching - services_selected: {services_selected}")
+                if services_selected in ["all", "card_only"]:
+                    next_stage_id = "card_selection"
+                else:
+                    next_stage_id = "completion"
+            # confirm_personal_info 특별 처리 - 중첩된 next_step 구조
+            elif current_stage_id == "confirm_personal_info":
+                personal_info_confirmed = collected_info.get("personal_info_confirmed")
+                services_selected = collected_info.get("services_selected")
+                print(f"[V3_NEXT_STEP] confirm_personal_info - confirmed: {personal_info_confirmed} (type: {type(personal_info_confirmed)}), services: {services_selected}")
+                
+                # boolean 값을 문자열로 변환하여 next_step과 매핑
+                if personal_info_confirmed == True:
+                    confirmed_key = "true"
+                elif personal_info_confirmed == False:
+                    confirmed_key = "false"
+                else:
+                    # 정보가 수집되지 않았으면 현재 스테이지 유지
+                    next_stage_id = current_stage_id
+                    print(f"[V3_NEXT_STEP] No personal_info_confirmed value, staying at {current_stage_id}")
+                    confirmed_key = None
+                
+                if confirmed_key:
+                    print(f"[V3_NEXT_STEP] Using key '{confirmed_key}' for next_step lookup")
+                    if confirmed_key == "true":
+                        # true인 경우 services_selected에 따라 분기
+                        true_next = next_step.get("true", {})
+                        print(f"[V3_NEXT_STEP] true_next structure: {true_next}")
+                        if isinstance(true_next, dict):
+                            next_stage_id = true_next.get(services_selected, true_next.get("all", "security_medium_registration"))
+                            print(f"[V3_NEXT_STEP] Selected next_stage_id: {next_stage_id} for services: {services_selected}")
+                        else:
+                            next_stage_id = true_next
+                    elif confirmed_key == "false":
+                        next_stage_id = next_step.get("false", "customer_info_update")
+                        print(f"[V3_NEXT_STEP] False branch - next_stage_id: {next_stage_id}")
+            elif main_field_key and main_field_key in collected_info:
+                collected_value = collected_info[main_field_key]
+                print(f"[V3_NEXT_STEP] collected_value: {collected_value} for field: {main_field_key}")
+                next_stage_id = next_step.get(collected_value, default_next)
+                print(f"[V3_NEXT_STEP] next_stage_id: {next_stage_id}")
+            else:
+                # 정보가 수집되지 않았으면 현재 스테이지 유지
+                next_stage_id = current_stage_id
+                print(f"[V3_NEXT_STEP] No info collected, staying at {current_stage_id}")
+        else:
+            # next_step이 string인 경우 바로 이동
+            next_stage_id = next_step
+        
+        # V3 시나리오에서 next_step을 사용한 경우 바로 처리하고 반환
+        print(f"[V3_NEXT_STEP] Final next_stage_id: {next_stage_id}")
+        determined_next_stage_id = next_stage_id
+        
+        # 스테이지 변경 시 로그
+        if determined_next_stage_id != current_stage_id:
+            log_node_execution("Stage_Change", f"{current_stage_id} → {determined_next_stage_id}")
+        
+        # 다음 스테이지 정보 가져오기
+        next_stage_info = active_scenario_data.get("stages", {}).get(str(determined_next_stage_id), {})
+        
+        # stage_response_data 생성
+        stage_response_data = None
+        if "response_type" in next_stage_info:
+            stage_response_data = generate_stage_response(next_stage_info, collected_info, active_scenario_data)
+            print(f"🎯 [V3_STAGE_RESPONSE] Generated stage response data for {determined_next_stage_id}")
+        
+        # 응답 프롬프트 준비
+        next_stage_prompt = next_stage_info.get("prompt", "")
+        
+        # Action plan 정리
+        updated_plan = state.get("action_plan", []).copy()
+        updated_struct = state.get("action_plan_struct", []).copy()
+        if updated_plan:
+            updated_plan.pop(0)
+        if updated_struct:
+            updated_struct.pop(0)
+        # Clear action plan when stage changes to prevent re-routing
+        if determined_next_stage_id != current_stage_id:
+            updated_plan = []
+            updated_struct = []
+        
+        # 최종 응답 생성
+        if stage_response_data:
+            update_dict = {
+                "collected_product_info": collected_info,
+                "current_scenario_stage_id": determined_next_stage_id,
+                "stage_response_data": stage_response_data,
+                "is_final_turn_response": True,
+                "action_plan": updated_plan,
+                "action_plan_struct": updated_struct
+            }
+            # bullet 타입인 경우 prompt도 함께 설정
+            if next_stage_info.get("response_type") == "bullet" and next_stage_prompt:
+                update_dict["final_response_text_for_tts"] = next_stage_prompt
+                print(f"🎯 [V3_BULLET_PROMPT] Set final_response_text_for_tts: '{next_stage_prompt[:100]}...'")
+            elif next_stage_prompt:  # 다른 response_type이라도 prompt가 있으면 설정
+                update_dict["final_response_text_for_tts"] = next_stage_prompt
+                print(f"🎯 [V3_PROMPT] Set final_response_text_for_tts: '{next_stage_prompt[:100]}...'")
+            return state.merge_update(update_dict)
+        else:
+            return state.merge_update({
+                "collected_product_info": collected_info,
+                "current_scenario_stage_id": determined_next_stage_id,
+                "final_response_text_for_tts": next_stage_prompt,
+                "is_final_turn_response": True,
+                "action_plan": updated_plan,
+                "action_plan_struct": updated_struct
+            })
+    
     # Case 1: 분기가 없는 경우 (transitions가 없거나 1개)
-    if len(transitions) <= 1:
-        # 필요한 정보가 수집되었는지 확인
-        expected_info_key = current_stage_info.get("expected_info_key")
-        if expected_info_key and expected_info_key not in collected_info:
+    elif len(transitions) <= 1:
+        # 필요한 정보가 수집되었는지 확인 (V3 시나리오 호환)
+        expected_field_keys = get_expected_field_keys(current_stage_info)
+        main_field_key = expected_field_keys[0] if expected_field_keys else None
+        if main_field_key and main_field_key not in collected_info:
             # Boolean 타입 필드에 대한 특별 처리
             if current_stage_info.get("input_type") == "yes_no" and user_input:
                 # 사용자 입력에서 boolean 값 직접 추출
                 user_lower = user_input.lower().strip()
                 if user_lower in ["네", "예", "좋아요", "그래요", "맞아요", "신청", "원해요", "할게요", "하겠어요"]:
-                    collected_info[expected_info_key] = True
+                    collected_info[main_field_key] = True
                 elif user_lower in ["아니요", "아니에요", "안", "필요없", "괜찮", "나중에", "안할", "미신청", "싫어요", "거부"]:
-                    collected_info[expected_info_key] = False
+                    collected_info[main_field_key] = False
             
             # Choice 타입 필드에 대한 특별 처리
             elif current_stage_info.get("input_type") == "choice" and user_input:
@@ -1301,23 +1561,23 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
                 # 정확한 value 매칭 우선
                 for choice in choices:
                     if choice.get("value") == user_input_clean:
-                        collected_info[expected_info_key] = user_input_clean
+                        collected_info[main_field_key] = user_input_clean
                         break
                 else:
                     # value 매칭 실패시 label 매칭 시도
                     for choice in choices:
                         if choice.get("label") == user_input_clean:
-                            collected_info[expected_info_key] = choice.get("value")
+                            collected_info[main_field_key] = choice.get("value")
                             break
                     else:
                         # 부분 문자열 매칭 시도
                         for choice in choices:
                             if user_input_clean in choice.get("value", "") or user_input_clean in choice.get("label", ""):
-                                collected_info[expected_info_key] = choice.get("value")
+                                collected_info[main_field_key] = choice.get("value")
                                 break
             
             # 여전히 정보가 수집되지 않았으면 현재 스테이지 유지
-            if expected_info_key not in collected_info:
+            if main_field_key not in collected_info:
                 next_stage_id = current_stage_id
             else:
                 # 정보가 수집되었으면 다음 단계로 진행
@@ -1437,6 +1697,11 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
     updated_struct = state.get("action_plan_struct", []).copy()
     if updated_struct:
         updated_struct.pop(0)
+    
+    # Clear action plan when stage changes to prevent re-routing
+    if determined_next_stage_id != current_stage_id:
+        updated_plan = []
+        updated_struct = []
     
     # END_SCENARIO에 도달한 경우 end_conversation을 action_plan에 추가
     if str(determined_next_stage_id).startswith("END_SCENARIO"):
@@ -1881,22 +2146,58 @@ def _is_info_modification_request(user_input: str, collected_info: Dict[str, Any
     return False
 
 
+def get_default_choice_display(stage_info: Dict[str, Any]) -> str:
+    """
+    스테이지 정보에서 기본 선택지의 display 텍스트를 반환
+    choice_groups 또는 choices에서 default=true인 항목의 display 값을 찾음
+    """
+    # choice_groups에서 찾기
+    if stage_info.get("choice_groups"):
+        for group in stage_info["choice_groups"]:
+            for choice in group.get("choices", []):
+                if choice.get("default"):
+                    return choice.get("display", "")
+    
+    # choices에서 찾기
+    if stage_info.get("choices"):
+        for choice in stage_info["choices"]:
+            if isinstance(choice, dict) and choice.get("default"):
+                return choice.get("display", "")
+    
+    return ""
+
+
 def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str, Any], scenario_data: Dict = None) -> Dict[str, Any]:
     """단계별 응답 유형에 맞는 데이터 생성"""
     response_type = stage_info.get("response_type", "narrative")
-    prompt = stage_info.get("prompt", "")
+    
+    # dynamic_prompt 처리 우선 (V3 시나리오)
+    if stage_info.get("dynamic_prompt"):
+        default_choice = get_default_choice_display(stage_info)
+        prompt = stage_info["dynamic_prompt"].replace("{default_choice}", default_choice)
+        print(f"🎯 [DYNAMIC_PROMPT] Used dynamic_prompt with default_choice: '{default_choice}'")
+    else:
+        prompt = stage_info.get("prompt", "")
     
     
     
     # display_fields가 있는 경우 처리 (bullet 타입)
     if stage_info.get("display_fields"):
-        prompt = format_prompt_with_fields(prompt, collected_info, stage_info["display_fields"], scenario_data)
+        # V3 시나리오: display_fields가 dict인 경우 (실제 값이 포함됨)
+        if isinstance(stage_info["display_fields"], dict):
+            # display_fields의 값들을 collected_info에 기본값으로 추가
+            display_values = stage_info["display_fields"]
+            merged_info = {**display_values, **collected_info}  # collected_info가 우선
+            prompt = format_prompt_with_fields(prompt, merged_info, list(display_values.keys()), scenario_data)
+        else:
+            # 기존 방식: display_fields가 list인 경우
+            prompt = format_prompt_with_fields(prompt, collected_info, stage_info["display_fields"], scenario_data)
     
     # 템플릿 변수 치환
     prompt = replace_template_variables(prompt, collected_info)
     
     response_data = {
-        "stage_id": stage_info.get("id"),
+        "stage_id": stage_info.get("stage_id"),
         "response_type": response_type,
         "prompt": prompt,
         "skippable": stage_info.get("skippable", False)
@@ -1916,6 +2217,17 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
     # 수정 가능한 필드 정보
     if stage_info.get("modifiable_fields"):
         response_data["modifiable_fields"] = stage_info["modifiable_fields"]
+    
+    # display_fields 정보 추가 (V3 시나리오)
+    if stage_info.get("display_fields"):
+        if isinstance(stage_info["display_fields"], dict):
+            # V3: display_fields가 실제 값을 포함하는 경우
+            display_values = stage_info["display_fields"]
+            merged_values = {**display_values, **collected_info}  # collected_info가 우선
+            response_data["display_fields"] = merged_values
+        else:
+            # 기존: display_fields가 필드명 리스트인 경우
+            response_data["display_fields"] = stage_info["display_fields"]
     
     return response_data
 

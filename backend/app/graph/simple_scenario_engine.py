@@ -19,7 +19,7 @@ class SimpleScenarioEngine:
     
     def _load_scenario(self) -> Dict[str, Any]:
         """간소화된 시나리오 JSON 로드"""
-        scenario_path = Path(__file__).parent.parent / "data" / "scenarios" / "deposit_account_scenario_v2.json"
+        scenario_path = Path(__file__).parent.parent / "data" / "scenarios" / "deposit_account_scenario_v3.json"
         
         try:
             with open(scenario_path, 'r', encoding='utf-8') as f:

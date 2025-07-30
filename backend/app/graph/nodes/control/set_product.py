@@ -8,6 +8,7 @@ from ...state import AgentState
 from ...models import ActionModel
 from ...utils import ALL_SCENARIOS_DATA
 from ...logger import node_log as log_node_execution, log_execution_time
+from ..workers.scenario_logic import generate_stage_response, get_default_choice_display
 
 
 @log_execution_time
@@ -60,7 +61,14 @@ async def set_product_type_node(state: AgentState) -> AgentState:
     log_node_execution("Set_Product", f"loaded scenario: {active_scenario.get('scenario_name')}")
 
     initial_stage_id = active_scenario.get("initial_stage_id")
-    response_text = active_scenario.get("stages", {}).get(str(initial_stage_id), {}).get("prompt", "How can I help?")
+    
+    # dynamic_prompt 처리
+    initial_stage_info = active_scenario.get("stages", {}).get(initial_stage_id, {})
+    if initial_stage_info.get("dynamic_prompt"):
+        default_choice = get_default_choice_display(initial_stage_info)
+        response_text = initial_stage_info["dynamic_prompt"].replace("{default_choice}", default_choice)
+    else:
+        response_text = initial_stage_info.get("prompt", "무엇을 도와드릴까요?")
 
     log_node_execution("Set_Product", f"response: '{response_text[:70]}...'")
 
@@ -87,6 +95,11 @@ async def set_product_type_node(state: AgentState) -> AgentState:
     # 시나리오 연속성을 위한 상태 설정
     log_node_execution("Set_Product", f"scenario ready: {active_scenario.get('scenario_name')}")
     
+    # stage_response_data 생성 (v3 시나리오용)
+    stage_response_data = None
+    if initial_stage_info.get("response_type"):
+        stage_response_data = generate_stage_response(initial_stage_info, merged_info, active_scenario)
+    
     state_updates = {
         "current_product_type": new_product_type,
         "active_scenario_data": active_scenario,
@@ -98,7 +111,9 @@ async def set_product_type_node(state: AgentState) -> AgentState:
         "is_final_turn_response": True,
         # 시나리오 연속성 관리
         "scenario_ready_for_continuation": True,
-        "scenario_awaiting_user_response": True
+        "scenario_awaiting_user_response": True,
+        # v3 시나리오용 stage_response_data
+        "stage_response_data": stage_response_data
     }
     
     updated_state = state.merge_update(state_updates)

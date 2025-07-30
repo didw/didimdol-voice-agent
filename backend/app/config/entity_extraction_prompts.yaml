@@ -503,3 +503,198 @@ card_usage_alert:
       output: true
     - input: "알림은 필요없어요"
       output: false
+
+# deposit_account_scenario_v3에 맞춘 추가 필드들
+
+services_selected:
+  prompt: |
+    사용자가 선택한 서비스를 추출하세요.
+    
+    선택지:
+    - "all": 모두 가입 (모바일 앱 + 체크카드)
+    - "mobile_only": 모바일 앱만
+    - "card_only": 체크카드만
+    - "account_only": 입출금 계좌만
+    
+    판단 기준:
+    - 모두/전부/다 → "all"
+    - 모바일/앱 → "mobile_only"
+    - 체크카드/카드 → "card_only"
+    - 계좌만/입출금만 → "account_only"
+    
+    사용자 발화: "{user_input}"
+    
+    선택된 서비스 (위 선택지 중 하나 또는 null):
+  examples:
+    - input: "모두 가입할게요"
+      output: "all"
+    - input: "모바일 앱만 할게요"
+      output: "mobile_only"
+    - input: "체크카드만 발급해주세요"
+      output: "card_only"
+    - input: "입출금 계좌만 만들어주세요"
+      output: "account_only"
+
+personal_info_confirmed:
+  prompt: |
+    사용자가 개인정보 확인에 동의했는지 판단하세요.
+    
+    판단 기준:
+    - 긍정: 네, 맞아요, 맞습니다, 확인했어요
+    - 부정: 아니요, 틀려요, 수정할게요, 변경필요
+    
+    사용자 발화: "{user_input}"
+    
+    확인 여부 (true/false/null):
+  examples:
+    - input: "네, 맞습니다"
+      output: true
+    - input: "아니요, 수정이 필요해요"
+      output: false
+
+security_medium_selected:
+  prompt: |
+    사용자가 선택한 보안매체를 추출하세요.
+    
+    선택지:
+    - "futuretech_19284019384": 미래테크 19284019384
+    - "comas_rsa_12930295": 코마스(RSA) 12930295
+    - "security_card": 보안카드
+    - "shinhan_otp": 신한OTP
+    
+    판단 기준:
+    - 미래테크 → "futuretech_19284019384"
+    - 코마스/RSA → "comas_rsa_12930295"
+    - 보안카드 → "security_card"
+    - 신한OTP/OTP → "shinhan_otp"
+    
+    사용자 발화: "{user_input}"
+    
+    선택된 보안매체 (위 선택지 중 하나 또는 null):
+  examples:
+    - input: "미래테크로 할게요"
+      output: "futuretech_19284019384"
+    - input: "코마스 RSA로 등록해주세요"
+      output: "comas_rsa_12930295"
+    - input: "보안카드 발급받을게요"
+      output: "security_card"
+
+important_transaction_alert:
+  prompt: |
+    사용자가 중요거래 알림을 신청하는지 판단하세요.
+    
+    판단 기준:
+    - 긍정: 신청, 네, 할게요
+    - 부정: 미신청, 아니요, 안할게요
+    
+    사용자 발화: "{user_input}"
+    
+    신청 여부 ("신청"/"미신청"/null):
+  examples:
+    - input: "중요거래 알림 신청할게요"
+      output: "신청"
+    - input: "필요없어요"
+      output: "미신청"
+
+withdrawal_alert:
+  prompt: |
+    사용자가 출금 알림을 신청하는지 판단하세요.
+    
+    판단 기준:
+    - 긍정: 신청, 네, 할게요
+    - 부정: 미신청, 아니요, 안할게요
+    
+    사용자 발화: "{user_input}"
+    
+    신청 여부 ("신청"/"미신청"/null):
+  examples:
+    - input: "출금 알림도 신청해주세요"
+      output: "신청"
+    - input: "출금 알림은 안할게요"
+      output: "미신청"
+
+overseas_ip_restriction:
+  prompt: |
+    사용자가 해외 IP 이체 제한을 신청하는지 판단하세요.
+    
+    판단 기준:
+    - 긍정: 신청, 네, 할게요
+    - 부정: 미신청, 아니요, 안할게요
+    
+    사용자 발화: "{user_input}"
+    
+    신청 여부 ("신청"/"미신청"/null):
+  examples:
+    - input: "해외 IP 제한도 걸어주세요"
+      output: "신청"
+    - input: "해외 IP 제한은 필요없어요"
+      output: "미신청"
+
+card_selection:
+  prompt: |
+    사용자가 선택한 체크카드를 추출하세요.
+    
+    선택지:
+    - "sline_transit": S-Line 체크카드 (후불교통)
+    - "sline_regular": S-Line 체크카드 (일반)
+    - "deepdream_transit": 신한 Deep Dream 체크카드 (후불교통)
+    - "deepdream_regular": 신한 Deep Dream 체크카드 (일반)
+    - "heyyoung_regular": 신한카드 Hey Young 체크카드 (일반)
+    
+    판단 기준:
+    - S-Line + 후불교통 → "sline_transit"
+    - S-Line + 일반 → "sline_regular"
+    - Deep Dream + 후불교통 → "deepdream_transit"
+    - Deep Dream + 일반 → "deepdream_regular"
+    - Hey Young → "heyyoung_regular"
+    
+    사용자 발화: "{user_input}"
+    
+    선택된 카드 (위 선택지 중 하나 또는 null):
+  examples:
+    - input: "S-Line 후불교통 카드로 할게요"
+      output: "sline_transit"
+    - input: "Deep Dream 일반 카드로 주세요"
+      output: "deepdream_regular"
+
+statement_delivery_method:
+  prompt: |
+    사용자가 선택한 명세서 수령 방법을 추출하세요.
+    
+    선택지:
+    - "mobile": 휴대폰
+    - "email": 이메일
+    - "website": 홈페이지
+    
+    판단 기준:
+    - 휴대폰/문자 → "mobile"
+    - 이메일/메일 → "email"
+    - 홈페이지/웹사이트 → "website"
+    
+    사용자 발화: "{user_input}"
+    
+    수령 방법 (위 선택지 중 하나 또는 null):
+  examples:
+    - input: "휴대폰으로 받을게요"
+      output: "mobile"
+    - input: "이메일로 보내주세요"
+      output: "email"
+    - input: "홈페이지에서 볼게요"
+      output: "website"
+
+card_password_same_as_account:
+  prompt: |
+    사용자가 카드 비밀번호를 계좌 비밀번호와 동일하게 설정하려는지 판단하세요.
+    
+    판단 기준:
+    - 긍정: 네, 같게, 동일하게
+    - 부정: 아니요, 다르게, 따로
+    
+    사용자 발화: "{user_input}"
+    
+    동일 설정 여부 (true/false/null):
+  examples:
+    - input: "계좌 비밀번호랑 같게 해주세요"
+      output: true
+    - input: "다른 비밀번호로 설정할게요"
+      output: false

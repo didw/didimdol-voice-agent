@@ -298,20 +298,52 @@ export const useChatStore = defineStore("chat", {
               this.addMessage("ai", `경고: ${data.message}`);
               break;
             case "stage_response":
+              // DEBUG: Log raw stage response data
+              console.log('🔍 RAW STAGE RESPONSE DATA:', data);
+              console.log('🔍 DATA.DATA:', data.data);
+              console.log('🔍 DATA.CHOICES:', data.choices);
+              console.log('🔍 DATA.DATA.CHOICES:', data.data?.choices);
+              console.log('🔍 DATA.CHOICEGROUPS:', data.choiceGroups);
+              console.log('🔍 DATA.DATA.CHOICEGROUPS:', data.data?.choiceGroups);
+              
+              // Check which one has the actual choices
+              const actualChoices = data.choices || data.data?.choices;
+              if (actualChoices && actualChoices.length > 0) {
+                console.log('🔍 ACTUAL CHOICES:', actualChoices);
+                console.log('🔍 FIRST CHOICE:', actualChoices[0]);
+                console.log('🔍 CHOICE KEYS:', Object.keys(actualChoices[0]));
+              }
+              
               // Stage response를 현재 상태에 저장하고 메시지로도 추가
-              this.currentStageResponse = data.stageId ? {
+              // Handle both data.field and data.data.field structures
+              const stageData = data.data || data;
+              console.log('🔍 STAGE DATA AFTER EXTRACTION:', stageData);
+              console.log('🔍 STAGEDATA.CHOICEGROUPS:', stageData.choiceGroups);
+              console.log('🔍 STAGEDATA.CHOICE_GROUPS:', stageData.choice_groups);
+              
+              this.currentStageResponse = stageData.stage_id || stageData.stageId ? {
                 type: 'stage_response',
-                stageId: data.stageId,
-                responseType: data.responseType,
-                prompt: data.prompt,
-                choices: data.choices,
-                skippable: data.skippable || false,
-                modifiableFields: data.modifiableFields,
-                choiceGroups: data.choiceGroups,
-                defaultChoice: data.defaultChoice
+                stageId: stageData.stage_id || stageData.stageId,
+                responseType: stageData.response_type || stageData.responseType,
+                prompt: stageData.prompt,
+                choices: stageData.choices,
+                skippable: stageData.skippable || false,
+                modifiableFields: stageData.modifiable_fields || stageData.modifiableFields,
+                choiceGroups: stageData.choiceGroups || stageData.choice_groups,
+                defaultChoice: stageData.default_choice || stageData.defaultChoice
               } : null;
               
+              console.log('🔍 FINAL CURRENT STAGE RESPONSE:', this.currentStageResponse);
+              
               // AI 메시지로 추가 (StageResponse 컴포넌트가 렌더링하도록)
+              // 메시지에 추가하기 전에 stageResponse 객체 확인
+              console.log('🔍 ABOUT TO ADD MESSAGE WITH STAGE RESPONSE:', {
+                currentStageResponse: this.currentStageResponse,
+                hasChoiceGroups: !!this.currentStageResponse?.choiceGroups,
+                choiceGroupsLength: this.currentStageResponse?.choiceGroups?.length,
+                choiceGroups: this.currentStageResponse?.choiceGroups
+              });
+              
               this.messages.push({
                 id: uuidv4(),
                 sender: 'ai',

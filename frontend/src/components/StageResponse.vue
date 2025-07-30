@@ -26,9 +26,9 @@
               @click="selectChoice(choice?.value || choice?.label || '')"
               class="choice-button"
               :class="{ 'selected': isSelectedChoice(choice) }"
-              :aria-label="`선택: ${choice?.label || choice?.value || '선택지'}`"
+              :aria-label="`선택: ${choice?.display || choice?.label || choice?.value || '선택지'}`"
             >
-              {{ choice?.label || choice?.value || `선택지 ${index + 1}` }}
+              {{ choice?.display || choice?.label || choice?.value || `선택지 ${index + 1}` }}
             </button>
           </div>
         </div>
@@ -42,9 +42,9 @@
           @click="selectChoice(choice?.value || choice?.label || '')"
           class="choice-button"
           :class="{ 'selected': isSelectedChoice(choice) }"
-          :aria-label="`선택: ${choice?.label || choice?.value || '선택지'}`"
+          :aria-label="`선택: ${choice?.display || choice?.label || choice?.value || '선택지'}`"
         >
-          {{ choice?.label || choice?.value || `선택지 ${index + 1}` }}
+          {{ choice?.display || choice?.label || choice?.value || `선택지 ${index + 1}` }}
         </button>
       </div>
     </div>
@@ -83,8 +83,8 @@
       </button>
     </div>
     
-    <!-- 수정 가능한 필드 표시 (customer_info_check 단계 제외) -->
-    <div v-if="responseData.modifiableFields && responseData.modifiableFields.length > 0 && responseData.stageId !== 'customer_info_check'" class="modifiable-info">
+    <!-- 수정 가능한 필드 표시 (특정 단계 제외) -->
+    <div v-if="responseData.modifiableFields && responseData.modifiableFields.length > 0 && !['customer_info_check', 'confirm_personal_info', 'security_medium_registration'].includes(responseData.stageId)" class="modifiable-info">
       <small>수정하실 항목이 있으시면 말씀해주세요.</small>
     </div>
   </div>
@@ -106,13 +106,42 @@ const chatStore = useChatStore();
 // CRITICAL DEBUG: Log all stage responses
 watch(() => props.responseData, (newData) => {
   if (newData) {
-    console.log('🔍 STAGE RESPONSE RECEIVED:');
+    console.log('🔍 STAGE RESPONSE COMPONENT RECEIVED DATA:');
+    console.log('  Full responseData:', JSON.stringify(newData, null, 2));
     console.log('  stageId:', newData.stageId);
     console.log('  responseType:', newData.responseType);
     console.log('  choices:', newData.choices);
     console.log('  choices.length:', newData.choices?.length);
-    console.log('  full data:', newData);
+    console.log('  choiceGroups:', newData.choiceGroups);
+    console.log('  choiceGroups.length:', newData.choiceGroups?.length);
+    console.log('  typeof choiceGroups:', typeof newData.choiceGroups);
+    console.log('  Array.isArray(choiceGroups):', Array.isArray(newData.choiceGroups));
     
+    // 각 choice의 구조를 자세히 확인
+    if (newData.choices && newData.choices.length > 0) {
+      newData.choices.forEach((choice, index) => {
+        console.log(`🔍 Choice ${index}:`, choice);
+        console.log(`🔍 Choice ${index} keys:`, Object.keys(choice));
+        console.log(`🔍 Choice ${index} display:`, choice.display);
+        console.log(`🔍 Choice ${index} value:`, choice.value);
+      });
+    }
+    
+    // choiceGroups가 있는 경우 구조 확인
+    if (newData.choiceGroups && newData.choiceGroups.length > 0) {
+      newData.choiceGroups.forEach((group, groupIndex) => {
+        console.log(`🔍 Group ${groupIndex}:`, group);
+        console.log(`🔍 Group ${groupIndex} title:`, group.title);
+        console.log(`🔍 Group ${groupIndex} items:`, group.items);
+        if (group.items && group.items.length > 0) {
+          group.items.forEach((item, itemIndex) => {
+            console.log(`🔍 Group ${groupIndex} Item ${itemIndex}:`, item);
+          });
+        }
+      });
+    }
+    
+    console.log('  full data:', newData);
   }
 }, { immediate: true });
 
@@ -121,15 +150,29 @@ const selectedChoice = ref<string>('');
 
 // 선택된 선택지 확인
 const isSelectedChoice = (choice: Choice) => {
-  const value = choice?.value || choice?.label || '';
+  const value = choice?.value || choice?.display || choice?.label || '';
   return selectedChoice.value === value;
 };
 
 // 기본 선택값 설정 (bullet 타입)
 watch(() => props.responseData, (newData) => {
-  if (newData && newData.responseType === 'bullet' && newData.defaultChoice) {
-    selectedChoice.value = newData.defaultChoice;
-    console.log('🎯 Default choice set:', newData.defaultChoice);
+  if (newData && newData.responseType === 'bullet') {
+    let defaultChoice = newData.defaultChoice;
+    
+    // defaultChoice가 없으면 choices에서 default: true인 항목 찾기
+    if (!defaultChoice && newData.choices) {
+      for (const choice of newData.choices) {
+        if (choice.default) {
+          defaultChoice = choice.value || choice.display || choice.label;
+          break;
+        }
+      }
+    }
+    
+    if (defaultChoice) {
+      selectedChoice.value = defaultChoice;
+      console.log('🎯 Default choice set:', defaultChoice);
+    }
   }
 }, { immediate: true });
 

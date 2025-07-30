@@ -51,9 +51,9 @@ async def handle_agent_output_chunk(
                     "skippable": stage_data.get("skippable", False),
                     "modifiableFields": stage_data.get("modifiable_fields")
                 }
-                # choice_groups가 있는 경우 추가
-                if stage_data.get("choice_groups"):
-                    websocket_data["choiceGroups"] = stage_data.get("choice_groups")
+                # choiceGroups가 있는 경우 추가
+                if stage_data.get("choiceGroups"):
+                    websocket_data["choiceGroups"] = stage_data.get("choiceGroups")
                 # default_choice가 있는 경우 추가
                 if stage_data.get("default_choice"):
                     websocket_data["defaultChoice"] = stage_data.get("default_choice")
