@@ -121,16 +121,14 @@
     "additional_services": {
       "stage_id": "additional_services",
       "stage_name": "추가 정보 선택",
-      "response_type": "narrative",
-      "prompt": "추가 신청 정보를 확인할게요. 중요거래 알림과 출금 알림, 해외 IP 이체 제한을 모두 신청해 드릴까요?",
+      "response_type": "boolean",
+      "prompt": "중요거래 알림과 출금 알림, 해외 IP 이체 제한을 모두 신청해드릴까요?",
+      "choices": [
+        {"key": "important_transaction_alert", "label": "중요거래 알림", "default": true},
+        {"key": "withdrawal_alert", "label": "출금내역 알림", "default": true},
+        {"key": "overseas_ip_restriction", "label": "해외IP 제한", "default": true}
+      ],
       "fields_to_collect": ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"],
-      "multi_select": true,
-      "default_values": {
-        "important_transaction_alert": "신청",
-        "withdrawal_alert": "신청",
-        "overseas_ip_restriction": "신청"
-      },
-      "extraction_prompt": "추가 서비스 신청 여부를 추출하세요:\\n- \"모두\", \"다\", \"전부\" → 모든 서비스 \"신청\"\\n- \"안해\", \"필요없어\" → 모든 서비스 \"미신청\"\\n- 개별 서비스 언급 시 해당 서비스만 추출",
       "next_step": {
         "all": "card_selection",
         "mobile_only": "completion"
@@ -291,9 +289,9 @@
       "group_name": "추가 정보 선택",
       "stage_ids": ["additional_services"],
       "fields": [
-        {"field_id": "important_transaction_alert", "field_name": "중요거래 통보", "field_type": "select", "options": ["신청", "미신청"]},
-        {"field_id": "withdrawal_alert", "field_name": "출금내역 통보", "field_type": "select", "options": ["신청", "미신청"]},
-        {"field_id": "overseas_ip_restriction", "field_name": "해외IP이체 제한", "field_type": "select", "options": ["신청", "미신청"]}
+        {"field_id": "important_transaction_alert", "field_name": "중요거래 통보", "field_type": "boolean"},
+        {"field_id": "withdrawal_alert", "field_name": "출금내역 통보", "field_type": "boolean"},
+        {"field_id": "overseas_ip_restriction", "field_name": "해외IP이체 제한", "field_type": "boolean"}
       ]
     },
     {
@@ -362,28 +360,25 @@
     {
       "key": "important_transaction_alert",
       "display_name": "중요거래 알림",
-      "type": "string",
+      "type": "boolean",
       "required": true,
       "stage": "additional_services",
-      "valid_values": ["신청", "미신청"],
       "extraction_prompt": "중요거래 알림 신청 여부를 추출하세요"
     },
     {
       "key": "withdrawal_alert",
       "display_name": "출금 알림",
-      "type": "string",
+      "type": "boolean",
       "required": true,
       "stage": "additional_services",
-      "valid_values": ["신청", "미신청"],
       "extraction_prompt": "출금 알림 신청 여부를 추출하세요"
     },
     {
       "key": "overseas_ip_restriction",
       "display_name": "해외 IP 이체 제한",
-      "type": "string",
+      "type": "boolean",
       "required": true,
       "stage": "additional_services",
-      "valid_values": ["신청", "미신청"],
       "extraction_prompt": "해외 IP 이체 제한 신청 여부를 추출하세요"
     },
     {
