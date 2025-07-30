@@ -169,6 +169,19 @@ watch(() => props.responseData, (newData) => {
       }
     }
     
+    // choices에서 못찾으면 choiceGroups에서 찾기
+    if (!defaultChoice && newData.choiceGroups) {
+      for (const group of newData.choiceGroups) {
+        for (const item of (group.items || [])) {
+          if (item.default) {
+            defaultChoice = item.value || item.display || item.label;
+            break;
+          }
+        }
+        if (defaultChoice) break;
+      }
+    }
+    
     if (defaultChoice) {
       selectedChoice.value = defaultChoice;
       console.log('🎯 Default choice set:', defaultChoice);

@@ -2343,6 +2343,22 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
             
             response_data["choice_groups"] = choice_groups
             response_data["choiceGroups"] = choice_groups  # camelCase for frontend compatibility
+            
+            # choice_groups에서 default choice 찾아서 top-level에 설정
+            default_choice_value = None
+            for group in choice_groups:
+                for item in group.get("items", []):
+                    if item.get("default"):
+                        default_choice_value = item.get("value")
+                        break
+                if default_choice_value:
+                    break
+            
+            if default_choice_value:
+                response_data["default_choice"] = default_choice_value
+                response_data["defaultChoice"] = default_choice_value  # camelCase for frontend compatibility
+                print(f"🎯 [CHOICE_GROUPS] Set default choice from choice_groups: {default_choice_value}")
+            
             print(f"🎯 [CHOICE_GROUPS] Final choice_groups in response_data: {response_data['choice_groups']}")
             print(f"🎯 [CHOICE_GROUPS] Added choiceGroups (camelCase) for frontend compatibility")
             print(f"🎯 [CHOICE_GROUPS] Transformed {len(choice_groups)} groups with {sum(len(g['items']) for g in choice_groups)} total choices for frontend")
