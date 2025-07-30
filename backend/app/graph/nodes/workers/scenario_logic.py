@@ -1071,6 +1071,56 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                                 elif field_key == "transfer_limit_daily" and default_metadata.get("transfer_limit_daily"):
                                     collected_info[field_key] = default_metadata["transfer_limit_daily"]
                                     print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: {default_metadata['transfer_limit_daily']}")
+                
+                # card_selection 단계 특별 처리
+                elif current_stage_id == "card_selection":
+                    # 기본 카드 선택
+                    default_choice = None
+                    default_metadata = None
+                    if current_stage_info.get("choices"):
+                        for choice in current_stage_info.get("choices", []):
+                            if choice.get("default"):
+                                default_choice = choice.get("value")
+                                default_metadata = choice.get("metadata", {})
+                                break
+                    
+                    if default_choice:
+                        # 각 필드별로 적절한 값 설정
+                        for field_key in fields_to_collect:
+                            if field_key not in collected_info:
+                                if field_key == "card_selection":
+                                    collected_info[field_key] = default_choice
+                                    print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: {default_choice}")
+                                elif field_key == "card_receipt_method" and default_metadata.get("receipt_method"):
+                                    collected_info[field_key] = default_metadata["receipt_method"]
+                                    print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: {default_metadata['receipt_method']}")
+                                elif field_key == "transit_function" and "transit_enabled" in default_metadata:
+                                    collected_info[field_key] = default_metadata["transit_enabled"]
+                                    print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: {default_metadata['transit_enabled']}")
+                
+                # statement_delivery 단계 특별 처리
+                elif current_stage_id == "statement_delivery":
+                    # 기본 수령 방법 선택
+                    default_choice = None
+                    if current_stage_info.get("choices"):
+                        for choice in current_stage_info.get("choices", []):
+                            if choice.get("default"):
+                                default_choice = choice.get("value")
+                                break
+                    
+                    # default_values에서 statement_delivery_date 가져오기
+                    default_values = current_stage_info.get("default_values", {})
+                    
+                    if default_choice or default_values:
+                        # 각 필드별로 적절한 값 설정
+                        for field_key in fields_to_collect:
+                            if field_key not in collected_info:
+                                if field_key == "statement_delivery_method" and default_choice:
+                                    collected_info[field_key] = default_choice
+                                    print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: {default_choice}")
+                                elif field_key == "statement_delivery_date" and default_values.get("statement_delivery_date"):
+                                    collected_info[field_key] = default_values["statement_delivery_date"]
+                                    print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: {default_values['statement_delivery_date']}")
                 else:
                     # 다른 단계들은 기존 로직 사용
                     for field_key in fields_to_collect:
