@@ -305,6 +305,9 @@ export const useChatStore = defineStore("chat", {
               console.log('🔍 DATA.DATA.CHOICES:', data.data?.choices);
               console.log('🔍 DATA.CHOICEGROUPS:', data.choiceGroups);
               console.log('🔍 DATA.DATA.CHOICEGROUPS:', data.data?.choiceGroups);
+              console.log('🔍 DATA.DATA.CHOICE_GROUPS:', data.data?.choice_groups);
+              console.log('🔍 DATA.DATA.RESPONSE_TYPE:', data.data?.response_type);
+              console.log('🔍 DATA.DATA.RESPONSETYPE:', data.data?.responseType);
               
               // Check which one has the actual choices
               const actualChoices = data.choices || data.data?.choices;

@@ -1796,12 +1796,21 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
     next_stage_prompt = ""
     stage_response_data = None
     
-    # 현재 스테이지가 사용자 입력 없이 처음 방문이고 bullet/boolean 타입인 경우 stage_response_data 생성
-    if not user_input and determined_next_stage_id == current_stage_id:
+    # 현재 스테이지에 머무는 경우 stage_response_data 생성 (bullet/boolean 타입)
+    if determined_next_stage_id == current_stage_id:
         current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
         if current_stage_info.get("response_type") in ["bullet", "boolean"]:
             stage_response_data = generate_stage_response(current_stage_info, collected_info, active_scenario_data)
-            print(f"🎯 [INITIAL_VISIT] Generated stage response data for current stage {current_stage_id} (type: {current_stage_info.get('response_type')})")
+            print(f"🎯 [STAY_CURRENT_STAGE] Generated stage response data for current stage {current_stage_id} (type: {current_stage_info.get('response_type')})")
+            # 현재 단계에 머무는 경우 prompt도 설정
+            if current_stage_info.get("prompt") or current_stage_info.get("dynamic_prompt"):
+                if current_stage_info.get("dynamic_prompt"):
+                    default_choice = get_default_choice_display(current_stage_info)
+                    current_prompt = current_stage_info["dynamic_prompt"].replace("{default_choice}", default_choice)
+                else:
+                    current_prompt = current_stage_info.get("prompt", "")
+                next_stage_prompt = current_prompt
+                print(f"🎯 [STAY_CURRENT_STAGE] Set prompt for current stage: '{current_prompt[:100]}...')")
     
     # 스테이지별 확인 메시지 추가
     confirmation_msg = ""
@@ -1886,9 +1895,21 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             "action_plan_struct": updated_struct
         }
         
-        # narrative 타입인 경우 prompt도 final_response_text_for_tts에 설정
-        if next_stage_info.get("response_type") == "narrative" and next_stage_prompt:
+        # prompt가 있는 경우 final_response_text_for_tts에 설정 (narrative 및 bullet 타입 모두)
+        if next_stage_prompt:
             update_dict["final_response_text_for_tts"] = next_stage_prompt
+            print(f"🎯 [STAGE_RESPONSE_WITH_TEXT] Set final_response_text_for_tts: '{next_stage_prompt[:100]}...'")
+        # 현재 단계에 머무는 경우의 prompt 처리
+        elif determined_next_stage_id == current_stage_id and stage_response_data:
+            current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
+            if current_stage_info.get("dynamic_prompt"):
+                default_choice = get_default_choice_display(current_stage_info)
+                current_prompt = current_stage_info["dynamic_prompt"].replace("{default_choice}", default_choice)
+                update_dict["final_response_text_for_tts"] = current_prompt
+                print(f"🎯 [CURRENT_STAGE_DYNAMIC_PROMPT] Set final_response_text_for_tts: '{current_prompt[:100]}...'")
+            elif current_stage_info.get("prompt"):
+                update_dict["final_response_text_for_tts"] = current_stage_info.get("prompt")
+                print(f"🎯 [CURRENT_STAGE_PROMPT] Set final_response_text_for_tts: '{current_stage_info.get('prompt')[:100]}...')")
     else:
         update_dict = {
             "collected_product_info": collected_info, 
@@ -2250,6 +2271,11 @@ def get_default_choice_display(stage_info: Dict[str, Any]) -> str:
 def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str, Any], scenario_data: Dict = None) -> Dict[str, Any]:
     """단계별 응답 유형에 맞는 데이터 생성"""
     response_type = stage_info.get("response_type", "narrative")
+    stage_id = stage_info.get("stage_id", "unknown")
+    
+    print(f"🎯 [GENERATE_STAGE_RESPONSE] Stage: {stage_id}, Type: {response_type}")
+    print(f"🎯 [GENERATE_STAGE_RESPONSE] Has choice_groups: {bool(stage_info.get('choice_groups'))}")
+    print(f"🎯 [GENERATE_STAGE_RESPONSE] Has dynamic_prompt: {bool(stage_info.get('dynamic_prompt'))}")
     
     # dynamic_prompt 처리 우선 (V3 시나리오)
     if stage_info.get("dynamic_prompt"):
@@ -2278,7 +2304,9 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
     
     response_data = {
         "stage_id": stage_info.get("stage_id"),
+        "stageId": stage_info.get("stage_id"),  # camelCase for frontend compatibility
         "response_type": response_type,
+        "responseType": response_type,  # camelCase for frontend compatibility  
         "prompt": prompt,
         "skippable": stage_info.get("skippable", False)
     }
@@ -2286,17 +2314,48 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
     # 선택지가 있는 경우
     if response_type in ["bullet", "boolean"]:
         response_data["choices"] = stage_info.get("choices", [])
-        # choice_groups가 있는 경우 추가
+        # choice_groups가 있는 경우 추가 (frontend 형식으로 변환)
         if stage_info.get("choice_groups"):
-            response_data["choice_groups"] = stage_info.get("choice_groups", [])
+            print(f"🎯 [CHOICE_GROUPS] Found choice_groups in stage_info: {stage_info.get('choice_groups')}")
+            choice_groups = []
+            for group in stage_info.get("choice_groups", []):
+                # choices도 frontend 형식으로 변환
+                transformed_choices = []
+                for choice in group.get("choices", []):
+                    transformed_choice = {
+                        "value": choice.get("value", ""),
+                        "label": choice.get("display", choice.get("label", "")),
+                        "display": choice.get("display", choice.get("label", "")),
+                        "default": choice.get("default", False)
+                    }
+                    # metadata가 있으면 포함
+                    if choice.get("metadata"):
+                        transformed_choice["metadata"] = choice.get("metadata")
+                    transformed_choices.append(transformed_choice)
+                    print(f"🎯 [CHOICE_GROUPS] Transformed choice: {transformed_choice}")
+                
+                transformed_group = {
+                    "title": group.get("group_name", ""),
+                    "items": transformed_choices
+                }
+                choice_groups.append(transformed_group)
+                print(f"🎯 [CHOICE_GROUPS] Transformed group: {transformed_group}")
+            
+            response_data["choice_groups"] = choice_groups
+            response_data["choiceGroups"] = choice_groups  # camelCase for frontend compatibility
+            print(f"🎯 [CHOICE_GROUPS] Final choice_groups in response_data: {response_data['choice_groups']}")
+            print(f"🎯 [CHOICE_GROUPS] Added choiceGroups (camelCase) for frontend compatibility")
+            print(f"🎯 [CHOICE_GROUPS] Transformed {len(choice_groups)} groups with {sum(len(g['items']) for g in choice_groups)} total choices for frontend")
         # default_choice가 있는 경우 추가
         if stage_info.get("default_choice"):
             response_data["default_choice"] = stage_info.get("default_choice")
+            response_data["defaultChoice"] = stage_info.get("default_choice")  # camelCase for frontend compatibility
         
     
     # 수정 가능한 필드 정보
     if stage_info.get("modifiable_fields"):
         response_data["modifiable_fields"] = stage_info["modifiable_fields"]
+        response_data["modifiableFields"] = stage_info["modifiable_fields"]  # camelCase for frontend compatibility
     
     # display_fields 정보 추가 (V3 시나리오)
     if stage_info.get("display_fields"):
