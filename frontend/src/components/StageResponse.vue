@@ -35,13 +35,12 @@
       </div>
       
       <!-- 일반 bullet 응답 처리 (choice_groups가 없는 경우) -->
-      <div v-else class="choices">
+      <div v-else :class="['choices', { 'horizontal-cards': responseData.stageId === 'card_selection' }]">
         <button 
           v-for="(choice, index) in (responseData.choices || [])" 
           :key="choice?.value || choice?.label || index"
           @click="selectChoice(choice?.value || choice?.label || '')"
-          class="choice-button"
-          :class="{ 'selected': isSelectedChoice(choice) }"
+          :class="['choice-button', { 'selected': isSelectedChoice(choice), 'card-choice': responseData.stageId === 'card_selection' }]"
           :aria-label="`선택: ${choice?.display || choice?.label || choice?.value || '선택지'}`"
         >
           {{ choice?.display || choice?.label || choice?.value || `선택지 ${index + 1}` }}
@@ -272,6 +271,34 @@ const getBooleanText = (value: boolean) => {
   margin-top: 1rem;
 }
 
+/* 카드 선택 단계 수평 스크롤 */
+.horizontal-cards {
+  flex-direction: row;
+  overflow-x: auto;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+.horizontal-cards::-webkit-scrollbar {
+  height: 8px;
+}
+
+.horizontal-cards::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.horizontal-cards::-webkit-scrollbar-thumb {
+  background: #1976d2;
+  border-radius: 4px;
+}
+
+.horizontal-cards::-webkit-scrollbar-thumb:hover {
+  background: #1565c0;
+}
+
 /* Choice Groups 스타일 */
 .choice-groups {
   margin-top: 1rem;
@@ -326,6 +353,36 @@ const getBooleanText = (value: boolean) => {
 
 .choice-button:active {
   transform: translateY(1px);
+}
+
+/* 카드 선택 버튼 스타일 */
+.card-choice {
+  min-width: 200px;
+  height: 140px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  white-space: pre-line;
+  font-size: 0.9rem;
+  line-height: 1.3;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  background: linear-gradient(135deg, #f7f8fa 0%, #ffffff 100%);
+  border: 2px solid #e0e0e0;
+}
+
+.card-choice:hover {
+  box-shadow: 0 4px 12px rgba(25, 118, 210, 0.2);
+  transform: translateY(-2px);
+  border-color: #1976d2;
+  background: linear-gradient(135deg, #e8f0fe 0%, #f7f8fa 100%);
+}
+
+.card-choice.selected {
+  background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+  box-shadow: 0 4px 16px rgba(25, 118, 210, 0.4);
+  transform: translateY(-2px);
 }
 
 /* Boolean 스타일 */
@@ -448,6 +505,18 @@ const getBooleanText = (value: boolean) => {
   .choice-button {
     font-size: 0.875rem;
     padding: 0.625rem 1rem;
+  }
+  
+  .card-choice {
+    min-width: 160px;
+    height: 120px;
+    font-size: 0.8rem;
+    padding: 0.5rem;
+  }
+  
+  .horizontal-cards {
+    gap: 0.75rem;
+    padding: 0.25rem 0;
   }
   
   .boolean-item {

@@ -143,7 +143,7 @@
       "dynamic_prompt": "이어서 체크카드 발급에 필요한 정보를 확인할게요.\\n지금 바로 수령할 수 있는 {default_choice}로 발급해드릴까요?",
       "choices": [
         {
-          "display": "S-Line\\n체크카드\\n(후불교통)",
+          "display": "S-Line 체크카드 (후불교통)",
           "value": "sline_transit",
           "default": true,
           "metadata": {
@@ -152,7 +152,7 @@
           }
         },
         {
-          "display": "S-Line\\n체크카드\\n(일반)",
+          "display": "S-Line 체크카드 (일반)",
           "value": "sline_regular",
           "metadata": {
             "receipt_method": "즉시발급",
@@ -160,7 +160,7 @@
           }
         },
         {
-          "display": "신한 Deep Dream\\n체크카드\\n(후불교통)",
+          "display": "신한 Deep Dream 체크카드 (후불교통)",
           "value": "deepdream_transit",
           "metadata": {
             "receipt_method": "배송",
@@ -168,7 +168,7 @@
           }
         },
         {
-          "display": "신한 Deep Dream\\n체크카드\\n(일반)",
+          "display": "신한 Deep Dream 체크카드 (일반)",
           "value": "deepdream_regular",
           "metadata": {
             "receipt_method": "배송",
@@ -176,7 +176,7 @@
           }
         },
         {
-          "display": "신한카드 Hey Young\\n체크카드\\n(일반)",
+          "display": "신한카드 Hey Young 체크카드 (일반)",
           "value": "heyyoung_regular",
           "metadata": {
             "receipt_method": "배송",
