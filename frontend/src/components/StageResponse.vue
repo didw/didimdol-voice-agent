@@ -82,6 +82,26 @@
       </button>
     </div>
     
+    <!-- 추가 질문 표시 -->
+    <div v-if="responseData.additionalQuestions && responseData.additionalQuestions.length > 0" class="additional-questions">
+      <div class="additional-questions-header">
+        <span class="plus-icon">+</span>
+        <span class="additional-questions-title">다른 질문도 할 수 있어요.</span>
+      </div>
+      <div class="additional-questions-list">
+        <div 
+          v-for="(question, index) in responseData.additionalQuestions" 
+          :key="index"
+          @click="handleAdditionalQuestion(question)"
+          class="additional-question-item"
+          :aria-label="`추가 질문: ${question}`"
+        >
+          <span class="arrow-icon">→</span>
+          <span class="question-text">{{ question }}</span>
+        </div>
+      </div>
+    </div>
+    
     <!-- 수정 가능한 필드 표시 (특정 단계 제외) -->
     <div v-if="responseData.modifiableFields && responseData.modifiableFields.length > 0 && !['customer_info_check', 'confirm_personal_info', 'security_medium_registration'].includes(responseData.stageId)" class="modifiable-info">
       <small>수정하실 항목이 있으시면 말씀해주세요.</small>
@@ -113,6 +133,8 @@ watch(() => props.responseData, (newData) => {
     console.log('  choices.length:', newData.choices?.length);
     console.log('  choiceGroups:', newData.choiceGroups);
     console.log('  choiceGroups.length:', newData.choiceGroups?.length);
+    console.log('  additionalQuestions:', newData.additionalQuestions);
+    console.log('  additionalQuestions.length:', newData.additionalQuestions?.length);
     console.log('  typeof choiceGroups:', typeof newData.choiceGroups);
     console.log('  Array.isArray(choiceGroups):', Array.isArray(newData.choiceGroups));
     
@@ -241,6 +263,13 @@ const getBooleanText = (value: boolean) => {
   return value 
     ? (displayLabels.boolean_true_alt || displayLabels.boolean_true || '신청') 
     : (displayLabels.boolean_false_alt || displayLabels.boolean_false || '미신청');
+};
+
+// 추가 질문 처리
+const handleAdditionalQuestion = (question: string) => {
+  console.log('🔍 Additional question clicked:', question);
+  // 챗 스토어에 사용자 메시지로 추가
+  chatStore.sendMessage(question);
 };
 </script>
 
@@ -500,6 +529,67 @@ const getBooleanText = (value: boolean) => {
   font-size: 0.875rem;
 }
 
+/* 추가 질문 스타일 */
+.additional-questions {
+  margin-top: 1.5rem;
+  padding: 0;
+}
+
+.additional-questions-header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 0.5rem;
+}
+
+.plus-icon {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #1976d2;
+}
+
+.additional-questions-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #1976d2;
+}
+
+.additional-questions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-left: 1.5rem;
+}
+
+.additional-question-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  font-size: 0.9rem;
+  color: #1565c0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.additional-question-item:hover {
+  color: #0d47a1;
+  transform: translateX(3px);
+}
+
+.arrow-icon {
+  font-size: 0.9rem;
+  color: #1976d2;
+  flex-shrink: 0;
+}
+
+.additional-question-item:hover .arrow-icon {
+  color: #0d47a1;
+}
+
+.question-text {
+  line-height: 1.4;
+}
 
 /* 모바일 반응형 */
 @media (max-width: 640px) {

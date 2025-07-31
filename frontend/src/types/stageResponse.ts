@@ -25,6 +25,7 @@ export interface StageResponseMessage {
   defaultChoice?: string
   skippable: boolean
   modifiableFields?: string[]
+  additionalQuestions?: string[]
 }
 
 export interface UserChoiceMessage {

@@ -57,6 +57,9 @@ async def handle_agent_output_chunk(
                 # default_choice가 있는 경우 추가
                 if stage_data.get("default_choice"):
                     websocket_data["defaultChoice"] = stage_data.get("default_choice")
+                # additionalQuestions가 있는 경우 추가
+                if stage_data.get("additionalQuestions") or stage_data.get("additional_questions"):
+                    websocket_data["additionalQuestions"] = stage_data.get("additionalQuestions") or stage_data.get("additional_questions")
                     
                 await manager.send_json_to_client(session_id, websocket_data)
             return full_ai_response_text, False, None
