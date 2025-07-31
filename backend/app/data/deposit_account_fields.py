@@ -249,10 +249,46 @@ CHOICE_VALUE_DISPLAY_MAPPING = {
     "false": "아니오"
 }
 
+def format_korean_currency(amount: int) -> str:
+    """숫자를 한국어 통화 단위로 변환 (만원/억원 단위)"""
+    if amount >= 100000000:  # 1억 이상
+        if amount % 100000000 == 0:
+            return f"{amount // 100000000}억원"
+        else:
+            awk = amount // 100000000
+            remainder = amount % 100000000
+            if remainder % 10000 == 0:
+                man = remainder // 10000
+                return f"{awk}억{man}만원"
+            else:
+                return f"{amount:,}원"  # 복잡한 경우 기존 방식
+    elif amount >= 10000:  # 1만원 이상
+        if amount % 10000 == 0:
+            return f"{amount // 10000}만원"
+        else:
+            man = amount // 10000
+            remainder = amount % 10000
+            return f"{man}만{remainder:,}원" if remainder > 0 else f"{man}만원"
+    else:  # 1만원 미만
+        return f"{amount:,}원"
+
+
 def get_display_value(field_key: str, value: any) -> str:
     """필드 값을 한글 표시용으로 변환"""
     if value in CHOICE_VALUE_DISPLAY_MAPPING:
         return CHOICE_VALUE_DISPLAY_MAPPING[value]
+    
+    # 이체한도 필드 특별 처리
+    if field_key in ["transfer_limit_once", "transfer_limit_daily"]:
+        try:
+            # 문자열이면 숫자로 변환
+            if isinstance(value, str):
+                numeric_value = int(value) if value.isdigit() else float(value)
+            else:
+                numeric_value = value
+            return format_korean_currency(int(numeric_value))
+        except (ValueError, TypeError):
+            return str(value) if value is not None else ""
     
     # 특별한 필드 처리
     if field_key == "statement_delivery_date":

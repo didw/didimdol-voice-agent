@@ -2680,6 +2680,30 @@ def generate_final_confirmation_prompt(collected_info: Dict[str, Any]) -> str:
     return prompt
 
 
+def format_korean_currency(amount: int) -> str:
+    """숫자를 한국어 통화 단위로 변환 (만원/억원 단위)"""
+    if amount >= 100000000:  # 1억 이상
+        if amount % 100000000 == 0:
+            return f"{amount // 100000000}억원"
+        else:
+            awk = amount // 100000000
+            remainder = amount % 100000000
+            if remainder % 10000 == 0:
+                man = remainder // 10000
+                return f"{awk}억{man}만원"
+            else:
+                return f"{amount:,}원"  # 복잡한 경우 기존 방식
+    elif amount >= 10000:  # 1만원 이상
+        if amount % 10000 == 0:
+            return f"{amount // 10000}만원"
+        else:
+            man = amount // 10000
+            remainder = amount % 10000
+            return f"{man}만{remainder:,}원" if remainder > 0 else f"{man}만원"
+    else:  # 1만원 미만
+        return f"{amount:,}원"
+
+
 def format_field_value(field_key: str, value: Any, field_type: str) -> str:
     """필드 값을 사용자에게 표시할 형태로 포맷팅"""
     if value is None:
@@ -2732,8 +2756,9 @@ def format_field_value(field_key: str, value: Any, field_type: str) -> str:
             else:
                 numeric_value = value
                 
+            # 이체한도 필드는 한국어 통화 형식으로 표시
             if field_key in ["transfer_limit_once", "transfer_limit_daily"]:
-                return f"{numeric_value:,}원"
+                return format_korean_currency(int(numeric_value))
             return str(numeric_value)
         except (ValueError, TypeError):
             # 숫자 변환에 실패하면 문자열로 반환

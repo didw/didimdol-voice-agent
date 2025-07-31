@@ -53,7 +53,7 @@
             <span class="field-display-name">{{ field.displayName }}</span>
             <span class="field-type">{{ field.type }}</span>
             <span class="field-required">{{ field.required ? '✓' : '○' }}</span>
-            <span class="field-value">{{ formatValue(collectedInfo[field.key]) }}</span>
+            <span class="field-value">{{ formatValue(collectedInfo[field.key], field.key) }}</span>
             <span class="field-completed">{{ completionStatus[field.key] ? '✓' : '○' }}</span>
           </div>
         </div>
@@ -156,11 +156,51 @@ const addUpdateHistory = () => {
   }
 }
 
+// 한국어 통화 단위 변환 함수
+const formatKoreanCurrency = (amount: number): string => {
+  if (amount >= 100000000) { // 1억 이상
+    if (amount % 100000000 === 0) {
+      return `${amount / 100000000}억원`
+    } else {
+      const awk = Math.floor(amount / 100000000)
+      const remainder = amount % 100000000
+      if (remainder % 10000 === 0) {
+        const man = remainder / 10000
+        return `${awk}억${man}만원`
+      } else {
+        return `${amount.toLocaleString()}원` // 복잡한 경우 기존 방식
+      }
+    }
+  } else if (amount >= 10000) { // 1만원 이상
+    if (amount % 10000 === 0) {
+      return `${amount / 10000}만원`
+    } else {
+      const man = Math.floor(amount / 10000)
+      const remainder = amount % 10000
+      return remainder > 0 ? `${man}만${remainder.toLocaleString()}원` : `${man}만원`
+    }
+  } else { // 1만원 미만
+    return `${amount.toLocaleString()}원`
+  }
+}
+
 // 값 포맷팅
-const formatValue = (value: any): string => {
+const formatValue = (value: any, fieldKey: string = ''): string => {
   if (value === null || value === undefined) return 'null'
   if (typeof value === 'string' && value === '') return 'empty'
   if (typeof value === 'object') return JSON.stringify(value)
+  
+  // 이체한도 필드는 한국어 통화 형식으로 표시
+  if ((fieldKey === 'transfer_limit_once' || fieldKey === 'transfer_limit_daily') && 
+      (typeof value === 'number' || (typeof value === 'string' && /^\d+$/.test(value)))) {
+    try {
+      const numericValue = typeof value === 'string' ? parseInt(value) : value
+      return formatKoreanCurrency(numericValue)
+    } catch (error) {
+      return String(value)
+    }
+  }
+  
   return String(value)
 }
 
