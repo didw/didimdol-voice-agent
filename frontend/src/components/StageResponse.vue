@@ -23,7 +23,7 @@
             <button 
               v-for="(choice, index) in (group.items || [])" 
               :key="choice?.value || choice?.label || index"
-              @click="selectChoice(choice?.value || choice?.label || '')"
+              @click="selectChoice(choice?.value || choice?.label || '', choice?.display || choice?.label)"
               class="choice-button"
               :class="{ 'selected': isSelectedChoice(choice) }"
               :aria-label="`선택: ${choice?.display || choice?.label || choice?.value || '선택지'}`"
@@ -39,7 +39,7 @@
         <button 
           v-for="(choice, index) in (responseData.choices || [])" 
           :key="choice?.value || choice?.label || index"
-          @click="selectChoice(choice?.value || choice?.label || '')"
+          @click="selectChoice(choice?.value || choice?.label || '', choice?.display || choice?.label)"
           :class="['choice-button', { 'selected': isSelectedChoice(choice), 'card-choice': responseData.stageId === 'card_selection' }]"
           :aria-label="`선택: ${choice?.display || choice?.label || choice?.value || '선택지'}`"
         >
@@ -205,11 +205,12 @@ const hasAnySelection = computed(() => {
   return Object.values(booleanSelections.value).some(v => v === true);
 });
 
-const selectChoice = (value: string) => {
+const selectChoice = (value: string, label?: string) => {
   if (!props.responseData) return;
   selectedChoice.value = value;
-  console.log('🎯 Choice selected:', value);
-  chatStore.sendUserChoice(props.responseData.stageId, value);
+  console.log('🎯 Choice selected:', value, 'Label:', label);
+  // label이 있으면 label을 사용, 없으면 value를 사용
+  chatStore.sendUserChoice(props.responseData.stageId, value, label || value);
 };
 
 const updateBoolean = () => {

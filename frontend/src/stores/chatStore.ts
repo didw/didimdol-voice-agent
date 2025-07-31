@@ -895,7 +895,7 @@ export const useChatStore = defineStore("chat", {
     },
     
     // Stage Response 관련 메서드들
-    sendUserChoice(stageId: string, selectedChoice: string) {
+    sendUserChoice(stageId: string, selectedChoice: string, displayLabel?: string) {
       if (this.webSocket && this.webSocket.readyState === WebSocket.OPEN) {
         this.webSocket.send(
           JSON.stringify({
@@ -904,8 +904,8 @@ export const useChatStore = defineStore("chat", {
             selectedChoice: selectedChoice,
           })
         );
-        // Add user message to show the selection
-        this.addMessage("user", selectedChoice);
+        // Add user message to show the selection - use displayLabel if provided
+        this.addMessage("user", displayLabel || selectedChoice);
         this.isProcessingLLM = true;
       }
     },
