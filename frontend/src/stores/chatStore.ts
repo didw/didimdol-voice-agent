@@ -321,8 +321,11 @@ export const useChatStore = defineStore("chat", {
               // Handle both data.field and data.data.field structures
               const stageData = data.data || data;
               console.log('🔍 STAGE DATA AFTER EXTRACTION:', stageData);
+              console.log('🔍 STAGE DATA JSON:', JSON.stringify(stageData, null, 2));
               console.log('🔍 STAGEDATA.CHOICEGROUPS:', stageData.choiceGroups);
               console.log('🔍 STAGEDATA.CHOICE_GROUPS:', stageData.choice_groups);
+              console.log('🔍 STAGEDATA.ADDITIONALQUESTIONS:', stageData.additionalQuestions);
+              console.log('🔍 STAGEDATA.ADDITIONAL_QUESTIONS:', stageData.additional_questions);
               
               this.currentStageResponse = stageData.stage_id || stageData.stageId ? {
                 type: 'stage_response',
@@ -333,7 +336,8 @@ export const useChatStore = defineStore("chat", {
                 skippable: stageData.skippable || false,
                 modifiableFields: stageData.modifiable_fields || stageData.modifiableFields,
                 choiceGroups: stageData.choiceGroups || stageData.choice_groups,
-                defaultChoice: stageData.default_choice || stageData.defaultChoice
+                defaultChoice: stageData.default_choice || stageData.defaultChoice,
+                additionalQuestions: stageData.additionalQuestions || stageData.additional_questions || []
               } : null;
               
               console.log('🔍 FINAL CURRENT STAGE RESPONSE:', this.currentStageResponse);
@@ -353,7 +357,7 @@ export const useChatStore = defineStore("chat", {
                 text: '', // 텍스트는 비워두고 stageResponse가 렌더링하도록
                 timestamp: new Date(),
                 isStreaming: false,
-                stageResponse: this.currentStageResponse
+                stageResponse: this.currentStageResponse ? { ...this.currentStageResponse } : null
               });
               
               // LLM 처리 완료 상태로 설정

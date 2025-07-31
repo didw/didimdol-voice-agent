@@ -2428,6 +2428,13 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
         "skippable": stage_info.get("skippable", False)
     }
     
+    # additional_questions가 있는 경우 추가
+    if stage_info.get("additional_questions"):
+        questions = stage_info.get("additional_questions", [])
+        response_data["additional_questions"] = questions
+        response_data["additionalQuestions"] = questions  # camelCase for frontend compatibility
+        print(f"🎯 [ADDITIONAL_QUESTIONS] Stage: {stage_info.get('stage_id')}, Added {len(questions)} additional questions: {questions}")
+    
     # 선택지가 있는 경우
     if response_type in ["bullet", "boolean"]:
         response_data["choices"] = stage_info.get("choices", [])
