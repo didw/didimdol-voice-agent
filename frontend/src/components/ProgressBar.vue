@@ -51,7 +51,17 @@ const completedCount = computed(() => {
   return count
 })
 const totalCount = computed(() => {
-  // 백엔드에서 계산한 전체 필수 필드 수 사용
+  // 서비스 선택에 따른 전체 필드 수 계산
+  const serviceFieldCounts = slotFillingStore.serviceFieldCounts
+  const servicesSelected = slotFillingStore.collectedInfo?.services_selected
+  
+  // serviceFieldCounts가 있으면 서비스별 total 사용
+  if (serviceFieldCounts && servicesSelected) {
+    console.log('[ProgressBar] Using service-specific total:', serviceFieldCounts.total)
+    return serviceFieldCounts.total
+  }
+  
+  // 백엔드에서 계산한 전체 필수 필드 수 사용 (fallback)
   let count = slotFillingStore.totalRequiredCount || 0
   
   // card_receive_method가 "즉시수령"일 때 card_delivery_location 제외
@@ -67,7 +77,7 @@ const totalCount = computed(() => {
     }
   }
   
-  return count || 19  // 기본값 19
+  return count || 20  // 기본값 20
 })
 </script>
 

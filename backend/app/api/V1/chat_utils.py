@@ -688,9 +688,21 @@ async def send_slot_filling_update(
                 "total": total_count
             })
         
-        # 전체 진행률
-        total_required = len([f for f in required_fields if f.get("required", True)])
-        total_collected = sum(1 for f in required_fields if f.get("key") in collected_info and f.get("required", True))
+        # 서비스 선택에 따른 진행률 계산
+        services_selected = collected_info.get("services_selected", "all")
+        
+        # deposit_account의 경우 서비스별 필드 수 사용
+        if product_type == "deposit_account":
+            service_field_counts = calculate_required_fields_for_service(services_selected)
+            # 서비스별로 필터링된 필드만 계산
+            filtered_fields = filter_fields_by_service(required_fields, services_selected)
+            total_required = len([f for f in filtered_fields if f.get("required", True)])
+            total_collected = sum(1 for f in filtered_fields if f.get("key") in collected_info and f.get("required", True))
+        else:
+            # 다른 시나리오는 기존 방식
+            total_required = len([f for f in required_fields if f.get("required", True)])
+            total_collected = sum(1 for f in required_fields if f.get("key") in collected_info and f.get("required", True))
+            
         overall_progress = (total_collected / total_required * 100) if total_required > 0 else 0
         
         # 현재 stage에서 표시할 그룹 정보 가져오기 (개선된 버전)
@@ -700,8 +712,23 @@ async def send_slot_filling_update(
         visible_groups = [current_stage_group_id] if current_stage_group_id else []
         current_stage_groups = visible_groups.copy()
         
-        # 이미 수집된 정보가 있는 그룹도 추가
+        # 서비스 선택에 따라 그룹 필터링
+        services_selected = collected_info.get("services_selected", "all")
+        allowed_groups = ["basic_info"]  # 기본정보는 항상 포함
+        
+        if services_selected == "all":
+            allowed_groups.extend(["electronic_banking", "check_card"])
+        elif services_selected == "mobile_only":
+            allowed_groups.append("electronic_banking")
+        elif services_selected == "card_only":
+            allowed_groups.append("check_card")
+        # account_only는 basic_info만
+        
+        # 이미 수집된 정보가 있는 그룹도 추가 (allowed_groups 내에서만)
         for group in field_groups:
+            if group["id"] not in allowed_groups:
+                continue
+                
             group_fields = group.get("fields", [])
             has_collected_data = any(field in collected_info for field in group_fields)
             if has_collected_data and group["id"] not in visible_groups:
@@ -727,9 +754,17 @@ async def send_slot_filling_update(
         # deposit_account의 경우 모든 필드를 포함
         if product_type == "deposit_account" or scenario_id == "deposit_account_concurrent":
             print(f"[{session_id}] ✅ CREATING ENHANCED FIELDS FOR DEPOSIT_ACCOUNT")
+            
+            # services_selected에 따라 필드 필터링
+            services_selected = collected_info.get("services_selected", "all")
+            print(f"[{session_id}] Services selected: {services_selected}")
+            
             # hierarchy_data의 visible_fields가 있으면 사용, 없으면 required_fields 사용
-            fields_to_use = hierarchy_data.get("visible_fields") if hierarchy_data.get("visible_fields") else required_fields
-            print(f"[{session_id}] Fields to use count: {len(fields_to_use)}")
+            all_visible_fields = hierarchy_data.get("visible_fields") if hierarchy_data.get("visible_fields") else required_fields
+            
+            # 서비스 선택에 따라 필드 필터링
+            fields_to_use = filter_fields_by_service(all_visible_fields, services_selected)
+            print(f"[{session_id}] Fields to use count after filtering: {len(fields_to_use)}")
             enhanced_fields = [{
                 "key": f.get("key", ""),
                 "displayName": f.get("display_name", ""),
@@ -806,7 +841,8 @@ async def send_slot_filling_update(
                 "currentStageGroups": current_stage_groups  # 현재 단계의 그룹만
             },
             "displayLabels": scenario_data.get("display_labels", {}),  # 시나리오에서 표시 레이블 추가
-            "choiceDisplayMappings": get_choice_display_mappings(product_type)  # Choice 필드의 한글 표시 매핑
+            "choiceDisplayMappings": get_choice_display_mappings(product_type),  # Choice 필드의 한글 표시 매핑
+            "serviceFieldCounts": calculate_required_fields_for_service(collected_info.get("services_selected", "all"))  # 서비스별 필드 개수
         }
         
         # 디버그 로그 추가
@@ -990,6 +1026,103 @@ def get_choice_display_mappings(product_type: str) -> Dict[str, str]:
         from ...data.deposit_account_fields import CHOICE_VALUE_DISPLAY_MAPPING
         return CHOICE_VALUE_DISPLAY_MAPPING
     return {}
+
+
+def filter_fields_by_service(fields: List[Dict], services_selected: str) -> List[Dict]:
+    """선택한 서비스에 따라 필드 필터링"""
+    if not services_selected or services_selected == "all":
+        # 모든 필드 반환
+        return fields
+    
+    # 항상 포함되는 기본 정보 필드
+    basic_info_keys = ["name", "english_name", "ssn", "phone_number", "email", "address", "work_address"]
+    
+    # 서비스별 포함할 그룹
+    groups_to_include = ["basic_info"]  # 기본정보는 항상 포함
+    
+    if services_selected == "mobile_only":
+        # 모바일 앱만: 기본정보 + 전자금융
+        groups_to_include.append("electronic_banking")
+    elif services_selected == "card_only":
+        # 체크카드만: 기본정보 + 체크카드
+        groups_to_include.append("check_card")
+    elif services_selected == "account_only":
+        # 입출금 계좌만: 기본정보만
+        pass  # 이미 basic_info가 포함됨
+    
+    # 필드 필터링
+    filtered_fields = []
+    for field in fields:
+        field_key = field.get("key", "")
+        field_group = field.get("group", "")
+        
+        # 기본정보 필드이거나 포함할 그룹에 속한 필드만 추가
+        if field_key in basic_info_keys or field_group in groups_to_include:
+            filtered_fields.append(field)
+    
+    return filtered_fields
+
+
+def calculate_required_fields_for_service(services_selected: str) -> Dict[str, int]:
+    """선택한 서비스에 따라 필요한 필드 개수 계산"""
+    # 기본 정보 필드 (모든 서비스에 공통)
+    basic_fields = 7  # name, english_name, ssn, phone_number, email, address, work_address
+    
+    # 서비스별 추가 필드
+    if services_selected == "all":
+        # 모두 가입: 기본정보(7) + 전자금융(6) + 체크카드(7) = 20
+        electronic_banking_fields = 6  # security_medium, transfer_limit_once, transfer_limit_daily, 
+                                      # important_transaction_alert, withdrawal_alert, overseas_ip_restriction
+        check_card_fields = 7  # card_selection, card_receipt_method, transit_function,
+                              # statement_delivery_method, statement_delivery_date, 
+                              # card_usage_alert, card_password_same_as_account
+        total = basic_fields + electronic_banking_fields + check_card_fields
+        return {
+            "total": total,
+            "basic_info": basic_fields,
+            "electronic_banking": electronic_banking_fields,
+            "check_card": check_card_fields
+        }
+    
+    elif services_selected == "mobile_only":
+        # 모바일 앱만: 기본정보(7) + 전자금융(6) = 13
+        electronic_banking_fields = 6
+        total = basic_fields + electronic_banking_fields
+        return {
+            "total": total,
+            "basic_info": basic_fields,
+            "electronic_banking": electronic_banking_fields,
+            "check_card": 0
+        }
+    
+    elif services_selected == "card_only":
+        # 체크카드만: 기본정보(7) + 체크카드(7) = 14
+        check_card_fields = 7
+        total = basic_fields + check_card_fields
+        return {
+            "total": total,
+            "basic_info": basic_fields,
+            "electronic_banking": 0,
+            "check_card": check_card_fields
+        }
+    
+    elif services_selected == "account_only":
+        # 입출금 계좌만: 기본정보(7) = 7
+        total = basic_fields
+        return {
+            "total": total,
+            "basic_info": basic_fields,
+            "electronic_banking": 0,
+            "check_card": 0
+        }
+    
+    # 기본값 (서비스 선택 전)
+    return {
+        "total": 20,  # 전체 필드
+        "basic_info": basic_fields,
+        "electronic_banking": 6,
+        "check_card": 7
+    }
 
 
 def get_info_collection_stages() -> List[str]:

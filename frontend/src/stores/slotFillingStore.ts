@@ -25,6 +25,12 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
   const fieldsByDepth = ref<Record<number, SmartField[]>>({})
   const displayLabels = ref<Record<string, string>>({})
   const choiceDisplayMappings = ref<Record<string, string>>({})
+  const serviceFieldCounts = ref<{
+    total: number
+    basic_info: number
+    electronic_banking: number
+    check_card: number
+  }>({ total: 20, basic_info: 7, electronic_banking: 6, check_card: 7 })
   
   // 성능 최적화 관련 상태
   const lastUpdateHash = ref<string>('')
@@ -286,6 +292,7 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
       currentStage.value = message.currentStage || null
       displayLabels.value = message.displayLabels || {}
       choiceDisplayMappings.value = message.choiceDisplayMappings || {}
+      serviceFieldCounts.value = message.serviceFieldCounts || { total: 20, basic_info: 7, electronic_banking: 6, check_card: 7 }
       
       // Backend에서 계산된 표시 필드 사용 (모든 필드가 이제 depth 정보를 가짐)
       visibleFields.value = message.requiredFields || []
@@ -556,6 +563,7 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
     fieldsByDepth,
     displayLabels,
     choiceDisplayMappings,
+    serviceFieldCounts,
     modificationMode,
     selectedFieldForModification,
     modificationPending,
