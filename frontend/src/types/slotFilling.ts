@@ -52,6 +52,13 @@ export interface SlotFillingUpdate {
   fieldGroups?: FieldGroup[]
   currentStage?: CurrentStageInfo
   displayLabels?: Record<string, string>  // 시나리오의 표시 레이블
+  choiceDisplayMappings?: Record<string, string>  // Choice 필드의 한글 표시 매핑
+  serviceFieldCounts?: {  // 서비스별 필드 개수
+    total: number
+    basic_info: number
+    electronic_banking: number
+    check_card: number
+  }
 }
 
 // 하위 호환성을 위한 별칭
