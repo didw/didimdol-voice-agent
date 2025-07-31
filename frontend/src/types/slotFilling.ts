@@ -17,6 +17,9 @@ export interface FieldGroup {
   id: string
   name: string
   fields: string[]
+  completionRate?: number  // 그룹별 완료율
+  totalFields?: number     // 그룹의 전체 필드 수
+  completedFields?: number // 그룹의 완료된 필드 수
 }
 
 export interface CurrentStageInfo {

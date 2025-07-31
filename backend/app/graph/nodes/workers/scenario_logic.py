@@ -1147,6 +1147,7 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                                 elif field_key == "statement_delivery_date" and default_values.get("statement_delivery_date"):
                                     collected_info[field_key] = default_values["statement_delivery_date"]
                                     print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: {default_values['statement_delivery_date']}")
+                                    print(f"🔥 [STATEMENT_DATE_DEBUG] collected_info now contains: {collected_info.get('statement_delivery_date')}")
                 else:
                     # 다른 단계들은 기존 로직 사용
                     for field_key in fields_to_collect:
@@ -1210,6 +1211,7 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
         # Get the first field to collect as the primary field for this choice
         fields_to_collect = current_stage_info.get("fields_to_collect", [])
         expected_field = fields_to_collect[0] if fields_to_collect else None
+        print(f"🎯 [EXACT_MATCH] fields_to_collect: {fields_to_collect}")
         
         # 디버깅: card_selection 단계일 때 상세 정보 출력
         if current_stage_id == "card_selection":
@@ -1270,6 +1272,21 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                             if value is not None:
                                 collected_info[key] = value
                                 print(f"✅ [CHOICE_EXACT_STORED] {key}: '{value}'")
+                        
+                        # 현재 단계의 default_values 처리
+                        # fields_to_collect에 있지만 entities에 없는 필드들에 대해 default_values 적용
+                        default_values = current_stage_info.get("default_values", {})
+                        if default_values and fields_to_collect:
+                            for field_key in fields_to_collect:
+                                if field_key not in entities and field_key not in collected_info and field_key in default_values:
+                                    collected_info[field_key] = default_values[field_key]
+                                    print(f"✅ [CHOICE_EXACT_DEFAULT] {field_key}: '{default_values[field_key]}' (from default_values)")
+                        
+                        # statement_delivery 단계 특별 처리 (추가 보장)
+                        if current_stage_id == "statement_delivery" and "statement_delivery_method" in entities:
+                            if "statement_delivery_date" in default_values and "statement_delivery_date" not in collected_info:
+                                collected_info["statement_delivery_date"] = default_values["statement_delivery_date"]
+                                print(f"✅ [CHOICE_EXACT_DEFAULT] statement_delivery_date: '{default_values['statement_delivery_date']}' (special handling for statement_delivery)")
                     break
         else:
             # 정확한 매치가 없는 경우에만 원래 scenario_output 사용

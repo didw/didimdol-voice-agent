@@ -17,7 +17,19 @@ const hierarchicalFieldGroups = computed(() => {
   if (currentStage.value?.stageId === 'limit_account_guide') {
     return []
   }
-  return slotFillingStore.hierarchicalFieldGroups
+  
+  // 현재 스테이지의 visibleGroups에 해당하는 그룹만 필터링
+  const allGroups = slotFillingStore.hierarchicalFieldGroups
+  
+  if (!currentStage.value?.visibleGroups || currentStage.value.visibleGroups.length === 0) {
+    // visibleGroups가 없으면 모든 그룹 표시 (기존 동작)
+    return allGroups
+  }
+  
+  // visibleGroups에 포함된 그룹만 필터링
+  return allGroups.filter(group => 
+    currentStage.value!.visibleGroups.includes(group.id)
+  )
 })
 const currentStage = computed(() => {
   const stage = slotFillingStore.currentStage
@@ -35,15 +47,36 @@ const formatFieldValue = (field: SmartField, value: any): string => {
   if (value === null || value === undefined) return ''
   
   const displayLabels = slotFillingStore.displayLabels || {}
+  const choiceDisplayMappings = slotFillingStore.choiceDisplayMappings || {}
   
   switch (field.type) {
     case 'boolean':
-      return value ? (displayLabels.boolean_true || '예') : (displayLabels.boolean_false || '아니오')
+      // boolean 값의 한글 표시
+      if (typeof value === 'boolean') {
+        return value ? '예' : '아니오'
+      }
+      // 문자열 boolean 값 처리
+      return value === 'true' || value === '예' || value === '신청' ? '예' : '아니오'
+      
     case 'number':
       return field.unit ? `${value.toLocaleString()}${field.unit}` : value.toString()
+      
     case 'choice':
+      // choice 필드의 값을 한글로 변환
+      if (choiceDisplayMappings[value]) {
+        return choiceDisplayMappings[value]
+      }
+      return value.toString()
+      
     case 'text':
     default:
+      // 특별한 필드 처리
+      if (field.key === 'statement_delivery_date') {
+        // 날짜 형식 처리 (예: "3" -> "매월 3일")
+        if (/^\d+$/.test(value.toString())) {
+          return `매월 ${value}일`
+        }
+      }
       return value.toString()
   }
 }
@@ -226,10 +259,21 @@ watch(() => slotFillingStore.currentStage, (newStage, oldStage) => {
         :key="group.id"
         class="field-group"
       >
-        <h4 class="group-title">
-          {{ group.name }}
-          <span v-if="isCurrentStageGroup(group)" class="stage-badge">현재 단계</span>
-        </h4>
+        <div class="group-header">
+          <h4 class="group-title">
+            {{ group.name }}
+            <span v-if="isCurrentStageGroup(group)" class="stage-badge">현재 단계</span>
+          </h4>
+          <div class="group-progress">
+            <span class="progress-text">{{ group.completedFields || 0 }}/{{ group.totalFields || 0 }}</span>
+            <div class="mini-progress-bar">
+              <div 
+                class="mini-progress-fill" 
+                :style="{ width: `${group.completionRate || 0}%` }"
+              ></div>
+            </div>
+          </div>
+        </div>
         
         <!-- 계층적 필드 렌더링 (간소화) -->
         <div class="hierarchical-fields">
@@ -363,10 +407,16 @@ watch(() => slotFillingStore.currentStage, (newStage, oldStage) => {
 }
 
 .progress-text {
-  font-size: 0.9em;
+  font-size: 0.8em;
   font-weight: 500;
   color: var(--color-text);
+  opacity: 0.8;
   min-width: 40px;
+}
+
+.group-progress .progress-text {
+  font-size: 0.75em;
+  min-width: auto;
 }
 
 .product-type {
@@ -393,21 +443,48 @@ watch(() => slotFillingStore.currentStage, (newStage, oldStage) => {
   margin-bottom: 0;
 }
 
-.group-title {
-  font-size: 0.95em;
-  font-weight: 600;
-  color: var(--color-heading);
-  margin: 0 0 12px 0;
+.group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
   padding: 8px 12px;
   background: linear-gradient(135deg, var(--color-background-soft) 0%, var(--color-background-mute) 100%);
   border-radius: 6px;
   border-left: 4px solid #4caf50;
-  position: relative;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   transition: all 0.2s ease;
 }
 
-.group-title:hover {
+.group-title {
+  font-size: 0.95em;
+  font-weight: 600;
+  color: var(--color-heading);
+  margin: 0;
+  flex: 1;
+}
+
+.group-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mini-progress-bar {
+  width: 80px;
+  height: 4px;
+  background-color: rgba(0, 0, 0, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.mini-progress-fill {
+  height: 100%;
+  background-color: #4caf50;
+  transition: width 0.3s ease;
+}
+
+.group-header:hover {
   transform: translateY(-1px);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }

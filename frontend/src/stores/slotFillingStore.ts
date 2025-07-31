@@ -24,6 +24,7 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
   const visibleFields = ref<SmartField[]>([])  // Backend에서 계산된 표시 필드
   const fieldsByDepth = ref<Record<number, SmartField[]>>({})
   const displayLabels = ref<Record<string, string>>({})
+  const choiceDisplayMappings = ref<Record<string, string>>({})
   
   // 성능 최적화 관련 상태
   const lastUpdateHash = ref<string>('')
@@ -62,6 +63,16 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
     fieldsByDepth: fieldsByDepth.value
   }))
 
+  // 그룹별 진행률 계산 함수
+  const calculateGroupCompletionRate = (groupId: string, groupFields: string[]): { rate: number, completed: number, total: number } => {
+    const fieldsInGroup = requiredFields.value.filter(field => groupFields.includes(field.key))
+    const total = fieldsInGroup.length
+    const completed = fieldsInGroup.filter(field => completionStatus.value[field.key]).length
+    const rate = total > 0 ? Math.round((completed / total) * 100) : 0
+    
+    return { rate, completed, total }
+  }
+
   // 계층적 필드 그룹 (Backend에서 계산된 visibleFields 사용)
   const hierarchicalFieldGroups = computed(() => {
     if (!fieldGroups.value || fieldGroups.value.length === 0) {
@@ -69,7 +80,10 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
       return [{
         id: 'default',
         name: '정보 수집',
-        fields: visibleFields.value
+        fields: visibleFields.value,
+        completionRate: completionRate.value,
+        totalFields: visibleFields.value.length,
+        completedFields: visibleFields.value.filter(f => completionStatus.value[f.key]).length
       }]
     }
 
@@ -140,12 +154,36 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
       })
     }
 
-    return groupsToShow.map(group => ({
-      ...group,
-      fields: visibleFields.value.filter(field => 
-        group.fields.includes(field.key)
-      )
-    }))
+    return groupsToShow.map(group => {
+      // 디버깅: 그룹 필드 매칭
+      console.log(`[SlotFillingStore] Processing group ${group.id}:`)
+      console.log(`[SlotFillingStore] - Group fields:`, group.fields)
+      console.log(`[SlotFillingStore] - Visible fields count:`, visibleFields.value.length)
+      console.log(`[SlotFillingStore] - Required fields count:`, requiredFields.value.length)
+      
+      // visibleFields가 비어있으면 requiredFields 사용
+      const fieldsToFilter = visibleFields.value.length > 0 ? visibleFields.value : requiredFields.value
+      
+      const fieldsInGroup = fieldsToFilter.filter(field => {
+        const isInGroup = group.fields.includes(field.key)
+        if (isInGroup) {
+          console.log(`[SlotFillingStore] - Field ${field.key} is in group ${group.id}`)
+        }
+        return isInGroup
+      })
+      
+      console.log(`[SlotFillingStore] - Fields in group:`, fieldsInGroup.map(f => f.key))
+      
+      const { rate, completed, total } = calculateGroupCompletionRate(group.id, group.fields)
+      
+      return {
+        ...group,
+        fields: fieldsInGroup,
+        completionRate: rate,
+        totalFields: total,
+        completedFields: completed
+      }
+    })
   })
 
   // 깊이별 필드 그룹화
@@ -247,6 +285,7 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
       fieldGroups.value = message.fieldGroups ? [...message.fieldGroups] : []
       currentStage.value = message.currentStage || null
       displayLabels.value = message.displayLabels || {}
+      choiceDisplayMappings.value = message.choiceDisplayMappings || {}
       
       // Backend에서 계산된 표시 필드 사용 (모든 필드가 이제 depth 정보를 가짐)
       visibleFields.value = message.requiredFields || []
@@ -516,6 +555,7 @@ export const useSlotFillingStore = defineStore('slotFilling', () => {
     visibleFields,
     fieldsByDepth,
     displayLabels,
+    choiceDisplayMappings,
     modificationMode,
     selectedFieldForModification,
     modificationPending,

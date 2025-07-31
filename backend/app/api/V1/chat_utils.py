@@ -8,6 +8,8 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from ...graph.state import AgentState
+from ...data.slot_filling_groups import get_groups_for_product, get_group_id_for_stage
+from ...data.deposit_account_fields import get_deposit_account_fields, convert_korean_keys_to_english
 
 
 # ===== 새로운 조건 평가 엔진 (심플 구조) =====
@@ -129,7 +131,12 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
     if not scenario_data:
         return []
     
-    required_fields = scenario_data.get("required_info_fields", [])
+    # deposit_account의 경우 하드코딩된 필드 사용
+    if scenario_data.get("scenario_id") == "deposit_account_concurrent" or scenario_data.get("product_type") == "deposit_account":
+        required_fields = get_deposit_account_fields()
+        print(f"[get_contextual_visible_fields] Using {len(required_fields)} deposit_account fields")
+    else:
+        required_fields = scenario_data.get("required_info_fields", [])
     visible_fields = []
     stages = scenario_data.get("stages", {})
     
@@ -385,8 +392,19 @@ def update_slot_filling_with_hierarchy(scenario_data: Dict, collected_info: Dict
     if not scenario_data:
         return {}
     
-    # 현재 단계에 맞는 필드들만 가져오기 - 점진적 공개
-    visible_fields = get_contextual_visible_fields(scenario_data, collected_info, current_stage)
+    # deposit_account의 경우 한글 키를 영문 키로 변환
+    from ...data.deposit_account_fields import convert_korean_keys_to_english as convert_keys
+    if scenario_data.get("scenario_id") == "deposit_account_concurrent" or scenario_data.get("product_type") == "deposit_account":
+        collected_info = convert_keys(collected_info)
+    
+    # deposit_account의 경우 전체 필드 사용
+    if scenario_data.get("scenario_id") == "deposit_account_concurrent" or scenario_data.get("product_type") == "deposit_account":
+        from ...data.deposit_account_fields import get_deposit_account_fields
+        visible_fields = get_deposit_account_fields()
+        print(f"[SLOT_FILLING] Using all deposit account fields: {len(visible_fields)} fields")
+    else:
+        # 현재 단계에 맞는 필드들만 가져오기 - 점진적 공개
+        visible_fields = get_contextual_visible_fields(scenario_data, collected_info, current_stage)
     
     # Default 값 자동 추가 비활성화 - 고객 응답을 기다림
     # customer_info_check 단계 전에는 기본값을 수집하지 않음
@@ -410,7 +428,11 @@ def update_slot_filling_with_hierarchy(scenario_data: Dict, collected_info: Dict
     field_groups = scenario_data.get("field_groups", [])
     
     # 완료 상태 계산 (모든 필드, 표시되지 않는 필드도 포함)
-    all_fields = scenario_data.get("required_info_fields", [])
+    if scenario_data.get("scenario_id") == "deposit_account_concurrent" or scenario_data.get("product_type") == "deposit_account":
+        all_fields = get_deposit_account_fields()
+        print(f"[update_slot_filling_with_hierarchy] Using deposit_account all_fields: {len(all_fields)}")
+    else:
+        all_fields = scenario_data.get("required_info_fields", [])
     
     # 🔥 Boolean 필드 문자열 변환 + 누락된 boolean 값 추론
     boolean_field_keys = [f["key"] for f in all_fields if f.get("type") == "boolean"]
@@ -521,8 +543,33 @@ def update_slot_filling_with_hierarchy(scenario_data: Dict, collected_info: Dict
     visible_completion_rate = completion_rate
     
     
+    # visible_fields가 dict 리스트가 아닌 경우 변환
+    formatted_visible_fields = []
+    print(f"[update_slot_filling_with_hierarchy] visible_fields count: {len(visible_fields)}")
+    for field in visible_fields:
+        if isinstance(field, dict):
+            # depth가 없으면 추가
+            field_copy = field.copy()
+            if "depth" not in field_copy:
+                field_copy["depth"] = 0
+            formatted_visible_fields.append(field_copy)
+        else:
+            # deposit_account_fields.py의 구조를 dict로 변환
+            formatted_visible_fields.append({
+                "key": field.get("key", ""),
+                "display_name": field.get("display_name", ""),
+                "type": field.get("type", "text"),
+                "required": field.get("required", True),
+                "group": field.get("group", ""),
+                "stage": field.get("stage", ""),
+                "choices": field.get("choices", []),
+                "unit": field.get("unit", ""),
+                "depth": 0  # 기본 depth
+            })
+    print(f"[update_slot_filling_with_hierarchy] formatted_visible_fields count: {len(formatted_visible_fields)}")
+    
     return {
-        "visible_fields": visible_fields,
+        "visible_fields": formatted_visible_fields,
         "all_fields": all_fields,  # 전체 필드 목록 추가
         "completion_status": completion_status,
         "completion_rate": completion_rate,
@@ -560,23 +607,53 @@ async def send_slot_filling_update(
 ) -> None:
     """슬롯 필링 상태 업데이트를 WebSocket으로 전송"""
     
+    print(f"[{session_id}] 🔄 SEND_SLOT_FILLING_UPDATE CALLED")
+    print(f"[{session_id}] Current product type: {state.get('current_product_type')}")
+    print(f"[{session_id}] Current stage: {state.get('current_scenario_stage_id')}")
     
     # 시나리오 데이터 확인
     scenario_data = state.get("active_scenario_data")
     if not scenario_data:
-        
+        print(f"[{session_id}] No active scenario data")
         # deposit_account의 경우 기본 시나리오 데이터 생성
         if state.get("current_product_type") == "deposit_account":
             await _send_deposit_account_update(websocket, state, session_id)
         return
     
     try:
-        # 필요한 정보 필드들 (시나리오 데이터 구조에 맞춤)
-        required_fields = scenario_data.get("required_info_fields", [])
-        if not required_fields:
-            required_fields = scenario_data.get("slot_fields", [])
-        field_groups = scenario_data.get("field_groups", [])
+        # 먼저 product_type을 가져옴
+        product_type = state.get("current_product_type", "")
+        scenario_id = scenario_data.get("scenario_id", "")
+        
+        print(f"[{session_id}] DEBUG - product_type: {product_type}, scenario_id: {scenario_id}")
+        
+        # deposit_account의 경우 무조건 하드코딩된 필드 정의 사용
+        if product_type == "deposit_account" or scenario_id == "deposit_account_concurrent":
+            required_fields = get_deposit_account_fields()
+            print(f"[{session_id}] ✅ USING DEPOSIT_ACCOUNT_FIELDS.PY - Loaded {len(required_fields)} deposit_account fields")
+            # 필드 키 리스트 출력
+            field_keys = [f.get("key", "") for f in required_fields]
+            print(f"[{session_id}] Field keys: {field_keys}")
+        else:
+            # 다른 시나리오의 경우 기존 방식 사용
+            required_fields = scenario_data.get("required_info_fields", [])
+            if not required_fields:
+                required_fields = scenario_data.get("slot_fields", [])
+            print(f"[{session_id}] Using scenario fields: {len(required_fields)} fields")
+        
+        # 새로운 그룹 정의 사용 (우선순위: slot_filling_groups.py > 시나리오 파일)
+        predefined_groups = get_groups_for_product(product_type)
+        field_groups = predefined_groups if predefined_groups else scenario_data.get("field_groups", [])
         collected_info = state.get("collected_product_info", {})
+        
+        # deposit_account의 경우 한글 키를 영문 키로 변환
+        if product_type == "deposit_account":
+            collected_info = convert_korean_keys_to_english(collected_info)
+            print(f"[SLOT_FILLING] Converted collected_info keys: {list(collected_info.keys())}")
+            # statement_delivery_date 디버그
+            if "statement_delivery_date" in collected_info:
+                print(f"🔥 [SLOT_FILLING_DEBUG] statement_delivery_date value: {collected_info['statement_delivery_date']}")
+        
         current_stage = state.get("current_scenario_stage_id", "")
         
         # card_receive_method 변경 감지 및 로그
@@ -616,10 +693,19 @@ async def send_slot_filling_update(
         total_collected = sum(1 for f in required_fields if f.get("key") in collected_info and f.get("required", True))
         overall_progress = (total_collected / total_required * 100) if total_required > 0 else 0
         
-        # 현재 stage에서 표시할 그룹 정보 가져오기
-        groups_info = get_stage_visible_groups(scenario_data, current_stage, collected_info)
-        visible_groups = groups_info["visible_groups"]
-        current_stage_groups = groups_info["current_stage_groups"]
+        # 현재 stage에서 표시할 그룹 정보 가져오기 (개선된 버전)
+        current_stage_group_id = get_group_id_for_stage(product_type, current_stage)
+        
+        # 현재 스테이지가 속한 그룹만 표시
+        visible_groups = [current_stage_group_id] if current_stage_group_id else []
+        current_stage_groups = visible_groups.copy()
+        
+        # 이미 수집된 정보가 있는 그룹도 추가
+        for group in field_groups:
+            group_fields = group.get("fields", [])
+            has_collected_data = any(field in collected_info for field in group_fields)
+            if has_collected_data and group["id"] not in visible_groups:
+                visible_groups.append(group["id"])
         
         # 새로운 계층적 슬롯 필링 계산
         try:
@@ -638,15 +724,15 @@ async def send_slot_filling_update(
         except Exception as e:
             hierarchy_data = {}
         
-        # 계층 정보가 있는 필드들 준비
-        enhanced_fields = []
-        visible_fields = hierarchy_data.get("visible_fields", [])
-        
-        if visible_fields:
-            # 계층 정보가 있는 경우 사용
+        # deposit_account의 경우 모든 필드를 포함
+        if product_type == "deposit_account" or scenario_id == "deposit_account_concurrent":
+            print(f"[{session_id}] ✅ CREATING ENHANCED FIELDS FOR DEPOSIT_ACCOUNT")
+            # hierarchy_data의 visible_fields가 있으면 사용, 없으면 required_fields 사용
+            fields_to_use = hierarchy_data.get("visible_fields") if hierarchy_data.get("visible_fields") else required_fields
+            print(f"[{session_id}] Fields to use count: {len(fields_to_use)}")
             enhanced_fields = [{
-                "key": f["key"],
-                "displayName": f["display_name"],
+                "key": f.get("key", ""),
+                "displayName": f.get("display_name", ""),
                 "type": f.get("type", "text"),
                 "required": f.get("required", True),
                 "choices": f.get("choices", []) if f.get("type") == "choice" else None,
@@ -655,23 +741,49 @@ async def send_slot_filling_update(
                 "showWhen": f.get("show_when"),
                 "parentField": f.get("parent_field"),
                 "depth": f.get("depth", 0),
-                "default": f.get("default")  # default 값 추가
-            } for f in visible_fields]
+                "default": f.get("default"),
+                "group": f.get("group", ""),  # 그룹 정보 추가
+                "stage": f.get("stage", "")   # 스테이지 정보 추가
+            } for f in fields_to_use]
+            print(f"[{session_id}] ✅ Enhanced fields count: {len(enhanced_fields)}")
+            # 필드 키 샘플 출력
+            sample_keys = [f["key"] for f in enhanced_fields[:5]]
+            print(f"[{session_id}] Sample field keys: {sample_keys}")
         else:
-            # fallback: 기존 방식
-            enhanced_fields = [{
-                "key": f["key"],
-                "displayName": f["display_name"],
-                "type": f.get("type", "text"),
-                "required": f.get("required", True),
-                "choices": f.get("choices", []) if f.get("type") == "choice" else None,
-                "unit": f.get("unit") if f.get("type") == "number" else None,
-                "description": f.get("description", ""),
-                "showWhen": f.get("show_when"),
-                "parentField": f.get("parent_field"),
-                "depth": 0,  # 기본 depth
-                "default": f.get("default")  # default 값 추가
-            } for f in required_fields]
+            # 계층 정보가 있는 필드들 준비
+            enhanced_fields = []
+            visible_fields = hierarchy_data.get("visible_fields", [])
+            
+            if visible_fields:
+                # 계층 정보가 있는 경우 사용
+                enhanced_fields = [{
+                    "key": f["key"],
+                    "displayName": f["display_name"],
+                    "type": f.get("type", "text"),
+                    "required": f.get("required", True),
+                    "choices": f.get("choices", []) if f.get("type") == "choice" else None,
+                    "unit": f.get("unit") if f.get("type") == "number" else None,
+                    "description": f.get("description", ""),
+                    "showWhen": f.get("show_when"),
+                    "parentField": f.get("parent_field"),
+                    "depth": f.get("depth", 0),
+                    "default": f.get("default")  # default 값 추가
+                } for f in visible_fields]
+            else:
+                # fallback: 기존 방식
+                enhanced_fields = [{
+                    "key": f["key"],
+                    "displayName": f["display_name"],
+                    "type": f.get("type", "text"),
+                    "required": f.get("required", True),
+                    "choices": f.get("choices", []) if f.get("type") == "choice" else None,
+                    "unit": f.get("unit") if f.get("type") == "number" else None,
+                    "description": f.get("description", ""),
+                    "showWhen": f.get("show_when"),
+                    "parentField": f.get("parent_field"),
+                    "depth": 0,  # 기본 depth
+                    "default": f.get("default")  # default 값 추가
+                } for f in required_fields]
         
         # WebSocket 메시지 구성 (새로운 구조)
         slot_filling_data = {
@@ -693,7 +805,8 @@ async def send_slot_filling_update(
                 "visibleGroups": visible_groups,
                 "currentStageGroups": current_stage_groups  # 현재 단계의 그룹만
             },
-            "displayLabels": scenario_data.get("display_labels", {})  # 시나리오에서 표시 레이블 추가
+            "displayLabels": scenario_data.get("display_labels", {}),  # 시나리오에서 표시 레이블 추가
+            "choiceDisplayMappings": get_choice_display_mappings(product_type)  # Choice 필드의 한글 표시 매핑
         }
         
         # 디버그 로그 추가
@@ -701,6 +814,10 @@ async def send_slot_filling_update(
         
         try:
             await websocket.send_json(slot_filling_data)
+            print(f"[{session_id}] ✅ SLOT_FILLING_UPDATE SENT SUCCESSFULLY")
+            print(f"[{session_id}] - Fields count: {len(enhanced_fields)}")
+            print(f"[{session_id}] - Collected info keys: {list(collected_info.keys())}")
+            print(f"[{session_id}] - Visible groups: {visible_groups}")
             
             # 즉시 테스트 메시지 전송하여 WebSocket 연결 확인
             test_message = {
@@ -865,6 +982,14 @@ async def _send_deposit_account_update(
         
     except Exception as e:
         print(f"[{session_id}] Error sending deposit account slot filling update: {e}")
+
+
+def get_choice_display_mappings(product_type: str) -> Dict[str, str]:
+    """Choice 필드의 한글 표시 매핑 반환"""
+    if product_type == "deposit_account":
+        from ...data.deposit_account_fields import CHOICE_VALUE_DISPLAY_MAPPING
+        return CHOICE_VALUE_DISPLAY_MAPPING
+    return {}
 
 
 def get_info_collection_stages() -> List[str]:
