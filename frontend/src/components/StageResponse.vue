@@ -269,7 +269,7 @@ const getBooleanText = (value: boolean) => {
 const handleAdditionalQuestion = (question: string) => {
   console.log('🔍 Additional question clicked:', question);
   // 챗 스토어에 사용자 메시지로 추가
-  chatStore.sendMessage(question);
+  chatStore.sendWebSocketTextMessage(question);
 };
 </script>
 
