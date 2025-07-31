@@ -1215,6 +1215,9 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
         if current_stage_id == "card_selection":
             print(f"🎯 [CARD_SELECTION_DEBUG] fields_to_collect: {fields_to_collect}")
             print(f"🎯 [CARD_SELECTION_DEBUG] current_stage_info keys: {list(current_stage_info.keys())}")
+            # 시나리오 데이터 소스 확인
+            print(f"🎯 [CARD_SELECTION_DEBUG] active_scenario_data source: {active_scenario_data.get('version', 'unknown')}")
+            print(f"🎯 [CARD_SELECTION_DEBUG] Full stage info: {json.dumps(current_stage_info, ensure_ascii=False, indent=2)[:500]}...")
         
         print(f"🎯 [EXACT_MATCH] Looking for '{user_input.strip()}' in {len(choices)} total choices")
         print(f"🎯 [EXACT_MATCH] Expected field: {expected_field}")
@@ -1243,6 +1246,10 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                         
                         # card_selection 단계의 경우 metadata를 entities에 추가
                         elif current_stage_id == "card_selection":
+                            # card_selection 필드에 선택한 카드 value 저장
+                            entities["card_selection"] = choice_value
+                            print(f"🎯 [EXACT_MATCH] Set card_selection to: {choice_value}")
+                            
                             if "receipt_method" in choice_metadata:
                                 entities["card_receipt_method"] = choice_metadata["receipt_method"]
                             if "transit_enabled" in choice_metadata:
