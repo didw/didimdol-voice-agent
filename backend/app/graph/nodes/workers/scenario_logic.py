@@ -1046,20 +1046,21 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                 collected_info["card_password_same_as_account"] = False
                 print(f"[CARD_PASSWORD] '아니' response -> card_password_same_as_account = False")
         
-        # additional_services 단계 - multi_select 처리
+        # additional_services 단계 - V3는 boolean 처리
         elif current_stage_id == "additional_services":
+            # V3 시나리오에서는 boolean 타입으로 처리
             if any(word in user_lower for word in ["네", "예", "응", "어", "그래", "좋아", "맞아", "알겠", "모두", "전부", "다"]):
-                # 모든 서비스 신청
-                collected_info["important_transaction_alert"] = "신청"
-                collected_info["withdrawal_alert"] = "신청"
-                collected_info["overseas_ip_restriction"] = "신청"
-                print(f"[ADDITIONAL_SERVICES] '네' response -> all services = '신청'")
+                # 모든 서비스 신청 (true)
+                collected_info["important_transaction_alert"] = True
+                collected_info["withdrawal_alert"] = True
+                collected_info["overseas_ip_restriction"] = True
+                print(f"[ADDITIONAL_SERVICES] '네' response -> all services = True")
             elif any(word in user_lower for word in ["아니", "안", "필요없", "괜찮"]):
-                # 모든 서비스 미신청
-                collected_info["important_transaction_alert"] = "미신청"
-                collected_info["withdrawal_alert"] = "미신청"
-                collected_info["overseas_ip_restriction"] = "미신청"
-                print(f"[ADDITIONAL_SERVICES] '아니' response -> all services = '미신청'")
+                # 모든 서비스 미신청 (false)
+                collected_info["important_transaction_alert"] = False
+                collected_info["withdrawal_alert"] = False
+                collected_info["overseas_ip_restriction"] = False
+                print(f"[ADDITIONAL_SERVICES] '아니' response -> all services = False")
     
     # 사용자가 '네' 응답을 한 경우 기본값 처리 (모든 bullet/choice 단계)
     if user_input and current_stage_info.get("response_type") in ["bullet", "boolean"]:
