@@ -159,15 +159,6 @@ async def run_agent_streaming(
         # Check for stage_response_data and send it first
         if final_state and final_state.get("stage_response_data"):
             stage_data = final_state["stage_response_data"]
-            print(f"🎯 [WEBSOCKET_SEND] Sending stage_response_data: {stage_data}")
-            print(f"🎯 [WEBSOCKET_SEND] stage_id: {stage_data.get('stage_id')}")
-            print(f"🎯 [WEBSOCKET_SEND] response_type: {stage_data.get('response_type')}")
-            print(f"🎯 [WEBSOCKET_SEND] has choice_groups: {bool(stage_data.get('choice_groups'))}")
-            print(f"🎯 [WEBSOCKET_SEND] choice_groups: {stage_data.get('choice_groups')}")
-            print(f"🎯 [WEBSOCKET_SEND] has additional_questions: {bool(stage_data.get('additional_questions'))}")
-            print(f"🎯 [WEBSOCKET_SEND] additional_questions: {stage_data.get('additional_questions')}")
-            print(f"🎯 [WEBSOCKET_SEND] has additionalQuestions: {bool(stage_data.get('additionalQuestions'))}")
-            print(f"🎯 [WEBSOCKET_SEND] additionalQuestions: {stage_data.get('additionalQuestions')}")
             yield {"type": "stage_response", "data": stage_data}
         
         # Only stream text if there's no stage_response_data

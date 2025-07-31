@@ -15,6 +15,8 @@ from ...simple_scenario_engine import SimpleScenarioEngine
 from ....agents.entity_agent import entity_agent
 from ....agents.internet_banking_agent import internet_banking_agent
 from ....agents.check_card_agent import check_card_agent
+from ....config.prompt_loader import load_yaml_file
+from pathlib import Path
 from .scenario_helpers import (
     check_required_info_completion,
     get_next_missing_info_group_stage,
@@ -26,6 +28,481 @@ from .scenario_helpers import (
     replace_template_variables
 )
 from ...validators import FIELD_VALIDATORS, get_validator_for_field
+
+
+async def map_user_intent_to_choice(
+    user_input: str,
+    choices: List[Any],
+    field_key: str,
+    keyword_mapping: Optional[Dict[str, List[str]]] = None
+) -> Optional[str]:
+    """사용자 입력을 선택지에 매핑하는 LLM 기반 함수"""
+    
+    # 먼저 키워드 기반 매칭 시도
+    if keyword_mapping:
+        user_input_lower = user_input.lower()
+        for choice_value, keywords in keyword_mapping.items():
+            for keyword in keywords:
+                if keyword in user_input_lower:
+                    print(f"🎯 [KEYWORD_MATCH] Found '{keyword}' in '{user_input}' -> '{choice_value}'")
+                    return choice_value
+    
+    # LLM 기반 의미 매칭
+    try:
+        # 선택지 정보 준비
+        choice_info = []
+        for choice in choices:
+            if isinstance(choice, dict):
+                choice_info.append({
+                    "value": choice.get("value"),
+                    "display": choice.get("display"),
+                    "keywords": choice.get("keywords", [])
+                })
+            else:
+                choice_info.append({"value": choice, "display": choice})
+        
+        prompt = f"""사용자의 입력을 주어진 선택지 중 하나에 매핑해주세요.
+
+사용자 입력: "{user_input}"
+
+선택지:
+{json.dumps(choice_info, ensure_ascii=False, indent=2)}
+
+사용자의 의도를 파악하여 가장 적절한 선택지의 value를 반환하세요.
+명확한 매칭이 없으면 null을 반환하세요.
+
+응답 형식:
+{{"matched_value": "선택된 value" 또는 null}}
+
+주의: 반드시 제공된 선택지의 value 중 하나를 선택하거나 null을 반환하세요.
+반드시 응답에 'json' 키워드를 포함하세요.
+"""
+
+        response = await json_llm.ainvoke([HumanMessage(content=prompt)])
+        result = json.loads(response.content.strip())
+        matched_value = result.get("matched_value")
+        
+        if matched_value:
+            print(f"🎯 [LLM_CHOICE_MAPPING] Mapped '{user_input}' to '{matched_value}'")
+            return matched_value
+            
+    except Exception as e:
+        print(f"❌ [LLM_CHOICE_MAPPING] Error: {e}")
+    
+    return None
+
+
+async def generate_natural_response(
+    user_input: str,
+    current_stage: str,
+    collected_info: Dict[str, Any],
+    scenario_deviation: bool = False,
+    deviation_topic: Optional[str] = None,
+    scenario_prompt: Optional[str] = None
+) -> str:
+    """사용자의 질문이나 이탈에 대해 자연스럽게 응답하고 시나리오로 유도하는 함수"""
+    
+    try:
+        # 시나리오 유도 응답 로드
+        scenario_guidance_path = Path(__file__).parent.parent.parent.parent / "config" / "scenario_guidance_responses.yaml"
+        if scenario_guidance_path.exists():
+            with open(scenario_guidance_path, 'r', encoding='utf-8') as f:
+                import yaml
+                guidance_responses = yaml.safe_load(f)
+        else:
+            guidance_responses = {}
+        
+        # 현재 단계의 미리 정의된 응답 확인
+        stage_responses = guidance_responses.get(current_stage, {})
+        
+        # 오타나 무관한 발화인 경우 간단한 유도 응답
+        if scenario_deviation and not deviation_topic:
+            prompt = f"""사용자가 이해하기 어려운 말을 했습니다. 친절하게 다시 질문을 유도하세요.
+
+사용자 입력: "{user_input}"
+현재 질문: {scenario_prompt or "질문을 계속 진행해주세요"}
+
+친절하고 자연스럽게 응답하되, 현재 질문으로 다시 유도하세요.
+응답은 2-3문장으로 작성하세요."""
+        else:
+            # 일반적인 시나리오 유도 응답
+            prompt = f"""사용자의 응답에 친절하게 답변하고, 자연스럽게 시나리오로 유도하세요.
+
+사용자 입력: "{user_input}"
+현재 단계: {current_stage}
+현재 질문: {scenario_prompt}
+
+사용자가 이해하지 못했거나 다른 질문을 한 것 같습니다.
+간단히 설명하고 현재 질문으로 다시 유도하세요.
+응답은 2-3문장으로 작성하세요."""
+        
+        from ...chains import generative_llm
+        response = await generative_llm.ainvoke([HumanMessage(content=prompt)])
+        
+        return response.content.strip()
+        
+    except Exception as e:
+        print(f"❌ [NATURAL_RESPONSE] Error: {e}")
+        # 에러 시 기본 응답
+        return f"죄송합니다, 이해하지 못했습니다. {scenario_prompt}"
+
+
+async def generate_choice_clarification_response(
+    user_input: str,
+    current_stage: str,
+    current_stage_info: Dict[str, Any],
+    choices: List[Any],
+    is_ambiguous: bool = False
+) -> str:
+    """애매한 지시어나 불명확한 선택에 대해 명확한 선택지를 제시하는 응답 생성"""
+    
+    try:
+        # 선택지 정보 준비
+        choice_descriptions = []
+        
+        # choice_groups가 있는 경우 그룹별로 정리
+        if current_stage_info.get("choice_groups"):
+            for group in current_stage_info.get("choice_groups", []):
+                group_name = group.get("group_name", "선택지")
+                choice_descriptions.append(f"\n【{group_name}】")
+                
+                for choice in group.get("choices", []):
+                    display = choice.get("display", choice.get("value", ""))
+                    metadata = choice.get("metadata", {})
+                    
+                    # 메타데이터 정보 추가
+                    extra_info = []
+                    if metadata.get("transfer_limit_once") and metadata.get("transfer_limit_daily"):
+                        limit_once = int(metadata["transfer_limit_once"]) // 10000
+                        limit_daily = int(metadata["transfer_limit_daily"]) // 10000
+                        extra_info.append(f"1회 {limit_once}만원, 1일 {limit_daily}만원 한도")
+                    if metadata.get("fee"):
+                        fee = int(metadata["fee"])
+                        extra_info.append(f"수수료 {fee:,}원")
+                    
+                    extra_text = f" ({', '.join(extra_info)})" if extra_info else ""
+                    choice_descriptions.append(f"- {display}{extra_text}")
+        else:
+            # 일반 choices 처리
+            for choice in choices:
+                if isinstance(choice, dict):
+                    display = choice.get("display", choice.get("value", ""))
+                    choice_descriptions.append(f"- {display}")
+                else:
+                    choice_descriptions.append(f"- {choice}")
+        
+        choices_text = "\n".join(choice_descriptions)
+        
+        # 애매한 지시어인지에 따라 다른 응답 생성
+        if is_ambiguous:
+            if current_stage == "security_medium_registration":
+                clarification_text = f"어떤 보안매체를 말씀하시는 건가요?"
+            elif current_stage == "card_selection":
+                clarification_text = f"어떤 카드를 말씀하시는 건가요?"
+            else:
+                clarification_text = f"어떤 것을 말씀하시는 건가요?"
+        else:
+            clarification_text = "죄송합니다, 정확히 이해하지 못했습니다."
+        
+        # 최종 응답 구성
+        if choices_text:
+            response = f"{clarification_text}\n\n다음 중에서 선택해주세요:{choices_text}\n\n구체적으로 말씀해주시면 진행해드리겠습니다."
+        else:
+            response = f"{clarification_text} 다시 말씀해주시겠어요?"
+        
+        return response
+        
+    except Exception as e:
+        print(f"❌ [CHOICE_CLARIFICATION] Error: {e}")
+        # 에러 시 기본 응답
+        return "죄송합니다, 정확히 어떤 것을 원하시는지 다시 말씀해주시겠어요?"
+
+
+def generate_choice_confirmation_response(
+    user_input: str,
+    choice_value: str,
+    current_stage: str,
+    choices: List[Any]
+) -> str:
+    """선택된 값에 대한 자연스러운 확인 응답 생성"""
+    
+    try:
+        # 선택된 choice의 display 이름 찾기
+        choice_display = None
+        choice_metadata = {}
+        
+        for choice in choices:
+            if isinstance(choice, dict):
+                if choice.get("value") == choice_value:
+                    choice_display = choice.get("display", choice_value)
+                    choice_metadata = choice.get("metadata", {})
+                    break
+        
+        if not choice_display:
+            choice_display = choice_value
+        
+        # 단계별 맞춤 확인 응답
+        if current_stage == "security_medium_registration":
+            if "미래테크" in choice_display:
+                response = f"네, 미래테크 보안매체로 진행하겠습니다."
+            elif "코마스" in choice_display or "RSA" in choice_display:
+                response = f"코마스(RSA) 보안매체로 설정해드리겠습니다."
+            elif "보안카드" in choice_display:
+                response = f"보안카드로 진행하겠습니다."
+            elif "OTP" in choice_display:
+                response = f"신한 OTP로 설정해드리겠습니다."
+            else:
+                response = f"{choice_display}로 진행하겠습니다."
+                
+            # 이체한도 정보 추가
+            if choice_metadata.get("transfer_limit_once") and choice_metadata.get("transfer_limit_daily"):
+                limit_once = int(choice_metadata["transfer_limit_once"]) // 10000
+                limit_daily = int(choice_metadata["transfer_limit_daily"]) // 10000
+                response += f" 1회 {limit_once}만원, 1일 {limit_daily}만원 한도로 설정됩니다."
+                
+        elif current_stage == "card_selection":
+            response = f"네, {choice_display}로 발급해드리겠습니다."
+            
+            # 교통카드 기능 여부 추가
+            if choice_metadata.get("transit_enabled"):
+                response += " 후불교통 기능도 함께 이용하실 수 있습니다."
+                
+        elif current_stage == "additional_services":
+            # additional_services 단계의 특별한 값들 처리
+            if choice_value == "all_true":
+                response = "네, 중요거래 알림, 출금 알림, 해외IP 제한을 모두 신청해드리겠습니다."
+            elif choice_value == "all_false":
+                response = "네, 추가 서비스는 신청하지 않고 진행하겠습니다."
+            elif choice_value == "important_only":
+                response = "네, 중요거래 알림만 신청해드리겠습니다."
+            elif choice_value == "withdrawal_only":
+                response = "네, 출금 알림만 신청해드리겠습니다."
+            elif choice_value == "overseas_only":
+                response = "네, 해외IP 제한만 신청해드리겠습니다."
+            else:
+                response = f"네, {choice_display}로 진행하겠습니다."
+                
+        else:
+            response = f"네, {choice_display}로 진행하겠습니다."
+        
+        return response
+        
+    except Exception as e:
+        print(f"❌ [CHOICE_CONFIRMATION] Error: {e}")
+        # 에러 시 기본 응답
+        return "네, 선택해주신 내용으로 진행하겠습니다."
+
+
+from ...chains import generative_llm, json_llm
+
+# 시나리오 유도 응답 로드
+scenario_guidance_path = Path(__file__).parent.parent.parent.parent / "config" / "scenario_guidance_responses.yaml"
+if scenario_guidance_path.exists():
+    SCENARIO_GUIDANCE = load_yaml_file(str(scenario_guidance_path))
+else:
+    SCENARIO_GUIDANCE = {}
+
+
+def find_scenario_guidance(user_input: str, current_stage: str) -> Optional[str]:
+    """사용자 입력에 대한 시나리오 유도 응답 찾기"""
+    if not SCENARIO_GUIDANCE:
+        return None
+    
+    user_input_lower = user_input.lower()
+    
+    # 현재 단계의 질문들 확인
+    stage_questions = SCENARIO_GUIDANCE.get(current_stage, {}).get('questions', {})
+    for topic, info in stage_questions.items():
+        keywords = info.get('keywords', [])
+        for keyword in keywords:
+            if keyword in user_input_lower:
+                return info.get('response', '')
+    
+    # 공통 질문들 확인
+    common_questions = SCENARIO_GUIDANCE.get('common_questions', {})
+    for topic, info in common_questions.items():
+        keywords = info.get('keywords', [])
+        for keyword in keywords:
+            if keyword in user_input_lower:
+                return info.get('response', '')
+    
+    return None
+
+
+async def map_user_intent_to_choice(
+    user_input: str,
+    choices: List[Any],
+    field_key: str,
+    keyword_mapping: Dict[str, List[str]] = None
+) -> Optional[str]:
+    """사용자 입력을 선택지에 매핑하는 LLM 기반 함수"""
+    
+    # 먼저 키워드 기반 매핑 시도
+    if keyword_mapping:
+        user_lower = user_input.lower().strip()
+        for choice_value, keywords in keyword_mapping.items():
+            for keyword in keywords:
+                if keyword in user_lower:
+                    print(f"🎯 [KEYWORD_MATCH] Found '{keyword}' in '{user_input}' -> '{choice_value}'")
+                    return choice_value
+    
+    # LLM을 사용한 의미 기반 매핑
+    choice_values = []
+    for choice in choices:
+        if isinstance(choice, dict):
+            choice_values.append(choice.get("value", ""))
+        else:
+            choice_values.append(str(choice))
+    
+    mapping_prompt = f"""사용자의 의도를 파악하여 가장 적절한 선택지로 매핑해주세요.
+
+사용자 입력: "{user_input}"
+선택 가능한 값들: {choice_values}
+필드명: {field_key}
+
+매핑 규칙:
+1. 사용자가 "다 해줘", "전부", "모두" 등을 말하면 "all"로 매핑
+2. 사용자의 의도를 파악하여 가장 적합한 선택지 선택
+3. 명확하게 매핑할 수 없으면 null 반환
+
+출력 형식:
+{{
+    "mapped_value": "선택된 값" 또는 null,
+    "confidence": 0.0-1.0,
+    "reasoning": "매핑 이유"
+}}"""
+    
+    try:
+        response = await json_llm.ainvoke(mapping_prompt)
+        result = response
+        
+        if result.get("mapped_value") and result["mapped_value"] in choice_values:
+            print(f"🎯 [LLM_CHOICE_MAPPING] Mapped '{user_input}' to '{result['mapped_value']}' (confidence: {result.get('confidence', 0)})")
+            return result["mapped_value"]
+    except Exception as e:
+        print(f"❌ [LLM_CHOICE_MAPPING] Error: {e}")
+    
+    return None
+
+
+async def generate_natural_response(
+    user_input: str,
+    current_stage: str,
+    stage_info: Dict[str, Any],
+    collected_info: Dict[str, Any],
+    extraction_result: Dict[str, Any],
+    next_stage_info: Dict[str, Any] = None
+) -> str:
+    """LLM을 사용하여 자연스러운 응답 생성 - 오타나 이상한 표현도 자연스럽게 처리"""
+    
+    print(f"\n🌐 [LLM_NATURAL_RESPONSE] 자연스러운 응답 생성 시작")
+    print(f"   📝 사용자 입력: \"{user_input}\"")
+    print(f"   📍 현재 단계: {current_stage}")
+    print(f"   📋 추출된 정보: {extraction_result.get('extracted_entities', {})}")
+    
+    # 시나리오 프롬프트
+    stage_prompt = stage_info.get("prompt", "")
+    stage_name = stage_info.get("stage_name", current_stage)
+    
+    # 다음 단계 프롬프트
+    next_prompt = ""
+    if next_stage_info:
+        next_prompt = next_stage_info.get("prompt", "")
+    
+    # 오타 수정 정보
+    typo_corrections = extraction_result.get("typo_corrections", {})
+    
+    # 사용자 의도 분석 결과
+    intent_analysis = extraction_result.get("intent_analysis", {})
+    user_intent = intent_analysis.get("intent", "")
+    
+    # 시나리오 유도 필요 여부 판단
+    needs_scenario_guidance = user_intent in ["질문", "혼란", "기타"] or \
+                            extraction_result.get("confidence", 1.0) < 0.5 or \
+                            not extraction_result.get("extracted_entities")
+    
+    # 미리 정의된 시나리오 유도 응답 찾기
+    predefined_guidance = find_scenario_guidance(user_input, current_stage) if needs_scenario_guidance else None
+    
+    # 단계별 시나리오 유도 예시
+    scenario_guidance_examples = {
+        "select_services": {
+            "한도계좌": "한도계좌는 정부의 지원을 받아 최대 3개까지 가입할 수 있는 특화계좌입니다. 금리와 우대 혜택을 받을 수 있어요. 지금 만드시는 계좌를 모바일 앱과 체크카드로 함께 이용할 수 있도록 가입해 드릴까요?",
+            "인터넷뱅킹": "인터넷뱅킹은 PC나 모바일로 계좌 조회와 이체를 할 수 있는 서비스입니다. 함께 신청하시면 편리하게 이용하실 수 있어요. 모바일 앱과 함께 신청해드릴까요?",
+            "체크카드": "체크카드는 계좌 잔액 범위 내에서 결제할 수 있는 카드입니다. 신용카드와 달리 연회비가 없고 후불교통 기능도 사용할 수 있어요. 모바일 앱과 함께 체크카드도 신청해드릴까요?"
+        },
+        "limit_account_guide": {
+            "한도": "한도계좌는 1인당 최대 3개까지 가입할 수 있고, 예금자보호법 한도를 초과하더라도 원금과 이자를 보호받을 수 있어요. 한도계좌 가입에 동의하시겠어요?",
+            "혜택": "우대 금리와 함께 ATM 수수료 면제, 타행 이체 수수료 감면 등의 혜택을 받으실 수 있습니다. 한도계좌로 진행하시겠어요?"
+        },
+        "security_medium_registration": {
+            "보안매체": "보안매체는 인터넷뱅킹이나 모바일뱅킹에서 이체할 때 본인 확인을 위해 사용하는 도구입니다. OTP는 매번 새로운 비밀번호를 생성해서 더 안전해요. 신한 OTP로 등록해드릴까요?",
+            "이체한도": "이체한도는 하루에 이체할 수 있는 최대 금액을 정하는 것입니다. 보안을 위해 필요하며, 나중에 변경할 수 있어요. 1회 이체한도와 1일 이체한도를 얼마로 설정하시겠어요?"
+        },
+        "additional_services": {
+            "중요거래": "중요거래 알림은 10만원 이상 이체나 해외 사용 등 중요한 거래가 있을 때 문자로 알려드립니다. 보안을 위해 꼭 필요한 서비스예요. 중요거래 알림, 출금 알림, 해외IP 제한 서비스를 모두 신청해드릴까요?",
+            "해외IP": "해외IP 제한은 해외에서 인터넷뱅킹에 접속하는 것을 차단하는 도난 방지 서비스입니다. 해외 여행 시에는 잠시 해제할 수 있어요. 보안 서비스들을 신청해드릴까요?"
+        },
+        "card_selection": {
+            "카드종류": "S-line은 세련된 디자인의 청년카드이고, Deep Dream은 첨단 디자인의 프리미엄 카드예요. 교통카드 기능을 원하시면 후불교통 기능이 있는 카드를 선택하실 수 있어요. 어떤 카드를 선택하시겠어요?",
+            "후불교통": "후불교통은 대중교통 요금을 나중에 결제하는 기능입니다. 버스나 지하철을 탈 때 현금 없이도 카드로 찍고 다음날 결제됩니다. 후불교통 기능이 있는 카드로 선택하시겠어요?"
+        }
+    }
+    
+    natural_response_prompt = f"""당신은 친절한 한국 은행 상담원입니다. 고객과 자연스럽게 대화하면서 시나리오를 진행해주세요.
+
+현재 상황:
+- 현재 단계: {stage_name}
+- 현재 질문: {stage_prompt}
+- 고객 발화: "{user_input}"
+- 고객 의도: {user_intent if user_intent else '불명확'}
+- 추출된 정보: {extraction_result.get('extracted_entities', {})}
+- 신뢰도: {extraction_result.get('confidence', 1.0)}
+{f"- 오타 수정: {typo_corrections}" if typo_corrections else ""}
+
+응답 생성 가이드:
+1. 고객이 제공한 정보를 확인해주세요
+2. 오타나 이상한 표현이 있었다면 자연스럽게 이해했다는 표현을 해주세요
+3. 정보가 애매하면 부드럽게 재확인을 요청하세요
+{f"4. 고객이 질문하거나 혼란스러워하면 친절하게 설명하고 다시 원래 질문으로 유도하세요" if needs_scenario_guidance else ""}
+5. 다음 단계로 진행한다면 자연스럽게 안내해주세요
+{f"6. 다음 질문: {next_prompt}" if next_prompt else ""}
+
+{
+f'''예시 (고객이 혼란스러워하는 경우):
+{
+    predefined_guidance if predefined_guidance else 
+    scenario_guidance_examples.get(current_stage, {}).get(
+        list(scenario_guidance_examples.get(current_stage, {}).keys())[0] 
+        if scenario_guidance_examples.get(current_stage) else '', 
+        ''
+    )
+}
+''' if needs_scenario_guidance else ''
+}
+
+중요: 
+- 딱딱하지 않고 친근하게 응답하되, 은행 상담원의 전문성은 유지하세요
+- 고객이 시나리오에서 벗어나려고 하면 친절하게 설명하고 다시 현재 단계의 질문으로 자연스럽게 유도하세요
+
+응답 (한국어로만):"""
+
+    try:
+        response = await generative_llm.ainvoke(natural_response_prompt)
+        print(f"   🗨️ 생성된 응답: {response[:100]}...")
+        if needs_scenario_guidance:
+            print(f"   🎯 시나리오 유도 포함")
+        print(f"🌐 [LLM_NATURAL_RESPONSE] 응답 생성 완료\n")
+        return response
+    except Exception as e:
+        print(f"   ❌ [LLM_NATURAL_RESPONSE] 생성 실패: {e}")
+        print(f"   🔄 Fallback 응답 사용\n")
+        # Fallback to simple response
+        if extraction_result.get("extracted_entities"):
+            confirmed = ", ".join([f"{k}: {v}" for k, v in extraction_result["extracted_entities"].items()])
+            return f"네, {confirmed}으로 확인했습니다. {next_prompt if next_prompt else ''}"
+        else:
+            return "죄송합니다. 다시 한 번 말씀해주시겠어요?"
 
 
 def get_expected_field_keys(stage_info: Dict[str, Any]) -> List[str]:
@@ -67,9 +544,24 @@ async def process_partial_response(
                 fields_to_extract = get_stage_relevant_fields(current_stage_info, required_fields, stage_id)
                 print(f"[process_partial_response] Filtered fields for stage {stage_id}: {[f['key'] for f in fields_to_extract]}")
             
-            extraction_result = await entity_agent.extract_entities_with_similarity(user_input, fields_to_extract)
+            # 유연한 추출 시도
+            extraction_result = await entity_agent.extract_entities_flexibly(
+                user_input, 
+                fields_to_extract,
+                stage_id,
+                current_stage_info
+            )
             extracted_entities = extraction_result.get("extracted_entities", {})
             similarity_messages = extraction_result.get("similarity_messages", [])
+            
+            # 의도 분석 결과를 extraction_result에 추가
+            if hasattr(entity_agent, 'last_intent_analysis') and entity_agent.last_intent_analysis:
+                extraction_result['intent_analysis'] = entity_agent.last_intent_analysis
+            
+            # 오타 수정이 있었다면 메시지 추가
+            if extraction_result.get("typo_corrections"):
+                for orig, corrected in extraction_result["typo_corrections"].items():
+                    similarity_messages.append(f"'{orig}'을(를) '{corrected}'(으)로 이해했습니다.")
         except Exception as e:
             print(f"[ERROR] Entity extraction error in partial response: {e}")
     
@@ -330,7 +822,22 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                     stage_relevant_fields = get_stage_relevant_fields(current_stage_info, required_fields, current_stage_id)
                     print(f"🤖 [ENTITY_AGENT] Filtered fields for stage: {[f['key'] for f in stage_relevant_fields]}")
                     
-                    extraction_result = await entity_agent.process_slot_filling(user_input, stage_relevant_fields, collected_info)
+                    # 유연한 추출 방식 사용
+                    extraction_result = await entity_agent.extract_entities_flexibly(
+                        user_input, 
+                        stage_relevant_fields,
+                        current_stage_id,
+                        current_stage_info
+                    )
+                    
+                    # 의도 분석 결과를 extraction_result에 추가 (자연어 응답 생성에 활용)
+                    if hasattr(entity_agent, 'last_intent_analysis') and entity_agent.last_intent_analysis:
+                        extraction_result['intent_analysis'] = entity_agent.last_intent_analysis
+                    
+                    # 추출된 엔티티를 collected_info에 병합
+                    if extraction_result.get("extracted_entities"):
+                        collected_info.update(extraction_result["extracted_entities"])
+                        extraction_result["collected_info"] = collected_info
                     
                     # Entity Agent 결과 디버깅
                     print(f"🤖 [ENTITY_AGENT] Entity Agent completed")
@@ -1066,30 +1573,43 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                 # 수정 요청 시 특별한 응답 설정
                 state["special_response_for_modification"] = True
         
-        # card_password_setting 단계
+        # card_password_setting 단계 - LLM 기반 유연한 처리
         elif current_stage_id == "card_password_setting":
-            if any(word in user_lower for word in ["네", "예", "응", "어", "그래", "좋아", "맞아", "알겠", "동일", "같게"]):
-                collected_info["card_password_same_as_account"] = True
-                print(f"[CARD_PASSWORD] '네' response -> card_password_same_as_account = True")
-            elif any(word in user_lower for word in ["아니", "다르게", "따로", "별도"]):
-                collected_info["card_password_same_as_account"] = False
-                print(f"[CARD_PASSWORD] '아니' response -> card_password_same_as_account = False")
+            try:
+                intent_result = await entity_agent.analyze_user_intent(
+                    user_input,
+                    current_stage_id,
+                    current_stage_info,
+                    collected_info
+                )
+                
+                if intent_result.get("intent") == "동일_비밀번호":
+                    collected_info["card_password_same_as_account"] = True
+                    print(f"[CARD_PASSWORD] LLM detected same password request -> True")
+                elif intent_result.get("intent") == "다른_비밀번호":
+                    collected_info["card_password_same_as_account"] = False
+                    print(f"[CARD_PASSWORD] LLM detected different password request -> False")
+                else:
+                    # Fallback to pattern matching
+                    if any(word in user_lower for word in ["네", "예", "응", "어", "그래", "좋아", "맞아", "알겠", "동일", "같게"]):
+                        collected_info["card_password_same_as_account"] = True
+                        print(f"[CARD_PASSWORD] Pattern match '네' -> True")
+                    elif any(word in user_lower for word in ["아니", "다르게", "따로", "별도"]):
+                        collected_info["card_password_same_as_account"] = False
+                        print(f"[CARD_PASSWORD] Pattern match '아니' -> False")
+            except Exception as e:
+                print(f"[CARD_PASSWORD] Intent analysis failed: {e}")
+                # Fallback
+                if any(word in user_lower for word in ["네", "예", "응", "어", "그래", "좋아", "맞아", "알겠", "동일", "같게"]):
+                    collected_info["card_password_same_as_account"] = True
+                elif any(word in user_lower for word in ["아니", "다르게", "따로", "별도"]):
+                    collected_info["card_password_same_as_account"] = False
         
-        # additional_services 단계 - V3는 boolean 처리
+        # additional_services 단계 - 새로운 LLM 기반 처리로 대체됨
         elif current_stage_id == "additional_services":
-            # V3 시나리오에서는 boolean 타입으로 처리
-            if any(word in user_lower for word in ["네", "예", "응", "어", "그래", "좋아", "맞아", "알겠", "모두", "전부", "다"]):
-                # 모든 서비스 신청 (true)
-                collected_info["important_transaction_alert"] = True
-                collected_info["withdrawal_alert"] = True
-                collected_info["overseas_ip_restriction"] = True
-                print(f"[ADDITIONAL_SERVICES] '네' response -> all services = True")
-            elif any(word in user_lower for word in ["아니", "안", "필요없", "괜찮"]):
-                # 모든 서비스 미신청 (false)
-                collected_info["important_transaction_alert"] = False
-                collected_info["withdrawal_alert"] = False
-                collected_info["overseas_ip_restriction"] = False
-                print(f"[ADDITIONAL_SERVICES] '아니' response -> all services = False")
+            # 이전 entity_agent 로직은 비활성화됨 - 새로운 LLM 기반 선택적 처리 사용
+            print(f"[ADDITIONAL_SERVICES] Stage processing - delegating to new LLM-based selective processing")
+            pass
     
     # 사용자가 '네' 응답을 한 경우 기본값 처리 (모든 bullet/choice 단계)
     if user_input and current_stage_info.get("response_type") in ["bullet", "boolean"]:
@@ -1240,86 +1760,212 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
         # Get the first field to collect as the primary field for this choice
         fields_to_collect = current_stage_info.get("fields_to_collect", [])
         expected_field = fields_to_collect[0] if fields_to_collect else None
-        print(f"🎯 [EXACT_MATCH] fields_to_collect: {fields_to_collect}")
+        print(f"🎯 [V3_CHOICE_PROCESSING] fields_to_collect: {fields_to_collect}")
+        print(f"🎯 [V3_CHOICE_PROCESSING] user_input: '{user_input}'")
         
-        # 디버깅: card_selection 단계일 때 상세 정보 출력
+        # LLM 기반 자연어 필드 추출
+        choice_mapping = None
+        
+        # 카드 선택 단계 특별 처리 - choices value와 직접 매칭 먼저 시도
         if current_stage_id == "card_selection":
-            print(f"🎯 [CARD_SELECTION_DEBUG] fields_to_collect: {fields_to_collect}")
-            print(f"🎯 [CARD_SELECTION_DEBUG] current_stage_info keys: {list(current_stage_info.keys())}")
-            # 시나리오 데이터 소스 확인
-            print(f"🎯 [CARD_SELECTION_DEBUG] active_scenario_data source: {active_scenario_data.get('version', 'unknown')}")
-            print(f"🎯 [CARD_SELECTION_DEBUG] Full stage info: {json.dumps(current_stage_info, ensure_ascii=False, indent=2)[:500]}...")
+            choice_mapping = handle_card_selection_mapping(user_input, choices, current_stage_info, collected_info)
+            if choice_mapping:
+                print(f"🎯 [CARD_SELECTION] Direct choice mapping successful: {choice_mapping}")
         
-        print(f"🎯 [EXACT_MATCH] Looking for '{user_input.strip()}' in {len(choices)} total choices")
-        print(f"🎯 [EXACT_MATCH] Expected field: {expected_field}")
-        
-        for choice in choices:
-            choice_value = choice.get("value", "") if isinstance(choice, dict) else str(choice)
-            if user_input.strip() == choice_value:
-                # 정확한 매치 발견 - Entity Agent 결과 대신 직접 사용
-                print(f"🎯 [EXACT_MATCH] {expected_field}: '{user_input}' is already a valid choice")
-                if expected_field:
-                    entities = {expected_field: user_input.strip()}
-                    intent = "정보제공"
-                    
-                    # 선택한 choice의 metadata도 함께 처리 (security_medium_registration 등)
-                    if isinstance(choice, dict) and choice.get("metadata"):
-                        choice_metadata = choice.get("metadata", {})
-                        print(f"🎯 [EXACT_MATCH] Found metadata for choice '{choice_value}': {choice_metadata}")
-                        
-                        # security_medium_registration 단계의 경우 metadata를 entities에 추가
-                        if current_stage_id == "security_medium_registration":
-                            if "transfer_limit_once" in choice_metadata:
-                                entities["transfer_limit_once"] = choice_metadata["transfer_limit_once"]
-                            if "transfer_limit_daily" in choice_metadata:
-                                entities["transfer_limit_daily"] = choice_metadata["transfer_limit_daily"]
-                            print(f"🎯 [EXACT_MATCH] Added transfer limits to entities: {entities}")
-                        
-                        # card_selection 단계의 경우 metadata를 entities에 추가
-                        elif current_stage_id == "card_selection":
-                            # card_selection 필드에 선택한 카드 value 저장
-                            entities["card_selection"] = choice_value
-                            print(f"🎯 [EXACT_MATCH] Set card_selection to: {choice_value}")
-                            
-                            if "receipt_method" in choice_metadata:
-                                entities["card_receipt_method"] = choice_metadata["receipt_method"]
-                            if "transit_enabled" in choice_metadata:
-                                entities["transit_function"] = choice_metadata["transit_enabled"]
-                            print(f"🎯 [EXACT_MATCH] Added card metadata to entities: {entities}")
-                    
-                    # scenario_output 재정의
-                    scenario_output = ScenarioAgentOutput(
-                        intent=intent,
-                        entities=entities,
-                        is_scenario_related=True
-                    )
-                    
-                    # choice_exact 모드에서는 즉시 entities를 collected_info에 저장
-                    if state.get("input_mode") == "choice_exact":
-                        print(f"🎯 [CHOICE_EXACT] Exact match found. Storing entities immediately: {entities}")
-                        for key, value in entities.items():
-                            if value is not None:
-                                collected_info[key] = value
-                                print(f"✅ [CHOICE_EXACT_STORED] {key}: '{value}'")
-                        
-                        # 현재 단계의 default_values 처리
-                        # fields_to_collect에 있지만 entities에 없는 필드들에 대해 default_values 적용
-                        default_values = current_stage_info.get("default_values", {})
-                        if default_values and fields_to_collect:
-                            for field_key in fields_to_collect:
-                                if field_key not in entities and field_key not in collected_info and field_key in default_values:
-                                    collected_info[field_key] = default_values[field_key]
-                                    print(f"✅ [CHOICE_EXACT_DEFAULT] {field_key}: '{default_values[field_key]}' (from default_values)")
-                        
-                        # statement_delivery 단계 특별 처리 (추가 보장)
-                        if current_stage_id == "statement_delivery" and "statement_delivery_method" in entities:
-                            if "statement_delivery_date" in default_values and "statement_delivery_date" not in collected_info:
-                                collected_info["statement_delivery_date"] = default_values["statement_delivery_date"]
-                                print(f"✅ [CHOICE_EXACT_DEFAULT] statement_delivery_date: '{default_values['statement_delivery_date']}' (special handling for statement_delivery)")
-                    break
+        if not choice_mapping:
+            # 시나리오의 extraction_prompt 활용
+            extraction_prompt = current_stage_info.get("extraction_prompt", "")
+            if extraction_prompt:
+                choice_mapping = await extract_field_value_with_llm(
+                    user_input, 
+                    expected_field,
+                    choices,
+                    extraction_prompt,
+                    current_stage_id
+                )
         else:
-            # 정확한 매치가 없는 경우에만 원래 scenario_output 사용
-            if scenario_output and scenario_output.get("is_scenario_related"):
+            # 기본 LLM 기반 매핑
+            choice_mapping = await map_user_intent_to_choice_enhanced(
+                user_input, 
+                choices, 
+                expected_field,
+                current_stage_id
+            )
+        
+        # 모든 단계에서 일관되게 개선된 LLM 기반 매핑 사용
+        if not choice_mapping and expected_field:
+            choice_mapping = await map_user_intent_to_choice_enhanced(
+                user_input, 
+                choices, 
+                expected_field,
+                current_stage_id
+            )
+        
+        # LLM 실패 시 강력한 키워드 기반 fallback
+        if not choice_mapping and expected_field:
+            choice_mapping = fallback_keyword_matching(
+                user_input,
+                choices,
+                expected_field,
+                current_stage_id
+            )
+        
+        if choice_mapping:
+            print(f"🎯 [V3_CHOICE_MAPPING] Mapped '{user_input}' to '{choice_mapping}'")
+            if expected_field:
+                entities = {expected_field: choice_mapping}
+                intent = "정보제공"
+                
+                # scenario_output 생성
+                scenario_output = ScenarioAgentOutput(
+                    intent=intent,
+                    entities=entities,
+                    is_scenario_related=True
+                )
+                
+                # additional_services 단계의 특별 처리
+                if current_stage_id == "additional_services" and choice_mapping in ["all_true", "all_false", "important_only", "withdrawal_only", "overseas_only"]:
+                    # 복합 필드 값 설정
+                    collected_info = apply_additional_services_values(choice_mapping, collected_info)
+                    print(f"✅ [V3_CHOICE_STORED] Applied additional_services mapping: '{choice_mapping}'")
+                # card_selection 단계의 특별 처리 - 이미 handle_card_selection_mapping에서 처리됨
+                elif current_stage_id == "card_selection":
+                    # 카드 선택은 이미 handle_card_selection_mapping에서 여러 필드가 설정됨
+                    print(f"✅ [V3_CHOICE_STORED] Card selection fields already set by handle_card_selection_mapping")
+                else:
+                    # 일반적인 단일 필드 저장
+                    collected_info[expected_field] = choice_mapping
+                    print(f"✅ [V3_CHOICE_STORED] {expected_field}: '{choice_mapping}'")
+                
+                # 자연스러운 확인 응답 생성
+                confirmation_response = generate_choice_confirmation_response(
+                    user_input, choice_mapping, current_stage_id, choices
+                )
+                
+                print(f"🎯 [V3_CHOICE_CONFIRMED] Generated confirmation: {confirmation_response}")
+                
+                # 다음 단계 확인
+                next_step = current_stage_info.get("next_step")
+                next_stage_id = current_stage_id  # 기본값은 현재 단계 유지
+                
+                if next_step:
+                    if isinstance(next_step, dict):
+                        # services_selected 값에 따른 분기
+                        if expected_field == "services_selected":
+                            next_stage_id = next_step.get(choice_mapping, next_step.get("all", current_stage_id))
+                            print(f"🎯 [V3_NEXT_STAGE] {expected_field}='{choice_mapping}' → next_stage: {next_stage_id}")
+                        # additional_services 단계 특별 처리 - services_selected 기준으로 분기
+                        elif current_stage_id == "additional_services":
+                            # 먼저 필수 필드가 모두 수집되었는지 확인
+                            required_fields = ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
+                            missing_fields = [field for field in required_fields if field not in collected_info or collected_info.get(field) is None]
+                            
+                            if missing_fields:
+                                # 필수 필드가 누락된 경우 현재 단계 유지
+                                next_stage_id = current_stage_id
+                                print(f"🎯 [V3_NEXT_STAGE] additional_services - missing fields: {missing_fields}, staying at {current_stage_id}")
+                            else:
+                                # 모든 필드가 수집된 경우 다음 단계로 진행
+                                services_selected = collected_info.get("services_selected", "all")
+                                next_stage_id = next_step.get(services_selected, next_step.get("all", current_stage_id))
+                                print(f"🎯 [V3_NEXT_STAGE] additional_services - all fields collected, services_selected='{services_selected}' → next_stage: {next_stage_id}")
+                        else:
+                            next_stage_id = next_step.get(choice_mapping, current_stage_id)
+                    else:
+                        # 단순 문자열인 경우
+                        next_stage_id = next_step
+                        print(f"🎯 [V3_NEXT_STAGE] Direct transition → {next_stage_id}")
+                
+                # 다음 단계로 진행하는 경우
+                if next_stage_id != current_stage_id:
+                    # 다음 스테이지 정보 가져오기
+                    next_stage_info = active_scenario_data.get("stages", {}).get(str(next_stage_id), {})
+                    next_stage_prompt = next_stage_info.get("prompt", "")
+                    
+                    print(f"🎯 [V3_STAGE_TRANSITION] {current_stage_id} → {next_stage_id}")
+                    
+                    # stage_response_data 생성 (개인정보 표시 등을 위해 필요)
+                    stage_response_data = None
+                    if "response_type" in next_stage_info:
+                        stage_response_data = generate_stage_response(next_stage_info, collected_info, active_scenario_data)
+                        print(f"🎯 [V3_STAGE_RESPONSE] Generated stage response data for {next_stage_id}")
+                    
+                    # 다음 단계의 프롬프트가 있으면 사용, 없으면 확인 응답 사용
+                    final_response = next_stage_prompt if next_stage_prompt else confirmation_response
+                    
+                    update_dict = {
+                        "final_response_text_for_tts": final_response,
+                        "is_final_turn_response": True,
+                        "current_scenario_stage_id": next_stage_id,  # 다음 단계로 진행
+                        "collected_product_info": collected_info,
+                        "action_plan": [],
+                        "action_plan_struct": [],
+                        "scenario_awaiting_user_response": True,
+                        "scenario_ready_for_continuation": True
+                    }
+                    
+                    if stage_response_data:
+                        update_dict["stage_response_data"] = stage_response_data
+                    
+                    return state.merge_update(update_dict)
+                else:
+                    # 현재 단계 유지
+                    return state.merge_update({
+                        "final_response_text_for_tts": confirmation_response,
+                        "is_final_turn_response": True,
+                        "current_scenario_stage_id": current_stage_id,
+                        "collected_product_info": collected_info,
+                        "action_plan": [],
+                        "action_plan_struct": [],
+                        "scenario_awaiting_user_response": True,
+                        "scenario_ready_for_continuation": True
+                    })
+        else:
+            # additional_services 단계에서 choice_mapping 실패 시 직접 처리
+            if current_stage_id == "additional_services":
+                handled = handle_additional_services_fallback(user_input, collected_info)
+                if handled:
+                    print(f"🎯 [ADDITIONAL_SERVICES_FALLBACK] Successfully processed: {user_input}")
+                    return state.merge_update({
+                        "final_response_text_for_tts": "네, 설정해드렸습니다.",
+                        "is_final_turn_response": True,
+                        "current_scenario_stage_id": current_stage_id,
+                        "collected_product_info": collected_info,
+                        "action_plan": [],
+                        "action_plan_struct": [],
+                        "scenario_awaiting_user_response": True,
+                        "scenario_ready_for_continuation": True
+                    })
+            
+            # 정확한 매치가 없는 경우 - 애매한 지시어 검사
+            ambiguous_keywords = ["그걸로", "그것으로", "그거", "그렇게", "저걸로", "저것으로", "저거", "위에꺼", "아래꺼", "첫번째", "두번째"]
+            is_ambiguous_reference = any(keyword in user_input.lower() for keyword in ambiguous_keywords)
+            
+            if is_ambiguous_reference or (scenario_output and not scenario_output.get("is_scenario_related")):
+                # 애매한 지시어나 무관한 발화인 경우 명확한 선택 유도 응답 생성
+                print(f"🎯 [V3_AMBIGUOUS] Ambiguous reference or deviation detected: '{user_input}'")
+                
+                # 선택지 명확화 유도 응답 생성
+                clarification_response = await generate_choice_clarification_response(
+                    user_input=user_input,
+                    current_stage=current_stage_id,
+                    current_stage_info=current_stage_info,
+                    choices=choices,
+                    is_ambiguous=is_ambiguous_reference
+                )
+                
+                # 현재 단계 유지하고 명확화 유도 응답 반환
+                return state.merge_update({
+                    "final_response_text_for_tts": clarification_response,
+                    "is_final_turn_response": True,
+                    "current_scenario_stage_id": current_stage_id,  # 현재 단계 유지
+                    "collected_product_info": collected_info,
+                    "action_plan": [],
+                    "action_plan_struct": [],
+                    "scenario_awaiting_user_response": True,
+                    "scenario_ready_for_continuation": True
+                })
+            elif scenario_output and scenario_output.get("is_scenario_related"):
                 entities = scenario_output.get("entities", {})
                 intent = scenario_output.get("intent", "")
             else:
@@ -1537,31 +2183,41 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             collected_info[expected_info_key] = "보안카드"
             print(f"🔐 [SECURITY_MEDIUM] Set {expected_info_key} = 보안카드 (user said no)")
     
-    # additional_services 단계에서 "네" 응답 처리
+    # additional_services 단계에서 "네" 응답 처리 - 더 엄격한 조건
     if current_stage_id == "additional_services":
         print(f"[ADDITIONAL_SERVICES] Processing with input: '{user_input}'")
         
         service_fields = ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
         has_specific_selections = any(field in collected_info for field in service_fields)
         
-        if (not has_specific_selections and user_input and 
-            any(word in user_input for word in ["네", "예", "응", "어", "좋아요", "모두", "전부", "다", "신청", "하겠습니다"])):
-            # V3 시나리오: choices에서 default 값 확인
-            choices = current_stage_info.get("choices", [])
-            if choices:
-                # boolean 타입 choices 처리
-                for choice in choices:
-                    field_key = choice.get("key")
-                    if field_key and choice.get("default", False):
-                        collected_info[field_key] = True
-                        print(f"[ADDITIONAL_SERVICES] Set {field_key} = True (from choice default)")
+        # 새로운 LLM 처리나 키워드 매핑이 이미 처리했다면 여기서는 처리하지 않음
+        if not has_specific_selections and user_input:
+            user_lower = user_input.lower().strip()
+            # 매우 단순한 긍정 응답만 처리 (구체적 언급이 없는 경우)
+            simple_yes_words = ["네", "예", "응", "어", "좋아요"]
+            specific_mentions = ["만", "알림", "내역", "거래", "해외", "ip", "제한", "출금", "중요"]
+            
+            # 단순한 긍정 응답이면서 구체적 언급이 없는 경우에만 기본값 적용
+            if (any(word == user_lower for word in simple_yes_words) and 
+                not any(mention in user_lower for mention in specific_mentions)):
+                # V3 시나리오: choices에서 default 값 확인
+                choices = current_stage_info.get("choices", [])
+                if choices:
+                    # boolean 타입 choices 처리
+                    for choice in choices:
+                        field_key = choice.get("key")
+                        if field_key and choice.get("default", False):
+                            collected_info[field_key] = True
+                            print(f"[ADDITIONAL_SERVICES] Set {field_key} = True (from choice default)")
+                else:
+                    # 기존 방식: default_values 사용
+                    default_values = current_stage_info.get("default_values", {})
+                    for field in service_fields:
+                        if field in default_values:
+                            collected_info[field] = default_values[field]
+                            print(f"[ADDITIONAL_SERVICES] Set {field} = {default_values[field]}")
             else:
-                # 기존 방식: default_values 사용
-                default_values = current_stage_info.get("default_values", {})
-                for field in service_fields:
-                    if field in default_values:
-                        collected_info[field] = default_values[field]
-                        print(f"[ADDITIONAL_SERVICES] Set {field} = {default_values[field]}")
+                print(f"[ADDITIONAL_SERVICES] Skipping default processing - user input contains specific mentions or not simple yes")
     
     # ask_notification_settings 단계에서 "네" 응답 처리 (Entity Agent 결과가 없는 경우에만)
     if current_stage_id == "ask_notification_settings":
@@ -1640,10 +2296,10 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             main_field_key = expected_field_keys[0] if expected_field_keys else None
             print(f"[V3_NEXT_STEP] main_field_key: {main_field_key}, collected_info: {collected_info}")
             
-            # additional_services 처리 - services_selected 값에 따라 JSON의 next_step 분기 사용
-            if current_stage_id == "additional_services":
+            # select_services 처리 - services_selected 값에 따라 JSON의 next_step 분기 사용
+            if current_stage_id == "select_services":
                 services_selected = collected_info.get("services_selected")
-                print(f"[V3_NEXT_STEP] additional_services branching - services_selected: {services_selected}")
+                print(f"[V3_NEXT_STEP] select_services branching - services_selected: {services_selected}")
                 next_stage_id = next_step.get(services_selected, next_step.get("all", "completion"))
             # confirm_personal_info 특별 처리 - 중첩된 next_step 구조
             elif current_stage_id == "confirm_personal_info":
@@ -1687,6 +2343,21 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
                             })
                         next_stage_id = next_step.get("false", "customer_info_update")
                         print(f"[V3_NEXT_STEP] False branch - next_stage_id: {next_stage_id}")
+            # additional_services 특별 처리 - services_selected 값에 따라 분기
+            elif current_stage_id == "additional_services":
+                services_selected = collected_info.get("services_selected")
+                print(f"[V3_NEXT_STEP] additional_services branching - services_selected: {services_selected}")
+                
+                # services_selected 값에 따라 적절한 다음 단계 결정
+                if services_selected in ["all", "card_only"]:
+                    next_stage_id = next_step.get("all", "card_selection")
+                elif services_selected == "mobile_only":
+                    next_stage_id = next_step.get("mobile_only", "final_confirmation")
+                else:
+                    # 기본값: all 처리 (card_selection으로 이동)
+                    next_stage_id = next_step.get("all", "card_selection")
+                    
+                print(f"[V3_NEXT_STEP] additional_services - next_stage_id: {next_stage_id}")
             elif main_field_key and main_field_key in collected_info:
                 collected_value = collected_info[main_field_key]
                 print(f"[V3_NEXT_STEP] collected_value: {collected_value} for field: {main_field_key}")
@@ -1697,8 +2368,25 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
                 next_stage_id = current_stage_id
                 print(f"[V3_NEXT_STEP] No info collected, staying at {current_stage_id}")
         else:
-            # next_step이 string인 경우 바로 이동
-            next_stage_id = next_step
+            # next_step이 string인 경우
+            # 필수 필드가 수집되었는지 확인
+            fields_to_collect = get_expected_field_keys(current_stage_info)
+            required_fields_collected = True
+            
+            for field in fields_to_collect:
+                if field not in collected_info or collected_info.get(field) is None:
+                    required_fields_collected = False
+                    print(f"[V3_NEXT_STEP] Required field '{field}' not collected")
+                    break
+            
+            if required_fields_collected:
+                # 모든 필수 필드가 수집된 경우에만 다음 단계로 이동
+                next_stage_id = next_step
+                print(f"[V3_NEXT_STEP] All required fields collected, moving to {next_stage_id}")
+            else:
+                # 필수 필드가 수집되지 않았으면 현재 단계에 머무름
+                next_stage_id = current_stage_id
+                print(f"[V3_NEXT_STEP] Required fields not collected, staying at {current_stage_id}")
         
         # V3 시나리오에서 next_step을 사용한 경우 바로 처리하고 반환
         print(f"[V3_NEXT_STEP] Final next_stage_id: {next_stage_id}")
@@ -1766,38 +2454,17 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         expected_field_keys = get_expected_field_keys(current_stage_info)
         main_field_key = expected_field_keys[0] if expected_field_keys else None
         if main_field_key and main_field_key not in collected_info:
-            # Boolean 타입 필드에 대한 특별 처리
-            if current_stage_info.get("input_type") == "yes_no" and user_input:
-                # 사용자 입력에서 boolean 값 직접 추출
-                user_lower = user_input.lower().strip()
-                if user_lower in ["네", "예", "좋아요", "그래요", "맞아요", "신청", "원해요", "할게요", "하겠어요"]:
-                    collected_info[main_field_key] = True
-                elif user_lower in ["아니요", "아니에요", "안", "필요없", "괜찮", "나중에", "안할", "미신청", "싫어요", "거부"]:
-                    collected_info[main_field_key] = False
+            # LLM 기반 자연어 필드 값 추출
+            extracted_value = await extract_any_field_value_with_llm(
+                user_input,
+                main_field_key,
+                current_stage_info,
+                current_stage_id
+            )
             
-            # Choice 타입 필드에 대한 특별 처리
-            elif current_stage_info.get("input_type") == "choice" and user_input:
-                # 선택지에서 정확한 매칭 확인
-                choices = current_stage_info.get("choices", [])
-                user_input_clean = user_input.strip()
-                
-                # 정확한 value 매칭 우선
-                for choice in choices:
-                    if choice.get("value") == user_input_clean:
-                        collected_info[main_field_key] = user_input_clean
-                        break
-                else:
-                    # value 매칭 실패시 label 매칭 시도
-                    for choice in choices:
-                        if choice.get("label") == user_input_clean:
-                            collected_info[main_field_key] = choice.get("value")
-                            break
-                    else:
-                        # 부분 문자열 매칭 시도
-                        for choice in choices:
-                            if user_input_clean in choice.get("value", "") or user_input_clean in choice.get("label", ""):
-                                collected_info[main_field_key] = choice.get("value")
-                                break
+            if extracted_value is not None:
+                collected_info[main_field_key] = extracted_value
+                print(f"🎯 [LLM_FIELD_EXTRACTION] {main_field_key}: '{user_input}' -> {extracted_value}")
             
             # 여전히 정보가 수집되지 않았으면 현재 스테이지 유지
             if main_field_key not in collected_info:
@@ -1958,6 +2625,16 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
     # 스테이지별 확인 메시지 추가
     confirmation_msg = ""
     
+    # LLM 기반 자연스러운 응답 생성을 위한 정보 준비
+    natural_response_info = {
+        "user_input": user_input,
+        "current_stage": current_stage_id,
+        "stage_info": current_stage_info,
+        "collected_info": collected_info,
+        "extraction_result": extraction_result if 'extraction_result' in locals() else {},
+        "next_stage_id": determined_next_stage_id
+    }
+    
     # limit_account_guide에서 전환된 경우
     if current_stage_id == "limit_account_guide" and collected_info.get("limit_account_agreement"):
         confirmation_msg = "네, 한도계좌로 진행하겠습니다. "
@@ -2040,8 +2717,26 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         
         # prompt가 있는 경우 final_response_text_for_tts에 설정 (narrative 및 bullet 타입 모두)
         if next_stage_prompt:
-            update_dict["final_response_text_for_tts"] = next_stage_prompt
-            print(f"🎯 [STAGE_RESPONSE_WITH_TEXT] Set final_response_text_for_tts: '{next_stage_prompt[:100]}...'")
+            # 사용자 입력이 있을 때 LLM 기반 자연스러운 응답 생성 시도
+            if user_input and determined_next_stage_id != current_stage_id:
+                try:
+                    next_stage_info = active_scenario_data.get("stages", {}).get(str(determined_next_stage_id), {})
+                    natural_response = await generate_natural_response(
+                        natural_response_info["user_input"],
+                        natural_response_info["current_stage"],
+                        natural_response_info["stage_info"],
+                        natural_response_info["collected_info"],
+                        natural_response_info["extraction_result"],
+                        next_stage_info
+                    )
+                    update_dict["final_response_text_for_tts"] = natural_response
+                    print(f"🎯 [NATURAL_RESPONSE] Generated: '{natural_response[:100]}...'")
+                except Exception as e:
+                    print(f"🎯 [NATURAL_RESPONSE] Failed, using template: {e}")
+                    update_dict["final_response_text_for_tts"] = next_stage_prompt
+            else:
+                update_dict["final_response_text_for_tts"] = next_stage_prompt
+                print(f"🎯 [STAGE_RESPONSE_WITH_TEXT] Set final_response_text_for_tts: '{next_stage_prompt[:100]}...'")
         # 현재 단계에 머무는 경우의 prompt 처리
         elif determined_next_stage_id == current_stage_id and stage_response_data:
             current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
@@ -2416,9 +3111,6 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
     response_type = stage_info.get("response_type", "narrative")
     stage_id = stage_info.get("stage_id", "unknown")
     
-    print(f"🎯 [GENERATE_STAGE_RESPONSE] Stage: {stage_id}, Type: {response_type}")
-    print(f"🎯 [GENERATE_STAGE_RESPONSE] Has choice_groups: {bool(stage_info.get('choice_groups'))}")
-    print(f"🎯 [GENERATE_STAGE_RESPONSE] Has dynamic_prompt: {bool(stage_info.get('dynamic_prompt'))}")
     
     # final_confirmation 단계의 동적 프롬프트 생성
     if stage_id == "final_confirmation":
@@ -2438,10 +3130,16 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
     if stage_info.get("display_fields"):
         # V3 시나리오: display_fields가 dict인 경우 (실제 값이 포함됨)
         if isinstance(stage_info["display_fields"], dict):
-            # display_fields의 값들을 collected_info에 기본값으로 추가
+            # V3 시나리오의 display_fields는 이미 포맷된 데이터이므로 바로 사용
             display_values = stage_info["display_fields"]
-            merged_info = {**display_values, **collected_info}  # collected_info가 우선
-            prompt = format_prompt_with_fields(prompt, merged_info, list(display_values.keys()), scenario_data)
+            field_display = []
+            for field_name, value in display_values.items():
+                field_display.append(f"- {field_name}: {value}")
+            
+            # 프롬프트에 개인정보 추가
+            if field_display:
+                prompt = prompt + "\n\n" + "\n".join(field_display)
+                print(f"🎯 [V3_DISPLAY_FIELDS] Added {len(field_display)} fields to prompt")
         else:
             # 기존 방식: display_fields가 list인 경우
             prompt = format_prompt_with_fields(prompt, collected_info, stage_info["display_fields"], scenario_data)
@@ -2463,7 +3161,6 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
         questions = stage_info.get("additional_questions", [])
         response_data["additional_questions"] = questions
         response_data["additionalQuestions"] = questions  # camelCase for frontend compatibility
-        print(f"🎯 [ADDITIONAL_QUESTIONS] Stage: {stage_info.get('stage_id')}, Added {len(questions)} additional questions: {questions}")
     
     # 선택지가 있는 경우
     if response_type in ["bullet", "boolean"]:
@@ -2766,3 +3463,690 @@ def format_field_value(field_key: str, value: Any, field_type: str) -> str:
     
     # 기본값
     return str(value)
+
+
+async def extract_field_value_with_llm(
+    user_input: str,
+    field_key: str,
+    choices: List[Any],
+    extraction_prompt: str,
+    stage_id: str
+) -> Optional[str]:
+    """시나리오의 extraction_prompt를 활용한 LLM 기반 필드 값 추출"""
+    
+    # 선택지 정보 준비
+    choice_options = []
+    for choice in choices:
+        if isinstance(choice, dict):
+            choice_options.append(f"- {choice.get('value', '')}: {choice.get('display', '')}")
+        else:
+            choice_options.append(f"- {choice}")
+    
+    # 확장된 프롬프트 생성
+    enhanced_prompt = f"""
+당신은 한국어 자연어 이해 전문가입니다. 사용자의 다양한 표현을 정확히 파악하여 올바른 선택지로 매핑하세요.
+
+**원본 지시사항**: {extraction_prompt}
+
+**사용자 입력**: "{user_input}"
+
+**선택 가능한 옵션들**:
+{chr(10).join(choice_options)}
+
+**한국어 자연어 이해 규칙**:
+1. **줄임말/구어체 인식**: "딥드림/딥드립"→Deep Dream, "아이피"→IP, "해외아이피"→해외IP, "에스라인"→S-Line
+2. **의도 기반 매핑**: "~만 해줘", "~로 해줘", "~으로 신청" 등의 표현에서 핵심 의도 추출
+3. **유사어 처리**: "제한"="차단", "알림"="통보"="문자", "카드"="체크카드", "신청"="선택"
+4. **문맥 고려**: 전후 맥락을 고려한 정확한 의미 파악
+
+**매핑 예시**:
+- "해외아이피만 제한해줘" → 해외IP 관련 옵션 (overseas_only, overseas_ip_restriction 등)
+- "딥드림 후불교통으로 해줘" → deepdream_transit (Deep Dream + 후불교통 조합)
+- "딥드립 후불교통으로 해줘" → deepdream_transit (딥드립=딥드림)
+- "출금내역만 신청해줘" → withdrawal_only (출금 관련 서비스만)
+- "중요한거만 해줘" → important_only (중요거래 관련만)
+- "모두 다 해줘" → all_true (모든 옵션 선택)
+
+**신뢰도 기준**:
+- 명확한 매핑: 0.9+ (정확한 키워드 포함)
+- 추론 가능: 0.7+ (문맥상 유추 가능)
+- 애매한 경우: 0.5- (null 반환)
+
+**JSON 응답 형식**:
+{{
+    "extracted_value": "매핑된_정확한_값" 또는 null,
+    "confidence": 0.0-1.0,
+    "reasoning": "구체적인 매핑 근거 (어떤 단어/표현에서 어떻게 추론했는지)"
+}}
+"""
+    
+    try:
+        from ...chains import json_llm
+        
+        response = await json_llm.ainvoke(enhanced_prompt)
+        # AIMessage 객체인 경우 content 추출 후 JSON 파싱
+        if hasattr(response, 'content'):
+            import json
+            try:
+                result = json.loads(response.content)
+            except json.JSONDecodeError:
+                print(f"❌ [LLM] JSON parsing failed: {response.content}")
+                result = {}
+        else:
+            result = response
+        
+        if result.get("extracted_value") and result.get("confidence", 0) > 0.6:
+            print(f"🎯 [LLM_EXTRACTION] {field_key}: '{user_input}' -> '{result['extracted_value']}' (confidence: {result.get('confidence', 0)})")
+            return result["extracted_value"]
+        else:
+            print(f"🎯 [LLM_EXTRACTION] Low confidence or null result for '{user_input}' (confidence: {result.get('confidence', 0)})")
+            
+    except Exception as e:
+        print(f"❌ [LLM_EXTRACTION] Error: {e}")
+    
+    return None
+
+
+async def map_user_intent_to_choice_enhanced(
+    user_input: str,
+    choices: List[Any],
+    field_key: str,
+    stage_id: str
+) -> Optional[str]:
+    """개선된 LLM 기반 의도 매핑 (키워드 매칭 최소화)"""
+    
+    # 선택지 정보 준비
+    choice_info = []
+    choice_values = []
+    
+    for choice in choices:
+        if isinstance(choice, dict):
+            value = choice.get("value", "")
+            display = choice.get("display", "")
+            choice_values.append(value)
+            choice_info.append(f"- '{value}': {display}")
+        else:
+            choice_values.append(str(choice))
+            choice_info.append(f"- '{choice}'")
+    
+    # 맥락적 프롬프트 생성
+    context_hints = {
+        "select_services": "어떤 서비스를 함께 가입할지 선택. '다/전부/모두'=all, '앱만/모바일만'=mobile_only, '카드만'=card_only, '계좌만/통장만'=account_only",
+        "security_medium_registration": "보안매체 선택. '미래테크'=futuretech, '코마스/RSA'=comas_rsa, '보안카드'=security_card, 'OTP'=shinhan_otp",
+        "confirm_personal_info": "개인정보 확인 여부. '맞다/확인/네'=true, '틀리다/수정/아니'=false",
+        "additional_services": "추가 서비스 선택. '중요거래만/중요한거만'=important_only, '출금알림만/출금내역만/인출알림만'=withdrawal_only, '해외IP만/해외아이피만/아이피제한만'=overseas_only, '다/모두/전부/전체'=all_true, '안해/필요없어/거부'=all_false",
+        "card_selection": "카드 종류 선택. 'S-Line/에스라인'=sline, 'Deep Dream/딥드림/딥드립'=deepdream, 'Hey Young/헤이영'=heyyoung, '후불교통/교통카드/transit'=transit 기능",
+        "statement_delivery": "명세서 수령 방법. '휴대폰/문자'=mobile, '이메일'=email, '홈페이지/웹사이트'=website"
+    }
+    
+    context_hint = context_hints.get(stage_id, f"사용자의 {field_key} 관련 의도 파악")
+    
+    enhanced_prompt = f"""
+당신은 한국어 자연어 이해 및 의도 분류 전문 AI입니다. 사용자의 자연스러운 표현을 정확히 이해하여 적절한 선택지로 매핑하세요.
+
+**분석 대상**: "{user_input}"
+**필드**: {field_key} ({stage_id} 단계)
+**맥락 가이드**: {context_hint}
+
+**선택 가능한 옵션**:
+{chr(10).join(choice_info)}
+
+**고급 자연어 이해 규칙**:
+
+🔹 **줄임말/구어체 처리**:
+- "딥드림/딥드립" ↔ "Deep Dream"
+- "아이피" ↔ "IP" 
+- "해외아이피" ↔ "해외IP"
+- "앱" ↔ "모바일앱"
+- "카드" ↔ "체크카드"
+- "에스라인" ↔ "S-Line"
+
+🔹 **의도 표현 패턴 인식**:
+- "~만 해줘" → 해당 항목만 선택
+- "~로 해줘" → 해당 방식으로 설정
+- "다 해줘/모두 해줘" → 전체 선택
+- "안 해요/필요없어요" → 거부/선택안함
+- "그걸로/그것으로" → 기본 선택지
+
+🔹 **유사어/동의어 처리**:
+- "제한" = "차단" = "막기"
+- "알림" = "통보" = "문자"
+- "신청" = "선택" = "등록"
+- "발급" = "만들기" = "개설"
+
+🔹 **실제 사용 예시 기반 매핑**:
+- "해외아이피만 제한해줘" → overseas_only
+- "딥드림 후불교통으로 해줘" → deepdream_transit
+- "딥드립 후불교통으로 해줘" → deepdream_transit (딥드립=딥드림)
+- "출금내역만 신청해줘" → withdrawal_only
+- "중요한거만 해줘" → important_only
+- "미래테크 말이야" → futuretech_19284019384
+- "이메일로 받을게요" → email
+- "아이피만 제한해줘" → overseas_only
+
+**신뢰도 평가 기준**:
+- 0.9+: 명확한 키워드 직접 매칭
+- 0.8+: 줄임말/유사어로 명확 추론 가능
+- 0.7+: 문맥상 의도가 분명함
+- 0.6-: 애매하거나 여러 해석 가능
+- 0.5-: 매핑 불가, null 반환
+
+**JSON 응답**:
+{{
+    "mapped_value": "정확한_옵션_값" 또는 null,
+    "confidence": 0.0-1.0,
+    "reasoning": "상세한 분석 과정 (어떤 단어에서 어떻게 추론했는지)"
+}}
+"""
+    
+    try:
+        from ...chains import json_llm
+        
+        response = await json_llm.ainvoke(enhanced_prompt)
+        # AIMessage 객체인 경우 content 추출 후 JSON 파싱
+        if hasattr(response, 'content'):
+            import json
+            try:
+                result = json.loads(response.content)
+            except json.JSONDecodeError:
+                print(f"❌ [LLM] JSON parsing failed: {response.content}")
+                result = {}
+        else:
+            result = response
+        
+        mapped_value = result.get("mapped_value")
+        confidence = result.get("confidence", 0)
+        
+        if mapped_value and mapped_value in choice_values and confidence > 0.7:
+            print(f"🎯 [LLM_ENHANCED] {field_key}: '{user_input}' -> '{mapped_value}' (confidence: {confidence})")
+            return mapped_value
+        else:
+            print(f"🎯 [LLM_ENHANCED] Unable to map '{user_input}' with high confidence (confidence: {confidence})")
+            
+    except Exception as e:
+        print(f"❌ [LLM_ENHANCED] Error: {e}")
+    
+    return None
+
+
+async def extract_any_field_value_with_llm(
+    user_input: str,
+    field_key: str,
+    stage_info: Dict[str, Any],
+    stage_id: str
+) -> Optional[Any]:
+    """모든 타입의 필드 값을 자연어로부터 추출하는 범용 LLM 함수"""
+    
+    input_type = stage_info.get("input_type", "text")
+    extraction_prompt = stage_info.get("extraction_prompt", "")
+    
+    # 타입별 기본 프롬프트 생성
+    if input_type == "yes_no":
+        base_prompt = f"""
+사용자의 응답에서 확인/동의 여부를 판단하세요.
+
+사용자 입력: "{user_input}"
+필드: {field_key}
+
+긍정적 응답 (true): 네, 예, 맞아요, 좋아요, 확인, 동의, 그렇게, 할게요, 하겠어요, 신청, 원해요 등
+부정적 응답 (false): 아니요, 안 해요, 필요없어요, 거부, 싫어요, 나중에, 괜찮아요, 안 할게요 등
+
+응답 형식 (JSON):
+{{
+    "extracted_value": true/false 또는 null,
+    "confidence": 0.0-1.0,
+    "reasoning": "판단 근거"
+}}
+"""
+    
+    elif input_type == "choice":
+        choices = stage_info.get("choices", [])
+        choice_options = []
+        for choice in choices:
+            if isinstance(choice, dict):
+                choice_options.append(f"- '{choice.get('value', '')}': {choice.get('display', '')}")
+            else:
+                choice_options.append(f"- '{choice}'")
+                
+        base_prompt = f"""
+사용자의 응답에서 가장 적절한 선택지를 찾으세요.
+
+사용자 입력: "{user_input}"
+필드: {field_key}
+
+선택 가능한 옵션들:
+{chr(10).join(choice_options)}
+
+응답 형식 (JSON):
+{{
+    "extracted_value": "선택된 값" 또는 null,
+    "confidence": 0.0-1.0,
+    "reasoning": "선택 근거"
+}}
+"""
+    
+    else:
+        # text나 기타 타입
+        base_prompt = f"""
+사용자의 응답에서 {field_key} 관련 정보를 추출하세요.
+
+사용자 입력: "{user_input}"
+필드: {field_key}
+
+응답 형식 (JSON):
+{{
+    "extracted_value": "추출된 값" 또는 null,
+    "confidence": 0.0-1.0,
+    "reasoning": "추출 근거"
+}}
+"""
+    
+    # extraction_prompt가 있으면 우선 사용
+    if extraction_prompt:
+        enhanced_prompt = f"""
+{extraction_prompt}
+
+사용자 입력: "{user_input}"
+
+위 가이드라인을 따라 추출하되, 확신이 없으면 null을 반환하세요.
+
+응답 형식 (JSON):
+{{
+    "extracted_value": "추출된 값" 또는 null,
+    "confidence": 0.0-1.0,
+    "reasoning": "추출 근거"
+}}
+"""
+    else:
+        enhanced_prompt = base_prompt
+    
+    try:
+        from ...chains import json_llm
+        
+        response = await json_llm.ainvoke(enhanced_prompt)
+        # AIMessage 객체인 경우 content 추출 후 JSON 파싱
+        if hasattr(response, 'content'):
+            import json
+            try:
+                result = json.loads(response.content)
+            except json.JSONDecodeError:
+                print(f"❌ [LLM] JSON parsing failed: {response.content}")
+                result = {}
+        else:
+            result = response
+        
+        extracted_value = result.get("extracted_value")
+        confidence = result.get("confidence", 0)
+        
+        if confidence > 0.55 and extracted_value is not None:
+            print(f"🎯 [ANY_FIELD_EXTRACTION] {field_key}: '{user_input}' -> {extracted_value} (confidence: {confidence})")
+            return extracted_value
+        else:
+            print(f"🎯 [ANY_FIELD_EXTRACTION] Low confidence for '{user_input}' -> {field_key} (confidence: {confidence})")
+            
+    except Exception as e:
+        print(f"❌ [ANY_FIELD_EXTRACTION] Error: {e}")
+    
+    return None
+
+
+def fallback_keyword_matching(
+    user_input: str,
+    choices: List[Any],
+    field_key: str,
+    stage_id: str
+) -> Optional[str]:
+    """LLM 실패 시 사용하는 강력한 키워드 기반 fallback"""
+    
+    user_lower = user_input.lower().strip()
+    
+    # 단계별 특화 키워드 매핑 (가장 구체적인 것부터)
+    stage_specific_mappings = {
+        "select_services": {
+            "all": [
+                "다", "전부", "모두", "전체", "다해", "다해줘", "다해주세요", "전부해", "전부해줘", 
+                "모두해", "모두해줘", "함께", "같이", "전부다", "모두다", "다가입", "전체가입", 
+                "올인", "풀세트", "전세트", "다주세요", "전부주세요", "모두주세요"
+            ],
+            "mobile_only": [
+                "앱만", "모바일만", "폰만", "핸드폰만", "어플만", "애플만", "스마트폰만", 
+                "모바일앱만", "앱하나만", "앱서비스만", "모바일서비스만"
+            ],
+            "card_only": [
+                "카드만", "체크카드만", "카드하나만", "카드서비스만", "체크만", "카드발급만", 
+                "체크카드발급만", "카드신청만"
+            ],
+            "account_only": [
+                "계좌만", "통장만", "입출금만", "계좌하나만", "통장하나만", "기본계좌만", 
+                "입출금계좌만", "통장개설만", "계좌개설만"
+            ]
+        },
+        
+        "security_medium_registration": {
+            "futuretech_19284019384": [
+                "미래테크", "미래", "19284019384", "19284", "미래테크19284", "미래테크말", 
+                "미래테크로", "미래테크것", "미래테크거", "미래테크꺼", "미래테크로해", 
+                "미래테크말이야", "미래테크로할게", "미래테크사용", "미래테크선택"
+            ],
+            "comas_rsa_12930295": [
+                "코마스", "RSA", "rsa", "12930295", "12930", "코마스RSA", "rsa코마스",
+                "코마스로", "코마스것", "코마스거", "코마스꺼", "코마스말", "rsa말", 
+                "코마스말이야", "코마스로할게", "rsa로할게", "코마스사용", "rsa사용"
+            ],
+            "security_card": [
+                "보안카드", "카드", "보안", "보안카드로", "보안카드말", "보안카드것", 
+                "보안카드거", "보안카드꺼", "보안카드말이야", "보안카드로할게", "보안카드사용", "보안카드선택"
+            ],
+            "shinhan_otp": [
+                "OTP", "otp", "신한OTP", "신한otp", "오티피", "OTP로", "otp로", 
+                "OTP말", "otp말", "OTP것", "otp것", "OTP거", "otp거", "OTP꺼", "otp꺼",
+                "OTP말이야", "otp말이야", "OTP로할게", "otp로할게", "OTP사용", "otp사용", "OTP선택"
+            ]
+        },
+        
+        "confirm_personal_info": {
+            "true": [
+                "네", "예", "맞아요", "맞습니다", "맞다", "좋아요", "좋습니다", "확인", 
+                "확인했어요", "확인했습니다", "동의", "동의해요", "동의합니다", "그래요", 
+                "그렇습니다", "맞네요", "정확해요", "정확합니다", "옳아요", "옳습니다", 
+                "그렇게", "그렇게해", "그렇게해주세요", "승인", "진행", "진행해", "진행해주세요"
+            ],
+            "false": [
+                "아니요", "아니에요", "아닙니다", "틀려요", "틀렸어요", "틀렸습니다", 
+                "다르다", "다르네요", "다릅니다", "수정", "수정해", "수정해주세요", 
+                "변경", "변경해", "변경해주세요", "거부", "거부해요", "거부합니다", 
+                "반대", "안해", "안해요", "싫어", "싫어요", "아니", "노"
+            ]
+        },
+        
+        "additional_services": {
+            "all_true": [
+                "다", "전부", "모두", "전체", "다해", "다해줘", "다해주세요", "전부해", "전부해줘", 
+                "모두해", "모두해줘", "전부다", "모두다", "다신청", "전체신청", "모두신청"
+            ],
+            "all_false": [
+                "안해", "안해요", "필요없어", "필요없어요", "괜찮아", "괜찮아요", "나중에", 
+                "싫어", "싫어요", "거부", "거부해요", "안신청", "신청안해", "아니요", "아니에요"
+            ],
+            "important_only": [
+                "중요거래만", "중요거래알림만", "중요한거만", "중요거래만해", "중요거래만해줘", 
+                "중요거래만신청", "중요거래서비스만", "중요한것만", "중요거래기능만", "중요한거래만",
+                "중요거래통보만", "중요거래통보만해", "중요거래통보만해줘", "중요한알림만"
+            ],
+            "withdrawal_only": [
+                "출금알림만", "출금만", "출금서비스만", "출금알림만해", "출금알림만해줘", 
+                "출금알림만신청", "출금기능만", "출금내역만", "출금내역만해", "출금내역만해줘",
+                "출금내역만신청", "출금내역알림만", "출금통보만", "출금통보만해", "출금통보만해줘"
+            ],
+            "overseas_only": [
+                "해외IP만", "해외제한만", "해외IP제한만", "IP제한만", "해외차단만", 
+                "해외IP만해", "해외IP만해줘", "해외IP만신청", "해외서비스만",
+                "해외아이피만", "아이피제한만", "아이피만", "해외아이피제한만",
+                "해외아이피만해", "해외아이피만해줘", "아이피만해", "아이피만해줘"
+            ]
+        }
+    }
+    
+    # 현재 단계의 키워드 매핑 사용
+    keyword_mappings = stage_specific_mappings.get(stage_id, {})
+    
+    # 키워드 매칭 (부분 문자열 포함)
+    for choice_value, keywords in keyword_mappings.items():
+        for keyword in keywords:
+            if keyword in user_lower:
+                print(f"🎯 [FALLBACK_KEYWORD] Found '{keyword}' in '{user_input}' -> '{choice_value}'")
+                
+                # additional_services 단계의 특별 처리
+                if stage_id == "additional_services":
+                    return handle_additional_services_mapping(choice_value, field_key)
+                
+                # 일반적인 choices 확인
+                for choice in choices:
+                    if isinstance(choice, dict):
+                        if choice.get("value") == choice_value:
+                            return choice_value
+                    else:
+                        if str(choice) == choice_value:
+                            return choice_value
+    
+    # 더 일반적인 패턴 매칭 (choice display name과 비교)
+    for choice in choices:
+        if isinstance(choice, dict):
+            display = choice.get("display", "").lower()
+            value = choice.get("value", "")
+            
+            # Display와 정확히 일치하는 경우
+            if display and display in user_lower:
+                print(f"🎯 [FALLBACK_DISPLAY] Found display '{display}' in '{user_input}' -> '{value}'")
+                return value
+                
+            # Display의 핵심 단어들과 매치
+            display_words = display.split()
+            for word in display_words:
+                if len(word) > 2 and word in user_lower:  # 3글자 이상의 단어만
+                    print(f"🎯 [FALLBACK_WORD] Found word '{word}' in '{user_input}' -> '{value}'")
+                    return value
+    
+    print(f"🎯 [FALLBACK_KEYWORD] No keyword match found for '{user_input}' in stage '{stage_id}'")
+    return None
+
+
+def handle_additional_services_mapping(choice_value: str, field_key: str) -> str:
+    """additional_services 단계의 복합 필드 매핑 처리 - 매핑된 선택지 값 반환"""
+    
+    # 매핑된 선택지 값을 그대로 반환하여 나중에 처리
+    print(f"🎯 [ADDITIONAL_SERVICES] Mapped to '{choice_value}' for field '{field_key}'")
+    return choice_value
+
+
+def apply_additional_services_values(choice_value: str, collected_info: Dict[str, Any]) -> Dict[str, Any]:
+    """additional_services 단계의 복합 필드 값을 실제로 설정"""
+    
+    # 기본값 - 모든 서비스 false
+    service_values = {
+        "important_transaction_alert": False,
+        "withdrawal_alert": False, 
+        "overseas_ip_restriction": False
+    }
+    
+    if choice_value == "all_true":
+        # 모든 서비스 신청
+        service_values = {
+            "important_transaction_alert": True,
+            "withdrawal_alert": True,
+            "overseas_ip_restriction": True
+        }
+        print(f"🎯 [ADDITIONAL_SERVICES] Setting all services -> True")
+        
+    elif choice_value == "all_false":
+        # 모든 서비스 거부 (이미 기본값이 False)
+        print(f"🎯 [ADDITIONAL_SERVICES] Setting all services -> False")
+        
+    elif choice_value == "important_only":
+        # 중요거래 알림만 신청
+        service_values["important_transaction_alert"] = True
+        print(f"🎯 [ADDITIONAL_SERVICES] Setting important transaction alert only -> True")
+        
+    elif choice_value == "withdrawal_only":
+        # 출금 알림만 신청
+        service_values["withdrawal_alert"] = True
+        print(f"🎯 [ADDITIONAL_SERVICES] Setting withdrawal alert only -> True")
+        
+    elif choice_value == "overseas_only":
+        # 해외IP 제한만 신청
+        service_values["overseas_ip_restriction"] = True
+        print(f"🎯 [ADDITIONAL_SERVICES] Setting overseas IP restriction only -> True")
+    
+    # collected_info에 값들을 설정
+    for service_key, value in service_values.items():
+        collected_info[service_key] = value
+    
+    return collected_info
+
+
+def handle_card_selection_mapping(user_input: str, choices: List[Any], current_stage_info: Dict[str, Any], collected_info: Dict[str, Any]) -> Optional[str]:
+    """카드 선택 단계 특별 처리 - 정확한 필드 매핑 및 metadata 적용"""
+    
+    user_lower = user_input.lower().strip()
+    
+    # 한국어 카드명 변환 매핑
+    korean_card_mappings = {
+        "딥드림": "deepdream",
+        "딥드립": "deepdream",  # 구어체 변형
+        "deep dream": "deepdream",
+        "에스라인": "sline", 
+        "s-line": "sline",
+        "s라인": "sline",
+        "헤이영": "heyyoung",
+        "hey young": "heyyoung"
+    }
+    
+    # 교통 기능 키워드
+    transit_keywords = ["후불교통", "교통", "transit", "교통카드"]
+    has_transit = any(keyword in user_lower for keyword in transit_keywords)
+    
+    # 일반 카드 키워드
+    regular_keywords = ["일반", "regular", "기본"]
+    is_regular = any(keyword in user_lower for keyword in regular_keywords)
+    
+    print(f"🎯 [CARD_SELECTION] Analyzing: '{user_input}' (has_transit={has_transit}, is_regular={is_regular})")
+    
+    # 카드 타입 매핑 시도
+    matched_card_type = None
+    for korean_name, card_type in korean_card_mappings.items():
+        if korean_name in user_lower:
+            matched_card_type = card_type
+            print(f"🎯 [CARD_SELECTION] Matched card type: {korean_name} -> {card_type}")
+            break
+    
+    if matched_card_type:
+        # 교통 기능 여부에 따라 선택지 결정
+        if matched_card_type == "deepdream":
+            if has_transit and not is_regular:
+                target_value = "deepdream_transit"
+            else:
+                target_value = "deepdream_regular"
+        elif matched_card_type == "sline":
+            if has_transit and not is_regular:
+                target_value = "sline_transit"
+            else:
+                target_value = "sline_regular"
+        elif matched_card_type == "heyyoung":
+            target_value = "heyyoung_regular"
+        else:
+            target_value = matched_card_type
+        
+        print(f"🎯 [CARD_SELECTION] Target value determined: {target_value}")
+        
+        # choices에서 해당 값 찾아서 설정
+        for choice in choices:
+            if isinstance(choice, dict) and choice.get("value") == target_value:
+                print(f"🎯 [CARD_SELECTION] Found matching choice: {target_value}")
+                
+                # 카드 선택 관련 필드들 설정
+                collected_info["card_selection"] = target_value
+                print(f"🎯 [CARD_SELECTION] Set card_selection = {target_value}")
+                
+                # metadata에서 추가 정보 설정
+                metadata = choice.get("metadata", {})
+                if metadata:
+                    # 수령 방법 설정
+                    receipt_method = metadata.get("receipt_method")
+                    if receipt_method:
+                        if receipt_method == "즉시발급":
+                            collected_info["card_receipt_method"] = "immediate"
+                        elif receipt_method == "배송":
+                            collected_info["card_receipt_method"] = "delivery"
+                        print(f"🎯 [CARD_SELECTION] Set card_receipt_method = {collected_info.get('card_receipt_method')}")
+                    
+                    # 후불교통 기능 설정
+                    transit_enabled = metadata.get("transit_enabled", False)
+                    collected_info["transit_function"] = transit_enabled
+                    print(f"🎯 [CARD_SELECTION] Set transit_function = {transit_enabled}")
+                
+                return target_value
+    
+    # 기존 매칭 로직도 유지 (fallback)
+    for choice in choices:
+        if isinstance(choice, dict):
+            choice_value = choice.get("value", "")
+            choice_display = choice.get("display", "").lower()
+            
+            # 입력이 choice value나 display와 일치하는지 확인
+            if (choice_value.lower() in user_lower or 
+                user_lower in choice_value.lower() or
+                any(keyword in user_lower for keyword in choice_display.split())):
+                
+                print(f"🎯 [CARD_SELECTION] Found fallback matching choice: {choice_value}")
+                
+                # 카드 선택 관련 필드들 설정
+                collected_info["card_selection"] = choice_value
+                print(f"🎯 [CARD_SELECTION] Set card_selection = {choice_value}")
+                
+                # metadata에서 추가 정보 설정
+                metadata = choice.get("metadata", {})
+                if metadata:
+                    # 수령 방법 설정
+                    receipt_method = metadata.get("receipt_method")
+                    if receipt_method:
+                        if receipt_method == "즉시발급":
+                            collected_info["card_receipt_method"] = "immediate"
+                        elif receipt_method == "배송":
+                            collected_info["card_receipt_method"] = "delivery"
+                        print(f"🎯 [CARD_SELECTION] Set card_receipt_method = {collected_info.get('card_receipt_method')}")
+                    
+                    # 후불교통 기능 설정
+                    transit_enabled = metadata.get("transit_enabled", False)
+                    collected_info["transit_function"] = transit_enabled
+                    print(f"🎯 [CARD_SELECTION] Set transit_function = {transit_enabled}")
+                
+                return choice_value
+    
+    print(f"🎯 [CARD_SELECTION] No match found for: {user_input}")
+    return None
+
+
+def handle_additional_services_fallback(user_input: str, collected_info: Dict[str, Any]) -> bool:
+    """additional_services 단계에서 choice_mapping 실패 시 직접 처리"""
+    
+    user_lower = user_input.lower().strip()
+    print(f"🎯 [ADDITIONAL_SERVICES_FALLBACK] Processing: {user_input}")
+    
+    # 패턴 기반 매칭
+    patterns = {
+        "overseas_only": [
+            "해외", "아이피", "ip", "제한", "차단", "해외아이피", "해외ip", 
+            "아이피제한", "ip제한", "해외만", "아이피만", "ip만"
+        ],
+        "important_only": [
+            "중요", "중요거래", "중요한", "거래알림", "중요알림"
+        ],
+        "withdrawal_only": [
+            "출금", "출금알림", "출금내역", "출금통보", "인출"
+        ],
+        "all_true": [
+            "모두", "전부", "다", "전체", "모든", "싹다"
+        ],
+        "all_false": [
+            "안해", "안함", "필요없", "싫어", "거부", "아니"
+        ]
+    }
+    
+    # 가장 많이 매칭되는 패턴 찾기
+    best_match = None
+    max_matches = 0
+    
+    for service_type, keywords in patterns.items():
+        matches = sum(1 for keyword in keywords if keyword in user_lower)
+        if matches > max_matches:
+            max_matches = matches
+            best_match = service_type
+    
+    # 매칭된 패턴이 있으면 적용
+    if best_match and max_matches > 0:
+        print(f"🎯 [ADDITIONAL_SERVICES_FALLBACK] Pattern matched: {best_match} (matches: {max_matches})")
+        collected_info = apply_additional_services_values(best_match, collected_info)
+        return True
+    
+    print(f"🎯 [ADDITIONAL_SERVICES_FALLBACK] No pattern matched for: {user_input}")
+    return False

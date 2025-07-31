@@ -25,6 +25,9 @@ class EntityRecognitionAgent:
         # 유사도 임계값 설정
         self.similarity_threshold = 0.7  # 70% 이상의 유사도만 매칭으로 인정
         self.retry_threshold = 0.3      # 30% 미만은 재질문 필요
+        
+        # 마지막 의도 분석 결과 저장
+        self.last_intent_analysis = None
     
     def _get_extraction_prompt(self) -> str:
         """엔티티 추출 프롬프트"""
@@ -128,6 +131,83 @@ class EntityRecognitionAgent:
     {{"value": "대안 선택지", "score": 0.0-1.0}}
   ]
 }}"""
+
+    async def analyze_user_intent(
+        self,
+        user_input: str,
+        current_stage: str,
+        stage_info: Dict[str, Any],
+        collected_info: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """사용자 의도를 자연스럽게 분석 - 오타나 이상한 표현도 처리"""
+        
+        print(f"\n🔍 [LLM_INTENT_ANALYSIS] 사용자 의도 분석 시작")
+        print(f"   📝 사용자 입력: \"{user_input}\"")
+        print(f"   📍 현재 단계: {current_stage}")
+        print(f"   💬 현재 질문: {stage_info.get('prompt', '')[:100]}...")
+        
+        intent_prompt = f"""당신은 한국 은행의 친절한 상담원입니다. 고객의 말을 자연스럽게 이해하고 의도를 파악해주세요.
+
+현재 단계: {stage_info.get('stage_name', current_stage)}
+현재 질문: {stage_info.get('prompt', '')}
+고객 발화: "{user_input}"
+
+고객이 오타를 내거나 이상하게 표현해도 문맥상 의도를 파악해주세요.
+
+분석할 내용:
+1. 고객의 전반적인 의도
+   - 긍정: 동의, 승낙, 확인 ("네", "예", "좋아요" 등)
+   - 부정: 거부, 반대 ("아니요", "싫어요" 등)
+   - 정보제공: 구체적인 정보 제공 (이름, 금액 등)
+   - 질문: 설명 요청, 의문 표현 ("뭐예요?", "왜요?" 등)
+   - 혼란: 현재 단계와 관련 없는 말, 이해 못함 표현
+   - 수정요청: 정보 변경 요청
+   - 기타: 분류하기 어려운 경우
+2. 고객이 제공하려는 정보
+3. 고객이 궁금해하는 점 (현재 단계와 관련된 질문인지)
+4. 오타나 이상한 표현의 의도 추측
+5. 시나리오에서 벗어난 발화인지 판단
+
+출력 형식:
+{{
+  "intent": "긍정/부정/정보제공/질문/혼란/수정요청/기타",
+  "confidence": 0.0-1.0,
+  "extracted_info": {{}},
+  "clarification_needed": false,
+  "scenario_deviation": false,  // 시나리오에서 벗어났는지 여부
+  "deviation_topic": "",  // 벗어난 경우 어떤 주제인지
+  "interpreted_meaning": "오타 수정 후 의도",
+  "suggested_response": "자연스러운 응답 제안"
+}}"""
+
+        try:
+            result = await json_llm.ainvoke(intent_prompt)
+            
+            print(f"   🎯 분석된 의도: {result.get('intent')}")
+            print(f"   📊 신뢰도: {result.get('confidence', 0):.2f}")
+            print(f"   💭 해석된 의미: {result.get('interpreted_meaning')}")
+            if result.get('extracted_info'):
+                print(f"   📋 추출된 정보: {result.get('extracted_info')}")
+            if result.get('clarification_needed'):
+                print(f"   ⚠️ 명확한 확인 필요")
+            print(f"   🗨️ 제안 응답: {result.get('suggested_response')[:100]}...")
+            print(f"🔍 [LLM_INTENT_ANALYSIS] 분석 완료\n")
+            
+            # 결과 저장
+            self.last_intent_analysis = result
+            return result
+        except Exception as e:
+            print(f"   ❌ [LLM_INTENT_ANALYSIS] 분석 실패: {e}\n")
+            result = {
+                "intent": "기타",
+                "confidence": 0.5,
+                "extracted_info": {},
+                "clarification_needed": True,
+                "interpreted_meaning": user_input,
+                "suggested_response": "죄송합니다. 다시 한 번 말씀해주시겠어요?"
+            }
+            self.last_intent_analysis = result
+            return result
 
     async def extract_entities(
         self, 
@@ -269,6 +349,87 @@ class EntityRecognitionAgent:
                 "reasoning": f"LLM 오류로 패턴 매칭 사용: {str(e)}"
             }
     
+    async def extract_entities_flexibly(
+        self,
+        user_input: str,
+        required_fields: List[Dict[str, Any]],
+        current_stage: str = None,
+        stage_info: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """더 유연한 엔티티 추출 - 오타, 유사 표현, 문맥 고려"""
+        
+        print(f"\n🔎 [LLM_ENTITY_EXTRACTION] 유연한 엔티티 추출 시작")
+        print(f"   📝 사용자 입력: \"{user_input}\"")
+        print(f"   📍 현재 단계: {current_stage}")
+        print(f"   🎯 추출 대상 필드: {[f['key'] for f in required_fields]}")
+        
+        # 먼저 의도 분석
+        intent_analysis = None
+        if stage_info:
+            intent_analysis = await self.analyze_user_intent(
+                user_input, current_stage, stage_info, {}
+            )
+        
+        # 필드 정보 구조화
+        field_info_str = []
+        for field in required_fields:
+            info = f"- {field.get('display_name', field['key'])} ({field['key']}): {field['type']} 타입"
+            if field.get('choices'):
+                info += f", 선택지: {field['choices']}"
+            if field.get('extraction_prompt'):
+                info += f"\n  가이드: {field['extraction_prompt']}"
+            field_info_str.append(info)
+        
+        flexible_prompt = f"""사용자의 발화를 이해하고 필요한 정보를 추출해주세요. 오타나 이상한 표현도 문맥상 이해해주세요.
+
+사용자 발화: "{user_input}"
+{f"의도 분석: {intent_analysis.get('interpreted_meaning', '')}" if intent_analysis else ""}
+
+추출해야 할 필드:
+{chr(10).join(field_info_str)}
+
+추출 원칙:
+1. 사용자가 명시적으로 언급한 정보를 추출
+2. 오타나 축약어도 문맥상 이해 (예: "넴" → "네", "ㅇㅇ" → "응/네")
+3. 유사한 표현도 인정 (예: "맞아요" → "네", "틀려요" → "아니요")
+4. choice 필드는 의미상 가장 가까운 선택지로 매칭
+5. 애매한 경우 confidence를 낮게 설정
+
+출력 형식:
+{{
+  "extracted_entities": {{
+    "field_key": "추출된 값",
+    ...
+  }},
+  "confidence": 0.0-1.0,
+  "typo_corrections": {{"원래표현": "수정된표현"}},
+  "ambiguous_fields": ["애매한 필드들"],
+  "reasoning": "추출 과정 설명"
+}}"""
+        
+        try:
+            result = await json_llm.ainvoke(flexible_prompt)
+            
+            print(f"   ✅ 추출된 엔티티: {result.get('extracted_entities', {})}")
+            print(f"   📊 신뢰도: {result.get('confidence', 0):.2f}")
+            if result.get('typo_corrections'):
+                print(f"   ✏️ 오타 수정: {result.get('typo_corrections')}")
+            if result.get('ambiguous_fields'):
+                print(f"   ⚠️ 애매한 필드: {result.get('ambiguous_fields')}")
+            print(f"   💭 추출 이유: {result.get('reasoning')}")
+            print(f"🔎 [LLM_ENTITY_EXTRACTION] 추출 완료\n")
+            
+            # confidence가 낮은 경우 재확인 메시지 추가
+            if result.get("confidence", 1.0) < 0.7:
+                result["needs_confirmation"] = True
+                
+            return result
+            
+        except Exception as e:
+            print(f"   ❌ [LLM_ENTITY_EXTRACTION] 추출 실패: {e}\n")
+            # 실패 시 기존 방식으로 fallback
+            return await self.extract_entities(user_input, required_fields)
+
     async def extract_entities_with_similarity(
         self, 
         user_input: str, 

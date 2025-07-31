@@ -37,14 +37,23 @@ async def synthesize_response_node(state: AgentState) -> AgentState:
     print(f"[Synthesizer] Incoming is_final_turn_response: {state.is_final_turn_response}")
     print(f"[Synthesizer] Incoming action_plan: {state.action_plan}")
     
-    # 1. 이미 설정된 최종 응답이 있으면 반환
-    if state.final_response_text_for_tts:
+    # 1. 이미 설정된 최종 응답이 있으면 반환 (문자열 'None'은 제외)
+    if state.final_response_text_for_tts and state.final_response_text_for_tts != 'None':
         print(f"[Synthesizer] Using existing final_response_text_for_tts: '{state.final_response_text_for_tts}'")
         return create_response(state.final_response_text_for_tts, "existing response")
     
-    # 2. Direct message가 있고 Worker 호출이 없는 경우 → 바로 출력
+    # 2. QA + 시나리오 상황 최우선 처리
+    print(f"🎯 [SYNTHESIZER] factual_response: {bool(state.factual_response)}, current_stage: {state.current_scenario_stage_id}")
+    if state.factual_response and state.current_scenario_stage_id:
+        print(f"🎯 [SYNTHESIZER] QA + Scenario detected - using continuation logic")
+        qa_continuation = generate_qa_with_scenario_continuation(state)
+        return create_response(qa_continuation, "QA + scenario continuation")
+    
+    # 3. Direct message가 있고 Worker 호출이 없는 경우 → 바로 출력
     has_direct_message = bool(state.main_agent_direct_response)
     has_worker_plan = bool(state.action_plan)
+    
+    print(f"🎯 [SYNTHESIZER] has_direct_message: {has_direct_message}, has_worker_plan: {has_worker_plan}")
     
     if has_direct_message and not has_worker_plan:
         log_node_execution("Synthesizer", "Direct message with no workers - quick return")
@@ -65,9 +74,15 @@ async def synthesize_response_node(state: AgentState) -> AgentState:
         
         final_answer = response.content.strip()
         
-        # 응답이 비어있는 경우 처리
+        # 응답이 비어있는 경우 폴백 처리
         if not final_answer:
-            final_answer = generate_fallback_response(state)
+            fallback_response = generate_fallback_response(state)
+            if fallback_response:
+                final_answer = fallback_response
+        
+        # 여전히 응답이 없으면 기본 응답
+        if not final_answer:
+            final_answer = "죄송합니다, 무엇을 도와드릴까요?"
         
         return create_response(final_answer, "synthesized response")
         
@@ -302,7 +317,14 @@ def analyze_field_status(state: AgentState, scenario_data: Optional[Dict[str, An
 
 def generate_fallback_response(state: AgentState) -> str:
     """응답 생성 실패 시 폴백 응답 생성"""
-    # 우선순위: factual > direct > scenario prompt > default
+    print(f"🎯 [FALLBACK] Called with factual_response: {bool(state.factual_response)}, stage: {state.current_scenario_stage_id}")
+    
+    # QA 답변 후 시나리오 진행 처리
+    if state.factual_response and state.current_scenario_stage_id:
+        print(f"🎯 [FALLBACK] Calling QA continuation")
+        return generate_qa_with_scenario_continuation(state)
+    
+    # 기존 우선순위: factual > direct > scenario prompt > default
     if state.factual_response:
         return state.factual_response
     elif state.main_agent_direct_response:
@@ -313,3 +335,135 @@ def generate_fallback_response(state: AgentState) -> str:
             return prompt
     
     return "죄송합니다, 무엇을 도와드릴까요?"
+
+
+def generate_qa_with_scenario_continuation(state: AgentState) -> str:
+    """QA 답변 후 시나리오 계속 진행"""
+    
+    # QA 답변 제공
+    qa_response = state.factual_response
+    
+    print(f"🎯 [QA_CONTINUATION] Starting with factual_response: {qa_response[:100]}...")
+    print(f"🎯 [QA_CONTINUATION] Current stage: {state.current_scenario_stage_id}")
+    print(f"🎯 [QA_CONTINUATION] Collected info: {state.collected_product_info}")
+    
+    # 현재 단계 정보 확인
+    if not state.current_scenario_stage_id:
+        print(f"🎯 [QA_CONTINUATION] No current stage, returning QA only")
+        return qa_response
+    
+    try:
+        from ...utils import get_active_scenario_data
+        
+        active_scenario_data = get_active_scenario_data(state.to_dict())
+        if not active_scenario_data:
+            return qa_response
+        
+        current_stage_info = active_scenario_data.get("stages", {}).get(state.current_scenario_stage_id, {})
+        if not current_stage_info:
+            return qa_response
+        
+        # 현재 단계에서 수집해야 할 필드들 확인
+        fields_to_collect = current_stage_info.get("fields_to_collect", [])
+        if not fields_to_collect:
+            # fields_to_collect이 없어도 현재 단계 프롬프트가 있으면 시나리오 계속 진행
+            stage_prompt = get_current_stage_prompt_with_variables(state)
+            if stage_prompt:
+                print(f"🎯 [QA_CONTINUATION] No fields_to_collect but stage has prompt, continuing")
+                continuation = get_scenario_continuation_phrase(state)
+                return f"{qa_response}\n\n{continuation} {stage_prompt}"
+            return qa_response
+        
+        collected_info = state.collected_product_info or {}
+        
+        # 미수집 필드가 있는지 확인
+        missing_fields = []
+        for field in fields_to_collect:
+            if field not in collected_info or collected_info.get(field) is None:
+                missing_fields.append(field)
+        
+        if missing_fields:
+            # 미수집 필드가 있으면 현재 단계 질문 추가
+            stage_prompt = get_current_stage_prompt_with_variables(state)
+            if stage_prompt:
+                print(f"🎯 [QA_CONTINUATION] Adding stage prompt after QA for missing fields: {missing_fields}")
+                # 시나리오 종류에 따른 자연스러운 연결 문구
+                if "deposit_account" in str(state.active_scenario_name):
+                    continuation = "그럼 다시 입출금통장 개설을 진행할게요."
+                elif "didimdol" in str(state.active_scenario_name):
+                    continuation = "그럼 다시 디딤돌 대출 상담을 계속할게요."
+                elif "jeonse" in str(state.active_scenario_name):
+                    continuation = "그럼 다시 전세 대출 상담을 계속할게요."
+                else:
+                    continuation = "그럼 상담을 계속 진행할게요."
+                
+                return f"{qa_response}\n\n{continuation} {stage_prompt}"
+        else:
+            # 모든 필드가 수집되었으면 다음 단계 확인
+            print(f"🎯 [QA_CONTINUATION] All fields collected for current stage")
+            
+            # 다음 단계가 있는지 확인
+            next_stage_info = get_next_stage_info(state, active_scenario_data, current_stage_info)
+            if next_stage_info:
+                next_stage_prompt = get_stage_prompt_from_info(next_stage_info, state)
+                if next_stage_prompt:
+                    print(f"🎯 [QA_CONTINUATION] Moving to next stage after QA")
+                    continuation = get_scenario_continuation_phrase(state)
+                    return f"{qa_response}\n\n{continuation} {next_stage_prompt}"
+            
+            # 다음 단계가 없거나 프롬프트가 없으면 QA 답변만 제공
+            return qa_response
+        
+    except Exception as e:
+        print(f"❌ [QA_CONTINUATION] Error: {e}")
+        return qa_response
+    
+    return qa_response
+
+
+def get_next_stage_info(state: AgentState, scenario_data: Dict[str, Any], current_stage_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """다음 단계 정보 가져오기"""
+    try:
+        # next_step이 있는 경우
+        next_step = current_stage_info.get("next_step")
+        if next_step:
+            if isinstance(next_step, str):
+                # 단순 문자열인 경우
+                return scenario_data.get("stages", {}).get(next_step)
+            elif isinstance(next_step, dict):
+                # 조건부 분기인 경우 - 기본값으로 첫 번째 값 사용
+                first_next = list(next_step.values())[0] if next_step else None
+                if first_next:
+                    return scenario_data.get("stages", {}).get(first_next)
+        
+        # transitions를 통한 다음 단계 찾기
+        transitions = current_stage_info.get("transitions", [])
+        if transitions:
+            first_transition = transitions[0] if transitions else None
+            if first_transition and "target" in first_transition:
+                return scenario_data.get("stages", {}).get(first_transition["target"])
+        
+    except Exception as e:
+        print(f"❌ [GET_NEXT_STAGE] Error: {e}")
+    
+    return None
+
+
+def get_stage_prompt_from_info(stage_info: Dict[str, Any], state: AgentState) -> Optional[str]:
+    """단계 정보에서 프롬프트 가져오기"""
+    prompt = stage_info.get("prompt")
+    if prompt:
+        return process_prompt_variables(prompt, state.collected_product_info or {}, state)
+    return None
+
+
+def get_scenario_continuation_phrase(state: AgentState) -> str:
+    """시나리오별 연결 문구"""
+    if "deposit_account" in str(state.active_scenario_name):
+        return "그럼 입출금통장 개설을 계속 진행할게요."
+    elif "didimdol" in str(state.active_scenario_name):
+        return "그럼 디딤돌 대출 상담을 계속할게요."
+    elif "jeonse" in str(state.active_scenario_name):
+        return "그럼 전세 대출 상담을 계속할게요."
+    else:
+        return "그럼 상담을 계속 진행할게요."

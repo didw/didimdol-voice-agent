@@ -765,21 +765,43 @@ async def send_slot_filling_update(
             # 서비스 선택에 따라 필드 필터링
             fields_to_use = filter_fields_by_service(all_visible_fields, services_selected)
             print(f"[{session_id}] Fields to use count after filtering: {len(fields_to_use)}")
-            enhanced_fields = [{
-                "key": f.get("key", ""),
-                "displayName": f.get("display_name", ""),
-                "type": f.get("type", "text"),
-                "required": f.get("required", True),
-                "choices": f.get("choices", []) if f.get("type") == "choice" else None,
-                "unit": f.get("unit") if f.get("type") == "number" else None,
-                "description": f.get("description", ""),
-                "showWhen": f.get("show_when"),
-                "parentField": f.get("parent_field"),
-                "depth": f.get("depth", 0),
-                "default": f.get("default"),
-                "group": f.get("group", ""),  # 그룹 정보 추가
-                "stage": f.get("stage", "")   # 스테이지 정보 추가
-            } for f in fields_to_use]
+            enhanced_fields = []
+            for f in fields_to_use:
+                try:
+                    field_dict = {
+                        "key": str(f.get("key", "")),
+                        "displayName": str(f.get("display_name", "")),
+                        "type": str(f.get("type", "text")),
+                        "required": bool(f.get("required", True)),
+                        "choices": f.get("choices", []) if str(f.get("type", "text")) == "choice" else None,
+                        "unit": f.get("unit") if str(f.get("type", "text")) == "number" else None,
+                        "description": str(f.get("description", "")),
+                        "showWhen": f.get("show_when"),
+                        "parentField": f.get("parent_field"),
+                        "depth": int(f.get("depth", 0)),
+                        "default": f.get("default"),
+                        "group": str(f.get("group", "")),  # 그룹 정보 추가
+                        "stage": str(f.get("stage", ""))   # 스테이지 정보 추가
+                    }
+                    enhanced_fields.append(field_dict)
+                except Exception as field_error:
+                    print(f"[{session_id}] ❌ Error processing field {f.get('key', 'unknown')}: {field_error}")
+                    # 기본 필드 구조로 fallback
+                    enhanced_fields.append({
+                        "key": str(f.get("key", "")),
+                        "displayName": str(f.get("display_name", "")),
+                        "type": "text",
+                        "required": True,
+                        "choices": None,
+                        "unit": None,
+                        "description": "",
+                        "showWhen": None,
+                        "parentField": None,
+                        "depth": 0,
+                        "default": None,
+                        "group": "",
+                        "stage": ""
+                    })
             print(f"[{session_id}] ✅ Enhanced fields count: {len(enhanced_fields)}")
             # 필드 키 샘플 출력
             sample_keys = [f["key"] for f in enhanced_fields[:5]]
@@ -789,44 +811,59 @@ async def send_slot_filling_update(
             enhanced_fields = []
             visible_fields = hierarchy_data.get("visible_fields", [])
             
-            if visible_fields:
-                # 계층 정보가 있는 경우 사용
-                enhanced_fields = [{
-                    "key": f["key"],
-                    "displayName": f["display_name"],
-                    "type": f.get("type", "text"),
-                    "required": f.get("required", True),
-                    "choices": f.get("choices", []) if f.get("type") == "choice" else None,
-                    "unit": f.get("unit") if f.get("type") == "number" else None,
-                    "description": f.get("description", ""),
-                    "showWhen": f.get("show_when"),
-                    "parentField": f.get("parent_field"),
-                    "depth": f.get("depth", 0),
-                    "default": f.get("default")  # default 값 추가
-                } for f in visible_fields]
-            else:
-                # fallback: 기존 방식
-                enhanced_fields = [{
-                    "key": f["key"],
-                    "displayName": f["display_name"],
-                    "type": f.get("type", "text"),
-                    "required": f.get("required", True),
-                    "choices": f.get("choices", []) if f.get("type") == "choice" else None,
-                    "unit": f.get("unit") if f.get("type") == "number" else None,
-                    "description": f.get("description", ""),
-                    "showWhen": f.get("show_when"),
-                    "parentField": f.get("parent_field"),
-                    "depth": 0,  # 기본 depth
-                    "default": f.get("default")  # default 값 추가
-                } for f in required_fields]
+            enhanced_fields = []
+            fields_to_process = visible_fields if visible_fields else required_fields
+            
+            for f in fields_to_process:
+                try:
+                    field_dict = {
+                        "key": str(f.get("key", "")),
+                        "displayName": str(f.get("display_name", "")),
+                        "type": str(f.get("type", "text")),
+                        "required": bool(f.get("required", True)),
+                        "choices": f.get("choices", []) if str(f.get("type", "text")) == "choice" else None,
+                        "unit": f.get("unit") if str(f.get("type", "text")) == "number" else None,
+                        "description": str(f.get("description", "")),
+                        "showWhen": f.get("show_when"),
+                        "parentField": f.get("parent_field"),
+                        "depth": int(f.get("depth", 0)),
+                        "default": f.get("default")
+                    }
+                    enhanced_fields.append(field_dict)
+                except Exception as field_error:
+                    print(f"[{session_id}] ❌ Error processing other scenario field {f.get('key', 'unknown')}: {field_error}")
+                    # 기본 필드 구조로 fallback
+                    enhanced_fields.append({
+                        "key": str(f.get("key", "")),
+                        "displayName": str(f.get("display_name", "")),
+                        "type": "text",
+                        "required": True,
+                        "choices": None,
+                        "unit": None,
+                        "description": "",
+                        "showWhen": None,
+                        "parentField": None,
+                        "depth": 0,
+                        "default": None
+                    })
         
         # WebSocket 메시지 구성 (새로운 구조)
+        # completion_status 안전하게 생성
+        safe_completion_status = hierarchy_data.get("completion_status", {})
+        if not safe_completion_status:
+            # 기본값 생성 시 타입 안전성 보장
+            safe_completion_status = {}
+            for field in required_fields:
+                field_key = field.get("key", "")
+                if field_key:
+                    safe_completion_status[field_key] = bool(field_key in collected_info and collected_info.get(field_key) is not None)
+        
         slot_filling_data = {
             "type": "slot_filling_update",
             "productType": state.get("current_product_type", ""),
             "requiredFields": enhanced_fields,
             "collectedInfo": collected_info,
-            "completionStatus": hierarchy_data.get("completion_status", {f["key"]: f["key"] in collected_info for f in required_fields}),
+            "completionStatus": safe_completion_status,
             "completionRate": hierarchy_data.get("completion_rate", overall_progress),
             "totalRequiredCount": hierarchy_data.get("total_required_count", total_required),  # 전체 필수 필드 수
             "completedRequiredCount": hierarchy_data.get("completed_required_count", total_collected),  # 완료된 필수 필드 수
