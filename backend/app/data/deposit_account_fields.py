@@ -232,9 +232,15 @@ CHOICE_VALUE_DISPLAY_MAPPING = {
     "deepdream_regular": "Deep Dream 일반카드",
     "heyyoung_regular": "Hey Young 일반카드",
     
+    # 카드 수령 방법
+    "immediate": "즉시발급",
+    "delivery": "배송",
+    "즉시발급": "즉시발급",
+    "배송": "배송",
+    
     # 명세서 수령 방법
     "mobile": "모바일",
-    "email": "이메일",
+    "email": "이메일", 
     "website": "홈페이지",
     
     # 카드 사용 알림
@@ -242,11 +248,17 @@ CHOICE_VALUE_DISPLAY_MAPPING = {
     "all_transactions_200won": "모든 내역 발송 (200원)",
     "no_alert": "문자 받지 않음",
     
-    # Boolean 값
-    True: "예",
-    False: "아니오",
-    "true": "예",
-    "false": "아니오"
+    # 서비스 선택
+    "all": "모두 가입",
+    "mobile_only": "모바일앱만",
+    "card_only": "체크카드만", 
+    "account_only": "입출금계좌만",
+    
+    # Boolean 값 (알림 설정 등)
+    True: "신청",
+    False: "미신청",
+    "true": "신청",
+    "false": "미신청"
 }
 
 def format_korean_currency(amount: int) -> str:
@@ -278,6 +290,21 @@ def get_display_value(field_key: str, value: any) -> str:
     if value in CHOICE_VALUE_DISPLAY_MAPPING:
         return CHOICE_VALUE_DISPLAY_MAPPING[value]
     
+    # Boolean 필드 특별 처리 (필드별 맞춤 텍스트)
+    if isinstance(value, bool):
+        # 카드 비밀번호 동일 설정
+        if field_key == "card_password_same_as_account":
+            return "계좌 비밀번호와 동일" if value else "별도 설정"
+        # 후불교통 기능
+        elif field_key == "transit_function":
+            return "신청" if value else "미신청"
+        # 알림 설정들
+        elif field_key in ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]:
+            return "신청" if value else "미신청"
+        # 기타 Boolean 필드
+        else:
+            return "예" if value else "아니오"
+    
     # 이체한도 필드 특별 처리
     if field_key in ["transfer_limit_once", "transfer_limit_daily"]:
         try:
@@ -293,7 +320,7 @@ def get_display_value(field_key: str, value: any) -> str:
     # 특별한 필드 처리
     if field_key == "statement_delivery_date":
         # 날짜 형식 처리 (예: "3" -> "매월 3일")
-        if isinstance(value, (str, int)) and value.isdigit() if isinstance(value, str) else True:
+        if isinstance(value, (str, int)) and (value.isdigit() if isinstance(value, str) else True):
             return f"매월 {value}일"
     
     # 기본값은 그대로 반환

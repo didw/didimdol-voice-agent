@@ -3402,67 +3402,38 @@ def format_korean_currency(amount: int) -> str:
 
 
 def format_field_value(field_key: str, value: Any, field_type: str) -> str:
-    """필드 값을 사용자에게 표시할 형태로 포맷팅"""
+    """필드 값을 사용자에게 표시할 형태로 포맷팅 - slot filling과 동일한 형식 사용"""
     if value is None:
         return "미설정"
     
-    # boolean 타입 처리
-    if field_type == "boolean":
-        if field_key == "card_password_same_as_account":
-            return "계좌 비밀번호와 동일" if value else "별도 설정"
-        elif field_key in ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]:
-            return "사용" if value else "미사용"
-        elif field_key == "transit_function":
-            return "신청" if value else "미신청"
-        else:
+    # deposit_account_fields의 get_display_value 함수와 동일한 로직 사용
+    from ....data.deposit_account_fields import get_display_value
+    
+    try:
+        return get_display_value(field_key, value)
+    except Exception as e:
+        print(f"🚨 [FORMAT_FIELD_VALUE] Error using get_display_value for {field_key}={value}: {e}")
+        # fallback: 기본 변환 로직
+        if field_type == "boolean":
             return "예" if value else "아니오"
-    
-    # choice 타입 처리 - 한글 매핑
-    choice_mappings = {
-        "security_medium": {
-            "existing_otp": "기존 OTP 사용",
-            "new_otp": "신규 OTP 발급",
-            "existing_security_card": "기존 보안카드 사용",
-            "new_security_card": "신규 보안카드 발급"
-        },
-        "card_receipt_method": {
-            "mail": "우편 수령",
-            "branch": "영업점 수령"
-        },
-        "statement_delivery_method": {
-            "email": "이메일",
-            "mail": "우편",
-            "branch": "영업점"
-        },
-        "card_usage_alert": {
-            "over_50000_free": "5만원 이상 결제 시 발송 (무료)",
-            "all_transactions_200won": "모든 거래 시 발송 (건당 200원)",
-            "no_alert": "알림 미사용"
-        }
-    }
-    
-    if field_key in choice_mappings and value in choice_mappings[field_key]:
-        return choice_mappings[field_key][value]
-    
-    # 숫자 필드 처리
-    if field_type == "number" or isinstance(value, (int, float)):
-        try:
-            # 숫자로 변환 시도
-            if isinstance(value, str):
-                numeric_value = int(value) if value.isdigit() else float(value)
-            else:
-                numeric_value = value
+        elif field_type == "number" or isinstance(value, (int, float)):
+            try:
+                # 숫자로 변환 시도
+                if isinstance(value, str):
+                    numeric_value = int(value) if value.isdigit() else float(value)
+                else:
+                    numeric_value = value
                 
-            # 이체한도 필드는 한국어 통화 형식으로 표시
-            if field_key in ["transfer_limit_once", "transfer_limit_daily"]:
-                return format_korean_currency(int(numeric_value))
-            return str(numeric_value)
-        except (ValueError, TypeError):
-            # 숫자 변환에 실패하면 문자열로 반환
-            return str(value)
-    
-    # 기본값
-    return str(value)
+                # 이체한도 필드는 한국어 통화 형식으로 표시
+                if field_key in ["transfer_limit_once", "transfer_limit_daily"]:
+                    return format_korean_currency(int(numeric_value))
+                return str(numeric_value)
+            except (ValueError, TypeError):
+                # 숫자 변환에 실패하면 문자열로 반환
+                return str(value)
+        
+        # 기본값
+        return str(value)
 
 
 async def extract_field_value_with_llm(
