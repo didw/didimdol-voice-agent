@@ -139,6 +139,8 @@
       "stage_name": "카드 선택",
       "response_type": "bullet",
       "dynamic_prompt": "이어서 체크카드 발급에 필요한 정보를 확인할게요.\\n지금 바로 수령할 수 있는 {default_choice}로 발급해드릴까요?",
+      "fields_to_collect": ["card_selection"],
+      "extraction_prompt": "사용자가 선택한 체크카드를 추출하세요:\\n- S-Line 후불교통 → \"sline_transit\"\\n- S-Line 일반 → \"sline_regular\"\\n- Deep Dream 후불교통 → \"deepdream_transit\"\\n- Deep Dream 일반 → \"deepdream_regular\"\\n- Hey Young → \"heyyoung_regular\"",
       "choices": [
         {
           "display": "S-Line 체크카드 (후불교통)",
