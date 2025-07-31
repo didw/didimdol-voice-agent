@@ -254,11 +254,8 @@ def generate_choice_confirmation_response(
             else:
                 response = f"{choice_display}로 진행하겠습니다."
                 
-            # 이체한도 정보 추가
-            if choice_metadata.get("transfer_limit_once") and choice_metadata.get("transfer_limit_daily"):
-                limit_once = int(choice_metadata["transfer_limit_once"]) // 10000
-                limit_daily = int(choice_metadata["transfer_limit_daily"]) // 10000
-                response += f" 1회 {limit_once}만원, 1일 {limit_daily}만원 한도로 설정됩니다."
+            # 모든 보안매체에 대해 이체한도 정보 추가 (최대 한도로 통일)
+            response += f" 1회 5,000만원, 1일 1억원 한도로 설정됩니다."
                 
         elif current_stage == "card_selection":
             response = f"네, {choice_display}로 발급해드리겠습니다."
@@ -267,6 +264,11 @@ def generate_choice_confirmation_response(
             if choice_metadata.get("transit_enabled"):
                 response += " 후불교통 기능도 함께 이용하실 수 있습니다."
                 
+        elif current_stage == "statement_delivery":
+            response = f"네, {choice_display}로 받아보시겠습니다."
+            # 모든 수령방법에 대해 발송일 정보 추가 (10일로 통일)
+            response += f" 매월 10일에 보내드리겠습니다."
+            
         elif current_stage == "additional_services":
             # additional_services 단계의 특별한 값들 처리
             if choice_value == "all_true":
@@ -1622,13 +1624,11 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                 if current_stage_id == "security_medium_registration":
                     # 기본 보안매체 선택
                     default_choice = None
-                    default_metadata = None
                     if current_stage_info.get("choice_groups"):
                         for group in current_stage_info.get("choice_groups", []):
                             for choice in group.get("choices", []):
                                 if choice.get("default"):
                                     default_choice = choice.get("value")
-                                    default_metadata = choice.get("metadata", {})
                                     break
                             if default_choice:
                                 break
@@ -1640,12 +1640,13 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                                 if field_key == "security_medium":
                                     collected_info[field_key] = default_choice
                                     print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: {default_choice}")
-                                elif field_key == "transfer_limit_once" and default_metadata.get("transfer_limit_once"):
-                                    collected_info[field_key] = default_metadata["transfer_limit_once"]
-                                    print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: {default_metadata['transfer_limit_once']}")
-                                elif field_key == "transfer_limit_daily" and default_metadata.get("transfer_limit_daily"):
-                                    collected_info[field_key] = default_metadata["transfer_limit_daily"]
-                                    print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: {default_metadata['transfer_limit_daily']}")
+                                # 모든 보안매체에 대해 최대 이체한도 설정
+                                elif field_key == "transfer_limit_once":
+                                    collected_info[field_key] = "50000000"  # 5천만원
+                                    print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: 50000000")
+                                elif field_key == "transfer_limit_daily":
+                                    collected_info[field_key] = "100000000"  # 1억원
+                                    print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: 100000000")
                 
                 # card_selection 단계 특별 처리
                 elif current_stage_id == "card_selection":
@@ -1683,19 +1684,17 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                                 default_choice = choice.get("value")
                                 break
                     
-                    # default_values에서 statement_delivery_date 가져오기
-                    default_values = current_stage_info.get("default_values", {})
-                    
-                    if default_choice or default_values:
+                    if default_choice:
                         # 각 필드별로 적절한 값 설정
                         for field_key in fields_to_collect:
                             if field_key not in collected_info:
-                                if field_key == "statement_delivery_method" and default_choice:
+                                if field_key == "statement_delivery_method":
                                     collected_info[field_key] = default_choice
                                     print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: {default_choice}")
-                                elif field_key == "statement_delivery_date" and default_values.get("statement_delivery_date"):
-                                    collected_info[field_key] = default_values["statement_delivery_date"]
-                                    print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: {default_values['statement_delivery_date']}")
+                                # 모든 수령방법에 대해 발송일 10일로 설정
+                                elif field_key == "statement_delivery_date":
+                                    collected_info[field_key] = "10"
+                                    print(f"[DEFAULT_SELECTION] Stage {current_stage_id}: '네' response mapped {field_key} to: 10")
                                     print(f"🔥 [STATEMENT_DATE_DEBUG] collected_info now contains: {collected_info.get('statement_delivery_date')}")
                 else:
                     # 다른 단계들은 기존 로직 사용
@@ -1828,6 +1827,31 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                     # 복합 필드 값 설정
                     collected_info = apply_additional_services_values(choice_mapping, collected_info)
                     print(f"✅ [V3_CHOICE_STORED] Applied additional_services mapping: '{choice_mapping}'")
+                # security_medium_registration 단계의 특별 처리
+                elif current_stage_id == "security_medium_registration":
+                    # 보안매체 선택
+                    collected_info[expected_field] = choice_mapping
+                    print(f"✅ [V3_CHOICE_STORED] {expected_field}: '{choice_mapping}'")
+                    
+                    # 모든 보안매체에 대해 최대 이체한도 설정 (사용자가 수정 요청하지 않은 경우)
+                    if "transfer_limit_once" not in collected_info:
+                        collected_info["transfer_limit_once"] = "50000000"  # 5천만원
+                        print(f"✅ [V3_CHOICE_STORED] Set default transfer_limit_once: 50000000")
+                    if "transfer_limit_daily" not in collected_info:
+                        collected_info["transfer_limit_daily"] = "100000000"  # 1억원
+                        print(f"✅ [V3_CHOICE_STORED] Set default transfer_limit_daily: 100000000")
+                        
+                # statement_delivery 단계의 특별 처리  
+                elif current_stage_id == "statement_delivery":
+                    # 명세서 수령방법 선택
+                    collected_info[expected_field] = choice_mapping
+                    print(f"✅ [V3_CHOICE_STORED] {expected_field}: '{choice_mapping}'")
+                    
+                    # 모든 수령방법에 대해 발송일 10일로 설정 (사용자가 수정 요청하지 않은 경우)
+                    if "statement_delivery_date" not in collected_info:
+                        collected_info["statement_delivery_date"] = "10"
+                        print(f"✅ [V3_CHOICE_STORED] Set default statement_delivery_date: 10")
+                        
                 # card_selection 단계의 특별 처리 - 이미 handle_card_selection_mapping에서 처리됨
                 elif current_stage_id == "card_selection":
                     # 카드 선택은 이미 handle_card_selection_mapping에서 여러 필드가 설정됨
