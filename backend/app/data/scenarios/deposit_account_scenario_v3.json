@@ -33,7 +33,7 @@
         "한도가 어느정도 제한되는지 알려줘"
       ],
       "fields_to_collect": ["services_selected"],
-      "extraction_prompt": "사용자가 선택한 서비스를 추출하세요:\\n- \"모두\", \"전부\", \"다\" → \"all\"\\n- \"모바일\", \"앱\" → \"mobile_only\"\\n- \"체크카드\", \"카드\" → \"card_only\"\\n- \"계좌만\", \"입출금만\" → \"account_only\"\\n- \"아니\"",
+      "extraction_prompt": "사용자가 선택한 서비스를 추출하세요:\\n- \"모두\", \"전부\", \"다\" → \"all\"\\n- \"모바일\", \"앱\" → \"mobile_only\"\\n- \"체크카드\", \"카드\" → \"card_only\"\\n- \"계좌만\", \"아니\", \"아니요\" \"입출금만\" → \"account_only\"",
       "next_step": {
         "all": "confirm_personal_info",
         "mobile_only": "confirm_personal_info",

@@ -500,8 +500,15 @@ def update_slot_filling_with_hierarchy(scenario_data: Dict, collected_info: Dict
                 except ValueError:
                     return False
         
-        # 기타 타입: 값이 존재하고 False가 아니면 완료
-        return value not in [None, "", False]
+        # 기타 타입: 안전한 타입 체크로 완료 상태 판단
+        if value is None:
+            return False
+        if isinstance(value, bool):
+            return True  # boolean 값 자체는 완료로 간주
+        if isinstance(value, str):
+            return value.strip() != ""
+        # 기타 타입은 값이 있으면 완료로 간주
+        return bool(value)
     
     for field in all_fields:
         field_key = field["key"]
@@ -749,6 +756,7 @@ async def send_slot_filling_update(
             else:
                 pass
         except Exception as e:
+            print(f"[{session_id}] ❌ Error in update_slot_filling_with_hierarchy: {e}")
             hierarchy_data = {}
         
         # deposit_account의 경우 모든 필드를 포함
@@ -848,39 +856,43 @@ async def send_slot_filling_update(
                     })
         
         # WebSocket 메시지 구성 (새로운 구조)
-        # completion_status 안전하게 생성
-        safe_completion_status = hierarchy_data.get("completion_status", {})
-        if not safe_completion_status:
-            # 기본값 생성 시 타입 안전성 보장
-            safe_completion_status = {}
-            for field in required_fields:
-                field_key = field.get("key", "")
-                if field_key:
-                    safe_completion_status[field_key] = bool(field_key in collected_info and collected_info.get(field_key) is not None)
-        
-        slot_filling_data = {
-            "type": "slot_filling_update",
-            "productType": state.get("current_product_type", ""),
-            "requiredFields": enhanced_fields,
-            "collectedInfo": collected_info,
-            "completionStatus": safe_completion_status,
-            "completionRate": hierarchy_data.get("completion_rate", overall_progress),
-            "totalRequiredCount": hierarchy_data.get("total_required_count", total_required),  # 전체 필수 필드 수
-            "completedRequiredCount": hierarchy_data.get("completed_required_count", total_collected),  # 완료된 필수 필드 수
-            "fieldGroups": [{
-                "id": group["id"],
-                "name": group["name"],
-                "fields": group["fields"]
-            } for group in field_groups] if field_groups else [],
-            "currentStage": {
-                "stageId": current_stage,
-                "visibleGroups": visible_groups,
-                "currentStageGroups": current_stage_groups  # 현재 단계의 그룹만
-            },
-            "displayLabels": scenario_data.get("display_labels", {}),  # 시나리오에서 표시 레이블 추가
-            "choiceDisplayMappings": get_choice_display_mappings(product_type),  # Choice 필드의 한글 표시 매핑
-            "serviceFieldCounts": calculate_required_fields_for_service(collected_info.get("services_selected", "all"))  # 서비스별 필드 개수
-        }
+        try:
+            # completion_status 안전하게 생성
+            safe_completion_status = hierarchy_data.get("completion_status", {})
+            if not safe_completion_status:
+                # 기본값 생성 시 타입 안전성 보장
+                safe_completion_status = {}
+                for field in required_fields:
+                    field_key = field.get("key", "")
+                    if field_key:
+                        safe_completion_status[field_key] = bool(field_key in collected_info and collected_info.get(field_key) is not None)
+            
+            slot_filling_data = {
+                "type": "slot_filling_update",
+                "productType": state.get("current_product_type", ""),
+                "requiredFields": enhanced_fields,
+                "collectedInfo": collected_info,
+                "completionStatus": safe_completion_status,
+                "completionRate": hierarchy_data.get("completion_rate", overall_progress),
+                "totalRequiredCount": hierarchy_data.get("total_required_count", total_required),  # 전체 필수 필드 수
+                "completedRequiredCount": hierarchy_data.get("completed_required_count", total_collected),  # 완료된 필수 필드 수
+                "fieldGroups": [{
+                    "id": group["id"],
+                    "name": group["name"],
+                    "fields": group["fields"]
+                } for group in field_groups] if field_groups else [],
+                "currentStage": {
+                    "stageId": current_stage,
+                    "visibleGroups": visible_groups,
+                    "currentStageGroups": current_stage_groups  # 현재 단계의 그룹만
+                },
+                "displayLabels": scenario_data.get("display_labels", {}),  # 시나리오에서 표시 레이블 추가
+                "choiceDisplayMappings": get_choice_display_mappings(product_type),  # Choice 필드의 한글 표시 매핑
+                "serviceFieldCounts": calculate_required_fields_for_service(collected_info.get("services_selected", "all"))  # 서비스별 필드 개수
+            }
+        except Exception as e:
+            print(f"[{session_id}] ❌ Error creating slot_filling_data: {e}")
+            raise
         
         # 디버그 로그 추가
         

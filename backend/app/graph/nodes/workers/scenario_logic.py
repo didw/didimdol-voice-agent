@@ -2323,6 +2323,11 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             # select_services 처리 - services_selected 값에 따라 JSON의 next_step 분기 사용
             if current_stage_id == "select_services":
                 services_selected = collected_info.get("services_selected")
+                # services_selected가 None이면 기본값 "all" 설정
+                if services_selected is None:
+                    services_selected = "all"
+                    collected_info["services_selected"] = services_selected
+                    print(f"[V3_NEXT_STEP] select_services - Set default value 'all' for services_selected")
                 print(f"[V3_NEXT_STEP] select_services branching - services_selected: {services_selected}")
                 next_stage_id = next_step.get(services_selected, next_step.get("all", "completion"))
             # confirm_personal_info 특별 처리 - 중첩된 next_step 구조

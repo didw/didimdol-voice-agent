@@ -29,16 +29,46 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
     print(f"[PersonalInfoCorrection] Correction mode: {state.correction_mode}")
     print(f"[PersonalInfoCorrection] Current modification context: {state.current_modification_context}")
     
-    # confirm_personal_info 단계에서 수정 요청이 들어온 경우 특별 처리
+    # confirm_personal_info 단계에서는 실제 수정 요청만 처리
     if current_stage_id == "confirm_personal_info":
-        print(f"[PersonalInfoCorrection] Modification request in confirm_personal_info stage")
+        # 확인 응답 키워드 체크 ("응", "네", "맞아" 등)
+        confirmation_words = ["응", "어", "네", "예", "맞아", "맞습니다", "맞아요", "그래", "그렇습니다", "확인"]
+        is_confirmation = any(word in user_input for word in confirmation_words)
+        
+        # 수정 요청 키워드 체크
+        modification_words = ["틀려", "틀렸", "다르", "다릅", "수정", "변경", "바꿔", "바꾸", "잘못"]
+        is_modification_request = any(word in user_input for word in modification_words)
+        
+        # 단순 확인 응답인 경우 시나리오 흐름에 맡김 (PersonalInfoCorrection 처리하지 않음)
+        if is_confirmation and not is_modification_request:
+            print(f"[PersonalInfoCorrection] Simple confirmation detected, letting scenario flow handle it")
+            # 시나리오 에이전트가 처리하도록 action_plan 설정
+            return state.merge_update({
+                "action_plan": ["invoke_scenario_agent"],
+                "action_plan_struct": [{"action": "invoke_scenario_agent", "reason": "Handle personal info confirmation"}],
+                "router_call_count": 0,
+                "is_final_turn_response": False
+            })
+        
+        # 실제 수정 요청인 경우에만 수정 화면으로 이동
+        if is_modification_request:
+            print(f"[PersonalInfoCorrection] Actual modification request in confirm_personal_info stage")
+            return state.merge_update({
+                "final_response_text_for_tts": "[은행 고객정보 변경] 화면으로 이동해드리겠습니다.",
+                "is_final_turn_response": True,
+                "correction_mode": False,
+                "action_plan": [],
+                "action_plan_struct": [],
+                "router_call_count": 0
+            })
+        
+        # 애매한 경우 시나리오 흐름에 맡김
+        print(f"[PersonalInfoCorrection] Ambiguous input, letting scenario flow handle it")
         return state.merge_update({
-            "final_response_text_for_tts": "[은행 고객정보 변경] 화면으로 이동해드리겠습니다.",
-            "is_final_turn_response": True,
-            "correction_mode": False,
-            "action_plan": [],
-            "action_plan_struct": [],
-            "router_call_count": 0
+            "action_plan": ["invoke_scenario_agent"], 
+            "action_plan_struct": [{"action": "invoke_scenario_agent", "reason": "Handle ambiguous input in confirm_personal_info"}],
+            "router_call_count": 0,
+            "is_final_turn_response": False
         })
     
     # 시나리오 데이터 가져오기

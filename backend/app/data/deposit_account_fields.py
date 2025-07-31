@@ -254,9 +254,7 @@ CHOICE_VALUE_DISPLAY_MAPPING = {
     "card_only": "입출금 계좌 + 체크카드", 
     "account_only": "입출금 계좌",
     
-    # Boolean 값 (알림 설정 등)
-    True: "신청",
-    False: "미신청",
+    # Boolean 값 (알림 설정 등) - string key만 사용
     "true": "신청",
     "false": "미신청"
 }
@@ -287,8 +285,13 @@ def format_korean_currency(amount: int) -> str:
 
 def get_display_value(field_key: str, value: any) -> str:
     """필드 값을 한글 표시용으로 변환"""
-    if value in CHOICE_VALUE_DISPLAY_MAPPING:
-        return CHOICE_VALUE_DISPLAY_MAPPING[value]
+    # Boolean 값을 string으로 변환해서 매핑에서 찾기
+    lookup_value = value
+    if isinstance(value, bool):
+        lookup_value = str(value).lower()
+    
+    if lookup_value in CHOICE_VALUE_DISPLAY_MAPPING:
+        return CHOICE_VALUE_DISPLAY_MAPPING[lookup_value]
     
     # Boolean 필드 특별 처리 (필드별 맞춤 텍스트)
     if isinstance(value, bool):
