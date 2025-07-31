@@ -71,6 +71,40 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
             "is_final_turn_response": False
         })
     
+    # final_confirmation 단계에서는 실제 수정 요청만 처리 
+    if current_stage_id == "final_confirmation":
+        # 확인 응답 키워드 체크 ("응", "네", "해줘" 등)
+        confirmation_words = ["응", "어", "네", "예", "맞아", "맞습니다", "맞아요", "그래", "그렇습니다", "확인", "해줘", "좋아", "진행"]
+        is_confirmation = any(word in user_input for word in confirmation_words)
+        
+        # 수정 요청 키워드 체크
+        modification_words = ["틀려", "틀렸", "다르", "다릅", "수정", "변경", "바꿔", "바꾸", "잘못"]
+        is_modification_request = any(word in user_input for word in modification_words)
+        
+        # 단순 확인 응답인 경우 시나리오 흐름에 맡김
+        if is_confirmation and not is_modification_request:
+            print(f"[PersonalInfoCorrection] Final confirmation detected, letting scenario flow handle it")
+            return state.merge_update({
+                "action_plan": ["invoke_scenario_agent"],
+                "action_plan_struct": [{"action": "invoke_scenario_agent", "reason": "Handle final confirmation"}],
+                "router_call_count": 0,
+                "is_final_turn_response": False
+            })
+        
+        # 실제 수정 요청인 경우에만 수정 처리 진행
+        if is_modification_request:
+            print(f"[PersonalInfoCorrection] Actual modification request in final_confirmation stage")
+            # 아래 수정 로직으로 계속 진행
+        else:
+            # 애매한 경우도 시나리오 흐름에 맡김
+            print(f"[PersonalInfoCorrection] Ambiguous input in final_confirmation, letting scenario flow handle it") 
+            return state.merge_update({
+                "action_plan": ["invoke_scenario_agent"],
+                "action_plan_struct": [{"action": "invoke_scenario_agent", "reason": "Handle ambiguous input in final_confirmation"}],
+                "router_call_count": 0,
+                "is_final_turn_response": False
+            })
+    
     # 시나리오 데이터 가져오기
     active_scenario_data = get_active_scenario_data(state.to_dict())
     required_fields = active_scenario_data.get("required_info_fields", []) if active_scenario_data else []

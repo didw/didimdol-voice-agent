@@ -281,6 +281,12 @@ def generate_choice_confirmation_response(
                 response = "네, 출금 알림만 신청해드리겠습니다."
             elif choice_value == "overseas_only":
                 response = "네, 해외IP 제한만 신청해드리겠습니다."
+            elif choice_value == "exclude_withdrawal":
+                response = "네, 출금 알림을 제외하고 중요거래 알림과 해외IP 제한을 신청해드리겠습니다."
+            elif choice_value == "exclude_important":
+                response = "네, 중요거래 알림을 제외하고 출금 알림과 해외IP 제한을 신청해드리겠습니다."
+            elif choice_value == "exclude_overseas":
+                response = "네, 해외IP 제한을 제외하고 중요거래 알림과 출금 알림을 신청해드리겠습니다."
             else:
                 response = f"네, {choice_display}로 진행하겠습니다."
                 
@@ -1823,7 +1829,7 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                 )
                 
                 # additional_services 단계의 특별 처리
-                if current_stage_id == "additional_services" and choice_mapping in ["all_true", "all_false", "important_only", "withdrawal_only", "overseas_only"]:
+                if current_stage_id == "additional_services" and choice_mapping in ["all_true", "all_false", "important_only", "withdrawal_only", "overseas_only", "exclude_important", "exclude_withdrawal", "exclude_overseas"]:
                     # 복합 필드 값 설정
                     collected_info = apply_additional_services_values(choice_mapping, collected_info)
                     print(f"✅ [V3_CHOICE_STORED] Applied additional_services mapping: '{choice_mapping}'")
@@ -3496,8 +3502,9 @@ async def extract_field_value_with_llm(
 **한국어 자연어 이해 규칙**:
 1. **줄임말/구어체 인식**: "딥드림/딥드립"→Deep Dream, "아이피"→IP, "해외아이피"→해외IP, "에스라인"→S-Line
 2. **의도 기반 매핑**: "~만 해줘", "~로 해줘", "~으로 신청" 등의 표현에서 핵심 의도 추출
-3. **유사어 처리**: "제한"="차단", "알림"="통보"="문자", "카드"="체크카드", "신청"="선택"
-4. **문맥 고려**: 전후 맥락을 고려한 정확한 의미 파악
+3. **부정 표현 인식**: "A빼고 다 해줘"→A제외한 나머지, "A말고 모두"→A제외한 나머지, "A제외하고"→A제외한 나머지
+4. **유사어 처리**: "제한"="차단", "알림"="통보"="문자", "카드"="체크카드", "신청"="선택", "출금내역"="출금알림"
+5. **문맥 고려**: 전후 맥락을 고려한 정확한 의미 파악
 
 **매핑 예시**:
 - "해외아이피만 제한해줘" → 해외IP 관련 옵션 (overseas_only, overseas_ip_restriction 등)
@@ -3506,6 +3513,10 @@ async def extract_field_value_with_llm(
 - "출금내역만 신청해줘" → withdrawal_only (출금 관련 서비스만)
 - "중요한거만 해줘" → important_only (중요거래 관련만)
 - "모두 다 해줘" → all_true (모든 옵션 선택)
+**부정 표현 매핑 예시**:
+- "출금내역 빼고 다 신청해줘" → exclude_withdrawal (출금알림 제외, 나머지 신청)
+- "중요거래 말고 나머지 해줘" → exclude_important (중요거래알림 제외, 나머지 신청)  
+- "해외IP 제외하고 모두 신청" → exclude_overseas (해외IP제한 제외, 나머지 신청)
 
 **신뢰도 기준**:
 - 명확한 매핑: 0.9+ (정확한 키워드 포함)
@@ -3796,9 +3807,44 @@ def fallback_keyword_matching(
     field_key: str,
     stage_id: str
 ) -> Optional[str]:
-    """LLM 실패 시 사용하는 강력한 키워드 기반 fallback"""
+    """LLM 실패 시 사용하는 강력한 키워드 기반 fallback (부정 표현 인식 포함)"""
     
     user_lower = user_input.lower().strip()
+    
+    # additional_services 단계의 부정 표현 특별 처리
+    if stage_id == "additional_services":
+        # "A빼고 다 해줘", "A말고 나머지", "A제외하고 모두" 패턴 인식
+        exclusion_patterns = {
+            "출금내역": ["출금내역", "출금", "출금알림", "출금통보", "인출"],
+            "중요거래": ["중요거래", "중요", "중요거래알림", "중요거래통보"],
+            "해외IP": ["해외ip", "해외아이피", "아이피", "ip", "해외제한", "해외차단"]
+        }
+        
+        exclusion_keywords = ["빼고", "말고", "제외하고", "제외", "말곤", "빼곤"]
+        include_all_keywords = ["다", "모두", "전부", "나머지", "전체"]
+        
+        # 부정 표현이 있는지 확인
+        has_exclusion = any(keyword in user_lower for keyword in exclusion_keywords)
+        has_include_all = any(keyword in user_lower for keyword in include_all_keywords)
+        
+        if has_exclusion and has_include_all:
+            print(f"🎯 [EXCLUSION_DETECTED] Found exclusion pattern in: {user_input}")
+            
+            # 어떤 서비스를 제외하려는지 확인
+            excluded_service = None
+            for service, keywords in exclusion_patterns.items():
+                if any(keyword in user_lower for keyword in keywords):
+                    excluded_service = service
+                    print(f"🎯 [EXCLUSION_DETECTED] Excluding service: {excluded_service}")
+                    break
+            
+            # 제외 패턴에 따른 매핑
+            if excluded_service == "출금내역":
+                return "exclude_withdrawal"  # 새로운 특별 값
+            elif excluded_service == "중요거래":
+                return "exclude_important"
+            elif excluded_service == "해외IP":
+                return "exclude_overseas"
     
     # 단계별 특화 키워드 매핑 (가장 구체적인 것부터)
     stage_specific_mappings = {
@@ -3976,6 +4022,34 @@ def apply_additional_services_values(choice_value: str, collected_info: Dict[str
         # 해외IP 제한만 신청
         service_values["overseas_ip_restriction"] = True
         print(f"🎯 [ADDITIONAL_SERVICES] Setting overseas IP restriction only -> True")
+        
+    # 새로운 제외 패턴 처리
+    elif choice_value == "exclude_withdrawal":
+        # 출금내역 빼고 나머지 신청
+        service_values = {
+            "important_transaction_alert": True,
+            "withdrawal_alert": False,  # 제외
+            "overseas_ip_restriction": True
+        }
+        print(f"🎯 [ADDITIONAL_SERVICES] Excluding withdrawal alert, setting others -> True")
+        
+    elif choice_value == "exclude_important":
+        # 중요거래 빼고 나머지 신청
+        service_values = {
+            "important_transaction_alert": False,  # 제외
+            "withdrawal_alert": True,
+            "overseas_ip_restriction": True
+        }
+        print(f"🎯 [ADDITIONAL_SERVICES] Excluding important transaction alert, setting others -> True")
+        
+    elif choice_value == "exclude_overseas":
+        # 해외IP 빼고 나머지 신청
+        service_values = {
+            "important_transaction_alert": True,
+            "withdrawal_alert": True,
+            "overseas_ip_restriction": False  # 제외
+        }
+        print(f"🎯 [ADDITIONAL_SERVICES] Excluding overseas IP restriction, setting others -> True")
     
     # collected_info에 값들을 설정
     for service_key, value in service_values.items():
