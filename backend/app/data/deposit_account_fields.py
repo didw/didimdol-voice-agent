@@ -166,10 +166,11 @@ DEPOSIT_ACCOUNT_REQUIRED_FIELDS = [
     {
         "key": "card_usage_alert",
         "display_name": "카드 사용 알림",
-        "type": "boolean",
+        "type": "choice",
         "required": True,
         "group": "check_card",
-        "stage": "card_usage_alert"
+        "stage": "card_usage_alert",
+        "choices": ["over_50000_free", "all_transactions_200won", "no_alert"]
     },
     
     # 체크카드 그룹 - card_password_setting
@@ -235,6 +236,11 @@ CHOICE_VALUE_DISPLAY_MAPPING = {
     "mobile": "모바일",
     "email": "이메일",
     "website": "홈페이지",
+    
+    # 카드 사용 알림
+    "over_50000_free": "5만원 이상 결제시 발송 (무료)",
+    "all_transactions_200won": "모든 내역 발송 (200원)",
+    "no_alert": "문자 받지 않음",
     
     # Boolean 값
     True: "예",

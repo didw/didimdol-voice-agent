@@ -38,7 +38,7 @@
         "all": "confirm_personal_info",
         "mobile_only": "confirm_personal_info",
         "card_only": "confirm_personal_info",
-        "account_only": "completion"
+        "account_only": "confirm_personal_info"
       }
     },
     "confirm_personal_info": {
@@ -63,7 +63,8 @@
         "true": {
           "all": "security_medium_registration",
           "mobile_only": "security_medium_registration", 
-          "card_only": "card_selection"
+          "card_only": "card_selection",
+          "account_only": "completion"
         },
         "false": "customer_info_update"
       }
