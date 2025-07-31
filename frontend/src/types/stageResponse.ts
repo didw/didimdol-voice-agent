@@ -7,6 +7,7 @@ export interface Choice {
   label: string
   key?: string
   default?: boolean
+  display?: string
 }
 
 export interface ChoiceGroup {
