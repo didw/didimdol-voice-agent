@@ -11,20 +11,20 @@
       "prompt": "입출금 계좌는 한도계좌로만 가입할 수 있어요.\\n지금 만드시는 계좌를 모바일 앱과 체크카드로 함께 이용할 수 있도록 가입해 드릴까요?",
       "choices": [
         {
-          "display": "모두 가입할게요",
+          "display": "입출금 계좌 + 체크카드 + 모바일 뱅킹",
           "value": "all",
           "default": true
         },
         {
-          "display": "모바일 앱만",
+          "display": "입출금 계좌 + 모바일 뱅킹",
           "value": "mobile_only"
         },
         {
-          "display": "체크카드만",
+          "display": "입출금 계좌 + 체크카드",
           "value": "card_only"
         },
         {
-          "display": "입출금 계좌만",
+          "display": "입출금 계좌",
           "value": "account_only"
         }
       ],
@@ -33,7 +33,7 @@
         "한도가 어느정도 제한되는지 알려줘"
       ],
       "fields_to_collect": ["services_selected"],
-      "extraction_prompt": "사용자가 선택한 서비스를 추출하세요:\\n- \"모두\", \"전부\", \"다\" → \"all\"\\n- \"모바일\", \"앱\" → \"mobile_only\"\\n- \"체크카드\", \"카드\" → \"card_only\"\\n- \"계좌만\", \"입출금만\" → \"account_only\"",
+      "extraction_prompt": "사용자가 선택한 서비스를 추출하세요:\\n- \"모두\", \"전부\", \"다\" → \"all\"\\n- \"모바일\", \"앱\" → \"mobile_only\"\\n- \"체크카드\", \"카드\" → \"card_only\"\\n- \"계좌만\", \"입출금만\" → \"account_only\"\\n- \"아니\"",
       "next_step": {
         "all": "confirm_personal_info",
         "mobile_only": "confirm_personal_info",

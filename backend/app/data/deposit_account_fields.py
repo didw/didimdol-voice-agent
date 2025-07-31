@@ -219,18 +219,18 @@ def convert_korean_keys_to_english(collected_info: dict) -> dict:
 
 # Choice 필드의 값을 한글로 표시하기 위한 매핑
 CHOICE_VALUE_DISPLAY_MAPPING = {
-    # 보안매체
-    "futuretech_19284019384": "퓨처테크 OTP",
-    "comas_rsa_12930295": "코마스 RSA",
+    # 보안매체 (시나리오 JSON display 값과 일치)
+    "futuretech_19284019384": "미래테크 19284019384",
+    "comas_rsa_12930295": "코마스(RSA) 12930295",
     "security_card": "보안카드",
-    "shinhan_otp": "신한 OTP",
+    "shinhan_otp": "신한OTP (10,000원)",
     
-    # 체크카드 선택
-    "sline_transit": "S-line 교통카드",
-    "sline_regular": "S-line 일반카드",
-    "deepdream_transit": "Deep Dream 교통카드",
-    "deepdream_regular": "Deep Dream 일반카드",
-    "heyyoung_regular": "Hey Young 일반카드",
+    # 체크카드 선택 (시나리오 JSON display 값과 일치)
+    "sline_transit": "S-Line 체크카드 (후불교통)",
+    "sline_regular": "S-Line 체크카드 (일반)",
+    "deepdream_transit": "신한 Deep Dream 체크카드 (후불교통)",
+    "deepdream_regular": "신한 Deep Dream 체크카드 (일반)",
+    "heyyoung_regular": "신한카드 Hey Young 체크카드 (일반)",
     
     # 카드 수령 방법
     "immediate": "즉시발급",
@@ -238,21 +238,21 @@ CHOICE_VALUE_DISPLAY_MAPPING = {
     "즉시발급": "즉시발급",
     "배송": "배송",
     
-    # 명세서 수령 방법
-    "mobile": "모바일",
+    # 명세서 수령 방법 (시나리오 JSON display 값과 일치)
+    "mobile": "휴대폰",
     "email": "이메일", 
     "website": "홈페이지",
     
-    # 카드 사용 알림
+    # 카드 사용 알림 (시나리오 JSON display 값과 일치)
     "over_50000_free": "5만원 이상 결제시 발송 (무료)",
-    "all_transactions_200won": "모든 내역 발송 (200원)",
+    "all_transactions_200won": "모든 내역 발송 (200원, 포인트 우선 차감)",
     "no_alert": "문자 받지 않음",
     
-    # 서비스 선택
-    "all": "모두 가입",
-    "mobile_only": "모바일앱만",
-    "card_only": "체크카드만", 
-    "account_only": "입출금계좌만",
+    # 서비스 선택 (시나리오 JSON display 값과 일치)
+    "all": "입출금 계좌 + 체크카드 + 모바일 뱅킹",
+    "mobile_only": "입출금 계좌 + 모바일 뱅킹",
+    "card_only": "입출금 계좌 + 체크카드", 
+    "account_only": "입출금 계좌",
     
     # Boolean 값 (알림 설정 등)
     True: "신청",
