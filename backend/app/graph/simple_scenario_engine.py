@@ -39,6 +39,15 @@ class SimpleScenarioEngine:
     
     def check_stage_completion(self, stage_id: str, collected_info: Dict[str, Any]) -> Tuple[bool, List[str]]:
         """단계 완료 여부 확인"""
+        # final_confirmation 단계는 특별 처리
+        if stage_id == "final_confirmation":
+            # final_confirmation 필드가 True로 설정되어 있으면 완료
+            final_confirmation = collected_info.get("final_confirmation")
+            if final_confirmation is True:
+                return True, []
+            else:
+                return False, ["final_confirmation"]
+        
         required_fields = self.get_required_fields_for_stage(stage_id)
         missing_fields = []
         

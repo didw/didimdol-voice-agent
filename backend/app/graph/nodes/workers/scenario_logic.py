@@ -358,6 +358,35 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             if extraction_result['extracted_entities']:
                 log_node_execution("Entity_Extract", output_info=f"entities={list(extraction_result['extracted_entities'].keys())}")
 
+        # final_confirmation 단계에서 최종 확인 메시지 생성
+        if current_stage_id == "final_confirmation":
+            confirmation_prompt = generate_final_confirmation_prompt(collected_info)
+            current_stage_info["prompt"] = confirmation_prompt
+            print(f"🎯 [FINAL_CONFIRMATION] Generated dynamic prompt: {confirmation_prompt}")
+            
+            # 사용자 응답이 있으면 final_confirmation 필드 설정
+            if user_input:
+                positive_keywords = ["네", "예", "좋아요", "그래요", "맞아요", "진행", "할게요", "하겠어요", "확인"]
+                negative_keywords = ["아니요", "아니에요", "안", "수정", "다시", "아직", "잠깐"]
+                
+                user_input_lower = user_input.lower().strip()
+                
+                # 부정 키워드 우선 체크
+                if any(keyword in user_input_lower for keyword in negative_keywords):
+                    collected_info["final_confirmation"] = False
+                    print(f"🎯 [FINAL_CONFIRMATION] User declined: {user_input}")
+                    # 사용자가 수정을 원하는 경우 수정 모드로 전환
+                    state.correction_mode = True
+                    response_data["response_type"] = "narrative"
+                    response_data["prompt"] = "어떤 부분을 수정하고 싶으신가요? 수정하실 항목을 말씀해주세요."
+                # 긍정 키워드 체크
+                elif any(keyword in user_input_lower for keyword in positive_keywords):
+                    collected_info["final_confirmation"] = True
+                    print(f"🎯 [FINAL_CONFIRMATION] User confirmed: {user_input}")
+                else:
+                    print(f"🎯 [FINAL_CONFIRMATION] Unclear response: {user_input}")
+                    # 명확하지 않은 응답의 경우 Entity Agent에게 처리를 맡김
+        
         # customer_info_check 단계에서 개인정보 확인 처리
         if current_stage_id == "customer_info_check":
             intent = scenario_output.get("intent", "") if scenario_output else ""
@@ -1611,14 +1640,11 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             main_field_key = expected_field_keys[0] if expected_field_keys else None
             print(f"[V3_NEXT_STEP] main_field_key: {main_field_key}, collected_info: {collected_info}")
             
-            # additional_services 특별 처리 - services_selected 값에 따라 분기
+            # additional_services 처리 - services_selected 값에 따라 JSON의 next_step 분기 사용
             if current_stage_id == "additional_services":
                 services_selected = collected_info.get("services_selected")
                 print(f"[V3_NEXT_STEP] additional_services branching - services_selected: {services_selected}")
-                if services_selected in ["all", "card_only"]:
-                    next_stage_id = "card_selection"
-                else:
-                    next_stage_id = "completion"
+                next_stage_id = next_step.get(services_selected, next_step.get("all", "completion"))
             # confirm_personal_info 특별 처리 - 중첩된 next_step 구조
             elif current_stage_id == "confirm_personal_info":
                 personal_info_confirmed = collected_info.get("personal_info_confirmed")
@@ -2394,8 +2420,12 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
     print(f"🎯 [GENERATE_STAGE_RESPONSE] Has choice_groups: {bool(stage_info.get('choice_groups'))}")
     print(f"🎯 [GENERATE_STAGE_RESPONSE] Has dynamic_prompt: {bool(stage_info.get('dynamic_prompt'))}")
     
+    # final_confirmation 단계의 동적 프롬프트 생성
+    if stage_id == "final_confirmation":
+        prompt = generate_final_confirmation_prompt(collected_info)
+        print(f"🎯 [FINAL_CONFIRMATION] Generated dynamic prompt: {prompt}")
     # dynamic_prompt 처리 우선 (V3 시나리오)
-    if stage_info.get("dynamic_prompt"):
+    elif stage_info.get("dynamic_prompt"):
         default_choice = get_default_choice_display(stage_info)
         prompt = stage_info["dynamic_prompt"].replace("{default_choice}", default_choice)
         print(f"🎯 [DYNAMIC_PROMPT] Used dynamic_prompt with default_choice: '{default_choice}'")
@@ -2565,3 +2595,149 @@ def format_prompt_with_fields(prompt: str, collected_info: Dict[str, Any], displ
             prompt += "\n" + "\n".join(field_display)
     
     return prompt
+
+
+def generate_final_confirmation_prompt(collected_info: Dict[str, Any]) -> str:
+    """
+    collected_info를 바탕으로 최종 확인 프롬프트를 동적으로 생성
+    선택된 서비스(select_services)에 따라 확인할 내용이 달라짐
+    """
+    from ....data.deposit_account_fields import get_deposit_account_fields
+    
+    # select_services 또는 services_selected 키로 저장될 수 있음
+    selected_services = collected_info.get("select_services") or collected_info.get("services_selected", "all")
+    print(f"🎯 [FINAL_CONFIRMATION] Selected services: {selected_services}")
+    print(f"🎯 [FINAL_CONFIRMATION] Available keys in collected_info: {list(collected_info.keys())}")
+    
+    # 기본 서비스 텍스트 매핑
+    service_texts = {
+        "all": ["입출금 계좌 가입", "모바일 앱 뱅킹 사용 신청", "체크카드 발급"],
+        "mobile_only": ["입출금 계좌 가입", "모바일 앱 뱅킹 사용 신청"],
+        "card_only": ["입출금 계좌 가입", "체크카드 발급"],
+        "account_only": ["입출금 계좌 가입"]
+    }
+    
+    services = service_texts.get(selected_services, service_texts["all"])
+    service_text = ", ".join(services)
+    
+    # 프롬프트 시작
+    prompt = f"마지막으로 아래 내용으로 {service_text}을 진행해 드릴까요?"
+    
+    # 필드 정보 수집
+    all_fields = get_deposit_account_fields()
+    field_groups = []
+    
+    # 서비스별 관련 필드 분류
+    if selected_services in ["all", "mobile_only"]:
+        # 모바일 앱 뱅킹 관련 항목
+        mobile_items = []
+        mobile_fields = ["security_medium", "transfer_limit_once", "transfer_limit_daily", 
+                        "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
+        
+        for field_key in mobile_fields:
+            value = collected_info.get(field_key)
+            if value is not None:
+                field_info = next((f for f in all_fields if f["key"] == field_key), None)
+                if field_info:
+                    display_name = field_info["display_name"]
+                    try:
+                        display_value = format_field_value(field_key, value, field_info.get("type"))
+                        mobile_items.append(f"- {display_name}: {display_value}")
+                    except Exception as e:
+                        print(f"🚨 [FINAL_CONFIRMATION] Error formatting field {field_key}: {e}")
+                        mobile_items.append(f"- {display_name}: {str(value)}")
+        
+        if mobile_items:
+            field_groups.extend(mobile_items)
+    
+    if selected_services in ["all", "card_only"]:
+        # 체크카드 발급 관련 항목
+        card_items = []
+        card_fields = ["card_selection", "card_receipt_method", "transit_function",
+                      "statement_delivery_method", "statement_delivery_date", 
+                      "card_usage_alert", "card_password_same_as_account"]
+        
+        for field_key in card_fields:
+            value = collected_info.get(field_key)
+            if value is not None:
+                field_info = next((f for f in all_fields if f["key"] == field_key), None)
+                if field_info:
+                    display_name = field_info["display_name"]
+                    try:
+                        display_value = format_field_value(field_key, value, field_info.get("type"))
+                        card_items.append(f"- {display_name}: {display_value}")
+                    except Exception as e:
+                        print(f"🚨 [FINAL_CONFIRMATION] Error formatting field {field_key}: {e}")
+                        card_items.append(f"- {display_name}: {str(value)}")
+                    
+        if card_items:
+            field_groups.extend(card_items)
+    
+    # 최종 프롬프트 구성
+    if field_groups:
+        prompt += "\n" + "\n".join(field_groups)
+    
+    return prompt
+
+
+def format_field_value(field_key: str, value: Any, field_type: str) -> str:
+    """필드 값을 사용자에게 표시할 형태로 포맷팅"""
+    if value is None:
+        return "미설정"
+    
+    # boolean 타입 처리
+    if field_type == "boolean":
+        if field_key == "card_password_same_as_account":
+            return "계좌 비밀번호와 동일" if value else "별도 설정"
+        elif field_key in ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]:
+            return "사용" if value else "미사용"
+        elif field_key == "transit_function":
+            return "신청" if value else "미신청"
+        else:
+            return "예" if value else "아니오"
+    
+    # choice 타입 처리 - 한글 매핑
+    choice_mappings = {
+        "security_medium": {
+            "existing_otp": "기존 OTP 사용",
+            "new_otp": "신규 OTP 발급",
+            "existing_security_card": "기존 보안카드 사용",
+            "new_security_card": "신규 보안카드 발급"
+        },
+        "card_receipt_method": {
+            "mail": "우편 수령",
+            "branch": "영업점 수령"
+        },
+        "statement_delivery_method": {
+            "email": "이메일",
+            "mail": "우편",
+            "branch": "영업점"
+        },
+        "card_usage_alert": {
+            "over_50000_free": "5만원 이상 결제 시 발송 (무료)",
+            "all_transactions_200won": "모든 거래 시 발송 (건당 200원)",
+            "no_alert": "알림 미사용"
+        }
+    }
+    
+    if field_key in choice_mappings and value in choice_mappings[field_key]:
+        return choice_mappings[field_key][value]
+    
+    # 숫자 필드 처리
+    if field_type == "number" or isinstance(value, (int, float)):
+        try:
+            # 숫자로 변환 시도
+            if isinstance(value, str):
+                numeric_value = int(value) if value.isdigit() else float(value)
+            else:
+                numeric_value = value
+                
+            if field_key in ["transfer_limit_once", "transfer_limit_daily"]:
+                return f"{numeric_value:,}원"
+            return str(numeric_value)
+        except (ValueError, TypeError):
+            # 숫자 변환에 실패하면 문자열로 반환
+            return str(value)
+    
+    # 기본값
+    return str(value)
