@@ -248,10 +248,19 @@
       "stage_id": "card_password_setting",
       "stage_name": "카드 비밀번호 설정",
       "response_type": "narrative",
-      "prompt": "마지막으로 카드 비밀번호는 계좌 비밀번호와 동일하게 설정하시겠어요?",
+      "prompt": "카드 비밀번호는 계좌 비밀번호와 동일하게 설정하시겠어요?",
       "fields_to_collect": ["card_password_same_as_account"],
       "field_type": "boolean",
       "extraction_prompt": "카드 비밀번호 설정 방법을 추출하세요:\\n- \"같게\", \"동일\", \"네\" → card_password_same_as_account: true\\n- \"다르게\", \"따로\", \"아니\" → card_password_same_as_account: false",
+      "next_step": "final_confirmation"
+    },
+    "final_confirmation": {
+      "stage_id": "final_confirmation",
+      "stage_name": "최종 확인",
+      "response_type": "narrative",
+      "prompt": "동적으로 생성됨 - collected_product_info 기반",
+      "fields_to_collect": [],
+      "extraction_prompt": "최종 확인에 대한 응답을 추출하세요:\\n- \"네\", \"예\", \"진행\", \"맞습니다\" → final_confirmation: true\\n- \"아니요\", \"수정\", \"다시\" → final_confirmation: false",
       "next_step": "completion"
     },
     "completion": {
