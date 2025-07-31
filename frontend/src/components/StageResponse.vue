@@ -89,16 +89,16 @@
         <span class="additional-questions-title">다른 질문도 할 수 있어요.</span>
       </div>
       <div class="additional-questions-list">
-        <button 
+        <div 
           v-for="(question, index) in responseData.additionalQuestions" 
           :key="index"
           @click="handleAdditionalQuestion(question)"
-          class="additional-question-button"
+          class="additional-question-item"
           :aria-label="`추가 질문: ${question}`"
         >
           <span class="arrow-icon">→</span>
           <span class="question-text">{{ question }}</span>
-        </button>
+        </div>
       </div>
     </div>
     
@@ -545,13 +545,13 @@ const handleAdditionalQuestion = (question: string) => {
 .plus-icon {
   font-size: 1.1rem;
   font-weight: 600;
-  color: #6c757d;
+  color: #1976d2;
 }
 
 .additional-questions-title {
   font-size: 0.95rem;
-  font-weight: 500;
-  color: #6c757d;
+  font-weight: 600;
+  color: #1976d2;
 }
 
 .additional-questions-list {
@@ -561,34 +561,30 @@ const handleAdditionalQuestion = (question: string) => {
   margin-left: 1.5rem;
 }
 
-.additional-question-button {
+.additional-question-item {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  background-color: transparent;
-  border: none;
-  font-size: 0.875rem;
-  color: #495057;
+  padding: 0.25rem 0;
+  font-size: 0.9rem;
+  color: #1565c0;
   cursor: pointer;
   transition: all 0.2s ease;
-  text-align: left;
-  width: fit-content;
 }
 
-.additional-question-button:hover {
-  color: #1976d2;
+.additional-question-item:hover {
+  color: #0d47a1;
   transform: translateX(3px);
 }
 
 .arrow-icon {
-  font-size: 0.875rem;
-  color: #6c757d;
+  font-size: 0.9rem;
+  color: #1976d2;
   flex-shrink: 0;
 }
 
-.additional-question-button:hover .arrow-icon {
-  color: #1976d2;
+.additional-question-item:hover .arrow-icon {
+  color: #0d47a1;
 }
 
 .question-text {
