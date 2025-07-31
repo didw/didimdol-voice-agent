@@ -1211,6 +1211,11 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
         fields_to_collect = current_stage_info.get("fields_to_collect", [])
         expected_field = fields_to_collect[0] if fields_to_collect else None
         
+        # 디버깅: card_selection 단계일 때 상세 정보 출력
+        if current_stage_id == "card_selection":
+            print(f"🎯 [CARD_SELECTION_DEBUG] fields_to_collect: {fields_to_collect}")
+            print(f"🎯 [CARD_SELECTION_DEBUG] current_stage_info keys: {list(current_stage_info.keys())}")
+        
         print(f"🎯 [EXACT_MATCH] Looking for '{user_input.strip()}' in {len(choices)} total choices")
         print(f"🎯 [EXACT_MATCH] Expected field: {expected_field}")
         
