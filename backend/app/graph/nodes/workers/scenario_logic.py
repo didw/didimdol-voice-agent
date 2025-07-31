@@ -1517,12 +1517,22 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         
         if (not has_specific_selections and user_input and 
             any(word in user_input for word in ["네", "예", "응", "어", "좋아요", "모두", "전부", "다", "신청", "하겠습니다"])):
-            # 기본값 적용
-            default_values = current_stage_info.get("default_values", {})
-            for field in service_fields:
-                if field in default_values:
-                    collected_info[field] = default_values[field]
-                    print(f"[ADDITIONAL_SERVICES] Set {field} = {default_values[field]}")
+            # V3 시나리오: choices에서 default 값 확인
+            choices = current_stage_info.get("choices", [])
+            if choices:
+                # boolean 타입 choices 처리
+                for choice in choices:
+                    field_key = choice.get("key")
+                    if field_key and choice.get("default", False):
+                        collected_info[field_key] = True
+                        print(f"[ADDITIONAL_SERVICES] Set {field_key} = True (from choice default)")
+            else:
+                # 기존 방식: default_values 사용
+                default_values = current_stage_info.get("default_values", {})
+                for field in service_fields:
+                    if field in default_values:
+                        collected_info[field] = default_values[field]
+                        print(f"[ADDITIONAL_SERVICES] Set {field} = {default_values[field]}")
     
     # ask_notification_settings 단계에서 "네" 응답 처리 (Entity Agent 결과가 없는 경우에만)
     if current_stage_id == "ask_notification_settings":
