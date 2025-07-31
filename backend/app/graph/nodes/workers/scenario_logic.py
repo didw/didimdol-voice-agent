@@ -1640,14 +1640,11 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             main_field_key = expected_field_keys[0] if expected_field_keys else None
             print(f"[V3_NEXT_STEP] main_field_key: {main_field_key}, collected_info: {collected_info}")
             
-            # additional_services 특별 처리 - services_selected 값에 따라 분기
+            # additional_services 처리 - services_selected 값에 따라 JSON의 next_step 분기 사용
             if current_stage_id == "additional_services":
                 services_selected = collected_info.get("services_selected")
                 print(f"[V3_NEXT_STEP] additional_services branching - services_selected: {services_selected}")
-                if services_selected in ["all", "card_only"]:
-                    next_stage_id = "card_selection"
-                else:
-                    next_stage_id = "completion"
+                next_stage_id = next_step.get(services_selected, next_step.get("all", "completion"))
             # confirm_personal_info 특별 처리 - 중첩된 next_step 구조
             elif current_stage_id == "confirm_personal_info":
                 personal_info_confirmed = collected_info.get("personal_info_confirmed")
@@ -2423,8 +2420,12 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
     print(f"🎯 [GENERATE_STAGE_RESPONSE] Has choice_groups: {bool(stage_info.get('choice_groups'))}")
     print(f"🎯 [GENERATE_STAGE_RESPONSE] Has dynamic_prompt: {bool(stage_info.get('dynamic_prompt'))}")
     
+    # final_confirmation 단계의 동적 프롬프트 생성
+    if stage_id == "final_confirmation":
+        prompt = generate_final_confirmation_prompt(collected_info)
+        print(f"🎯 [FINAL_CONFIRMATION] Generated dynamic prompt: {prompt}")
     # dynamic_prompt 처리 우선 (V3 시나리오)
-    if stage_info.get("dynamic_prompt"):
+    elif stage_info.get("dynamic_prompt"):
         default_choice = get_default_choice_display(stage_info)
         prompt = stage_info["dynamic_prompt"].replace("{default_choice}", default_choice)
         print(f"🎯 [DYNAMIC_PROMPT] Used dynamic_prompt with default_choice: '{default_choice}'")
@@ -2603,8 +2604,10 @@ def generate_final_confirmation_prompt(collected_info: Dict[str, Any]) -> str:
     """
     from ....data.deposit_account_fields import get_deposit_account_fields
     
-    selected_services = collected_info.get("select_services", "all")
+    # select_services 또는 services_selected 키로 저장될 수 있음
+    selected_services = collected_info.get("select_services") or collected_info.get("services_selected", "all")
     print(f"🎯 [FINAL_CONFIRMATION] Selected services: {selected_services}")
+    print(f"🎯 [FINAL_CONFIRMATION] Available keys in collected_info: {list(collected_info.keys())}")
     
     # 기본 서비스 텍스트 매핑
     service_texts = {
@@ -2637,8 +2640,12 @@ def generate_final_confirmation_prompt(collected_info: Dict[str, Any]) -> str:
                 field_info = next((f for f in all_fields if f["key"] == field_key), None)
                 if field_info:
                     display_name = field_info["display_name"]
-                    display_value = format_field_value(field_key, value, field_info.get("type"))
-                    mobile_items.append(f"- {display_name}: {display_value}")
+                    try:
+                        display_value = format_field_value(field_key, value, field_info.get("type"))
+                        mobile_items.append(f"- {display_name}: {display_value}")
+                    except Exception as e:
+                        print(f"🚨 [FINAL_CONFIRMATION] Error formatting field {field_key}: {e}")
+                        mobile_items.append(f"- {display_name}: {str(value)}")
         
         if mobile_items:
             field_groups.extend(mobile_items)
@@ -2656,8 +2663,12 @@ def generate_final_confirmation_prompt(collected_info: Dict[str, Any]) -> str:
                 field_info = next((f for f in all_fields if f["key"] == field_key), None)
                 if field_info:
                     display_name = field_info["display_name"]
-                    display_value = format_field_value(field_key, value, field_info.get("type"))
-                    card_items.append(f"- {display_name}: {display_value}")
+                    try:
+                        display_value = format_field_value(field_key, value, field_info.get("type"))
+                        card_items.append(f"- {display_name}: {display_value}")
+                    except Exception as e:
+                        print(f"🚨 [FINAL_CONFIRMATION] Error formatting field {field_key}: {e}")
+                        card_items.append(f"- {display_name}: {str(value)}")
                     
         if card_items:
             field_groups.extend(card_items)
@@ -2714,9 +2725,19 @@ def format_field_value(field_key: str, value: Any, field_type: str) -> str:
     
     # 숫자 필드 처리
     if field_type == "number" or isinstance(value, (int, float)):
-        if field_key in ["transfer_limit_once", "transfer_limit_daily"]:
-            return f"{value:,}원"
-        return str(value)
+        try:
+            # 숫자로 변환 시도
+            if isinstance(value, str):
+                numeric_value = int(value) if value.isdigit() else float(value)
+            else:
+                numeric_value = value
+                
+            if field_key in ["transfer_limit_once", "transfer_limit_daily"]:
+                return f"{numeric_value:,}원"
+            return str(numeric_value)
+        except (ValueError, TypeError):
+            # 숫자 변환에 실패하면 문자열로 반환
+            return str(value)
     
     # 기본값
     return str(value)

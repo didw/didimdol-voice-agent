@@ -132,7 +132,7 @@
       "fields_to_collect": ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"],
       "next_step": {
         "all": "card_selection",
-        "mobile_only": "completion"
+        "mobile_only": "final_confirmation"
       }
     },
     "card_selection": {
