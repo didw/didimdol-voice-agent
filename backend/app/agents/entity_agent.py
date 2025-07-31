@@ -354,7 +354,8 @@ class EntityRecognitionAgent:
         user_input: str,
         required_fields: List[Dict[str, Any]],
         current_stage: str = None,
-        stage_info: Dict[str, Any] = None
+        stage_info: Dict[str, Any] = None,
+        last_llm_prompt: str = None
     ) -> Dict[str, Any]:
         """더 유연한 엔티티 추출 - 오타, 유사 표현, 문맥 고려"""
         
@@ -362,6 +363,8 @@ class EntityRecognitionAgent:
         print(f"   📝 사용자 입력: \"{user_input}\"")
         print(f"   📍 현재 단계: {current_stage}")
         print(f"   🎯 추출 대상 필드: {[f['key'] for f in required_fields]}")
+        if last_llm_prompt:
+            print(f"   💬 이전 AI 질문: \"{last_llm_prompt[:100]}...\"" if len(last_llm_prompt) > 100 else f"   💬 이전 AI 질문: \"{last_llm_prompt}\"")
         
         # 먼저 의도 분석
         intent_analysis = None
@@ -382,6 +385,7 @@ class EntityRecognitionAgent:
         
         flexible_prompt = f"""사용자의 발화를 이해하고 필요한 정보를 추출해주세요. 오타나 이상한 표현도 문맥상 이해해주세요.
 
+{f"이전 AI 질문: \"{last_llm_prompt}\"" if last_llm_prompt else ""}
 사용자 발화: "{user_input}"
 {f"의도 분석: {intent_analysis.get('interpreted_meaning', '')}" if intent_analysis else ""}
 
@@ -390,10 +394,11 @@ class EntityRecognitionAgent:
 
 추출 원칙:
 1. 사용자가 명시적으로 언급한 정보를 추출
-2. 오타나 축약어도 문맥상 이해 (예: "넴" → "네", "ㅇㅇ" → "응/네")
+2. 오타나 축약어도 문맥상 이해 (예: "넴" → "네", "ㅇㅇ" → "응/네", "뺴고" → "빼고")
 3. 유사한 표현도 인정 (예: "맞아요" → "네", "틀려요" → "아니요")
-4. choice 필드는 의미상 가장 가까운 선택지로 매칭
-5. 애매한 경우 confidence를 낮게 설정
+4. 대명사나 지시어는 이전 AI 질문의 맥락을 참고 (예: "그걸로 해줘" → AI가 제시한 선택지)
+5. choice 필드는 의미상 가장 가까운 선택지로 매칭
+6. 애매한 경우 confidence를 낮게 설정
 
 출력 형식:
 {{

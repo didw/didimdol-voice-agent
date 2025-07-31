@@ -79,6 +79,7 @@ class AgentState(BaseModel):
     # --- Conversation History & Final Response ---
     messages: Sequence[BaseMessage] = Field(default_factory=list)
     final_response_text_for_tts: Optional[str] = None
+    last_llm_prompt: Optional[str] = None  # Store the last prompt shown to user for context
     
     # --- Turn-specific state ---
     action_plan_struct: List[Dict[str, Any]] = Field(default_factory=list)

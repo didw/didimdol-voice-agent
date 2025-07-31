@@ -30,6 +30,21 @@ from .scenario_helpers import (
 from ...validators import FIELD_VALIDATORS, get_validator_for_field
 
 
+def create_update_dict_with_last_prompt(update_dict: Dict[str, Any], stage_response_data: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Update dict를 생성하면서 last_llm_prompt도 함께 저장"""
+    # final_response_text_for_tts가 있으면 last_llm_prompt에도 저장
+    if update_dict.get("final_response_text_for_tts"):
+        update_dict["last_llm_prompt"] = update_dict["final_response_text_for_tts"]
+        print(f"💾 [SAVE_LAST_PROMPT] Saved: '{update_dict['last_llm_prompt'][:100]}...'" if len(update_dict['last_llm_prompt']) > 100 else f"💾 [SAVE_LAST_PROMPT] Saved: '{update_dict['last_llm_prompt']}'")
+    
+    # stage_response_data에서 prompt 추출하여 저장
+    elif stage_response_data and stage_response_data.get("prompt"):
+        update_dict["last_llm_prompt"] = stage_response_data["prompt"]
+        print(f"💾 [SAVE_LAST_PROMPT] From stage_response_data: '{update_dict['last_llm_prompt'][:100]}...'" if len(update_dict['last_llm_prompt']) > 100 else f"💾 [SAVE_LAST_PROMPT] From stage_response_data: '{update_dict['last_llm_prompt']}'")
+    
+    return update_dict
+
+
 async def map_user_intent_to_choice(
     user_input: str,
     choices: List[Any],
@@ -797,26 +812,27 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
             _handle_field_name_mapping(collected_info)
         elif user_input and len(user_input.strip()) > 0:
             # 먼저 user_input이 현재 stage의 valid choice 중 하나와 정확히 일치하는지 확인
+            # [DISABLED] - Exact match를 비활성화하고 항상 LLM을 통해 의미를 이해하도록 변경
             exact_choice_match = False
-            if current_stage_info.get("choices"):
-                choices = current_stage_info.get("choices", [])
-                expected_field_keys = get_expected_field_keys(current_stage_info)
-                expected_field = expected_field_keys[0] if expected_field_keys else None
-                
-                for choice in choices:
-                    choice_value = choice.get("value", "") if isinstance(choice, dict) else str(choice)
-                    if user_input.strip() == choice_value:
-                        # 정확한 매치 발견 - Entity Agent를 거치지 않고 직접 저장
-                        print(f"✅ [EXACT_CHOICE_MATCH] Found exact match: '{user_input}' for field '{expected_field}'")
-                        if expected_field:
-                            collected_info[expected_field] = user_input.strip()
-                            extraction_result = {
-                                "collected_info": collected_info,
-                                "extracted_entities": {expected_field: user_input.strip()},
-                                "message": "Exact choice match found"
-                            }
-                            exact_choice_match = True
-                            break
+            # if current_stage_info.get("choices"):
+            #     choices = current_stage_info.get("choices", [])
+            #     expected_field_keys = get_expected_field_keys(current_stage_info)
+            #     expected_field = expected_field_keys[0] if expected_field_keys else None
+            #     
+            #     for choice in choices:
+            #         choice_value = choice.get("value", "") if isinstance(choice, dict) else str(choice)
+            #         if user_input.strip() == choice_value:
+            #             # 정확한 매치 발견 - Entity Agent를 거치지 않고 직접 저장
+            #             print(f"✅ [EXACT_CHOICE_MATCH] Found exact match: '{user_input}' for field '{expected_field}'")
+            #             if expected_field:
+            #                 collected_info[expected_field] = user_input.strip()
+            #                 extraction_result = {
+            #                     "collected_info": collected_info,
+            #                     "extracted_entities": {expected_field: user_input.strip()},
+            #                     "message": "Exact choice match found"
+            #                 }
+            #                 exact_choice_match = True
+            #                 break
             
             if not exact_choice_match:
                 try:
@@ -835,7 +851,8 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                         user_input, 
                         stage_relevant_fields,
                         current_stage_id,
-                        current_stage_info
+                        current_stage_info,
+                        state.last_llm_prompt  # 이전 AI 질문 전달
                     )
                     
                     # 의도 분석 결과를 extraction_result에 추가 (자연어 응답 생성에 활용)
@@ -993,7 +1010,7 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                     })
                 else:
                     next_stage_prompt = next_stage_info.get("prompt", "")
-                    return state.merge_update({
+                    update_dict = {
                         "current_scenario_stage_id": next_stage_id,
                         "collected_product_info": collected_info,
                         "final_response_text_for_tts": next_stage_prompt,
@@ -1001,7 +1018,10 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                         "action_plan": [],
                         "action_plan_struct": [],
                         "correction_mode": False  # 수정 모드 해제
-                    })
+                    }
+                    # last_llm_prompt 저장
+                    update_dict = create_update_dict_with_last_prompt(update_dict)
+                    return state.merge_update(update_dict)
             # confirm_personal_info가 false인 경우는 기존 시나리오 전환 로직을 따름
         
         
@@ -1794,7 +1814,8 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                 user_input, 
                 choices, 
                 expected_field,
-                current_stage_id
+                current_stage_id,
+                state.last_llm_prompt  # 대화 맥락 전달
             )
         
         # 모든 단계에서 일관되게 개선된 LLM 기반 매핑 사용
@@ -1803,7 +1824,8 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                 user_input, 
                 choices, 
                 expected_field,
-                current_stage_id
+                current_stage_id,
+                state.last_llm_prompt  # 대화 맥락 전달
             )
         
         # LLM 실패 시 강력한 키워드 기반 fallback
@@ -1937,10 +1959,13 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                     if stage_response_data:
                         update_dict["stage_response_data"] = stage_response_data
                     
+                    # last_llm_prompt 저장
+                    update_dict = create_update_dict_with_last_prompt(update_dict, stage_response_data)
+                    
                     return state.merge_update(update_dict)
                 else:
                     # 현재 단계 유지
-                    return state.merge_update({
+                    update_dict = {
                         "final_response_text_for_tts": confirmation_response,
                         "is_final_turn_response": True,
                         "current_scenario_stage_id": current_stage_id,
@@ -1949,7 +1974,10 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                         "action_plan_struct": [],
                         "scenario_awaiting_user_response": True,
                         "scenario_ready_for_continuation": True
-                    })
+                    }
+                    # last_llm_prompt 저장
+                    update_dict = create_update_dict_with_last_prompt(update_dict)
+                    return state.merge_update(update_dict)
         else:
             # additional_services 단계에서 choice_mapping 실패 시 직접 처리
             if current_stage_id == "additional_services":
@@ -3562,7 +3590,8 @@ async def map_user_intent_to_choice_enhanced(
     user_input: str,
     choices: List[Any],
     field_key: str,
-    stage_id: str
+    stage_id: str,
+    last_llm_prompt: str = None
 ) -> Optional[str]:
     """개선된 LLM 기반 의도 매핑 (키워드 매칭 최소화)"""
     
@@ -3595,7 +3624,8 @@ async def map_user_intent_to_choice_enhanced(
     enhanced_prompt = f"""
 당신은 한국어 자연어 이해 및 의도 분류 전문 AI입니다. 사용자의 자연스러운 표현을 정확히 이해하여 적절한 선택지로 매핑하세요.
 
-**분석 대상**: "{user_input}"
+{f'**이전 AI 질문**: "{last_llm_prompt}"' if last_llm_prompt else ""}
+**사용자 응답**: "{user_input}"
 **필드**: {field_key} ({stage_id} 단계)
 **맥락 가이드**: {context_hint}
 
@@ -3617,7 +3647,13 @@ async def map_user_intent_to_choice_enhanced(
 - "~로 해줘" → 해당 방식으로 설정
 - "다 해줘/모두 해줘" → 전체 선택
 - "안 해요/필요없어요" → 거부/선택안함
-- "그걸로/그것으로" → 기본 선택지
+
+🔹 **대명사/지시어 처리** (이전 AI 질문의 맥락 활용):
+- "그걸로/그거로/그것으로" → AI가 제시한 기본 선택지
+- "그렇게/그대로" → AI가 제안한 대로
+- "네/예/응/좋아요" → AI 제안 수락 (기본값)
+- "첫번째/두번째/세번째" → 해당 순서의 선택지
+- 이전 질문에 특정 옵션이 언급되었다면, 지시어는 그 옵션을 가리킴
 
 🔹 **유사어/동의어 처리**:
 - "제한" = "차단" = "막기"
