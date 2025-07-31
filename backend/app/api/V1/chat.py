@@ -428,7 +428,10 @@ async def process_input_through_agent(
                 collected_info = current_state.get("collected_product_info", {})
                 stages = scenario_data.get("stages", {})
                 current_stage = stages.get(current_stage_id, {})
-                expected_info_key = current_stage.get("expected_info_key")
+                
+                # V3는 fields_to_collect 사용, V2는 expected_info_key 사용
+                fields_to_collect = current_stage.get("fields_to_collect", [])
+                expected_info_key = fields_to_collect[0] if fields_to_collect else current_stage.get("expected_info_key")
                 
                 if expected_info_key:
                     # 정확한 choice 값을 그대로 저장
