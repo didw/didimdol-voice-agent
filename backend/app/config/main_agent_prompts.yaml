@@ -74,15 +74,17 @@ task_management_prompt: |
   Based on the context and manual, decide how to best respond:
 
   **Decision Priority**:
-  1. **For information corrections/modifications - use personal_info_correction directly**:
-     - EXCEPT when current stage is "ask_notification_settings" (always use invoke_scenario_agent)
+  1. **CRITICAL: Check current stage FIRST - if current stage is "statement_delivery", "card_selection", "additional_services", "card_usage_alert", "security_medium_registration", or "ask_notification_settings" → ALWAYS use invoke_scenario_agent regardless of user input content**
+  
+  2. **For information corrections/modifications - use personal_info_correction directly**:
+     - ONLY when current stage is NOT one of the scenario stages listed above
      - Direct correction requests ("정보 수정", "변경하고 싶어", "틀렸어")
      - Specific info corrections with clear contrast ("아니야", "다르다", "잘못", "X아니고 Y", "X아니라 Y" + specific replacement info)
      - Phone number corrections ("뒷번호가", "전화번호", specific numbers)
      - Name corrections ("이름은", "성함", specific names)
      - **Use personal_info_correction action directly for these cases**
   
-  2. **Use invoke_scenario_agent for general task progress**:
+  3. **Use invoke_scenario_agent for general task progress**:
      - User providing requested information (income, purpose, etc.)
      - User answering agent's questions
      - Responses continuing the consultation flow
@@ -129,11 +131,25 @@ task_management_prompt: |
   }}
   
   사용자 입력: "오육칠팔이 아니고 이칠사칠이야" (정보 수정)
+  Current Stage: "customer_info_check"
   {{
     "actions": [
       {{
         "tool": "personal_info_correction",
         "tool_input": {{}}
+      }}
+    ]
+  }}
+  
+  사용자 입력: "날짜는 20일로 바꾸고 이메일로 받을래" 
+  Current Stage: "statement_delivery"
+  {{
+    "actions": [
+      {{
+        "tool": "invoke_scenario_agent",
+        "tool_input": {{
+          "user_input": "날짜는 20일로 바꾸고 이메일로 받을래"
+        }}
       }}
     ]
   }}

@@ -36,7 +36,7 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
         is_confirmation = any(word in user_input for word in confirmation_words)
         
         # 수정 요청 키워드 체크
-        modification_words = ["틀려", "틀렸", "다르", "다릅", "수정", "변경", "바꿔", "바꾸", "잘못"]
+        modification_words = ["틀려", "틀렸", "다르", "다릅", "수정", "변경", "바꿔", "바꾸", "바꿀", "잘못"]
         is_modification_request = any(word in user_input for word in modification_words)
         
         # 단순 확인 응답인 경우 시나리오 흐름에 맡김 (PersonalInfoCorrection 처리하지 않음)
@@ -78,7 +78,7 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
         is_confirmation = any(word in user_input for word in confirmation_words)
         
         # 수정 요청 키워드 체크
-        modification_words = ["틀려", "틀렸", "다르", "다릅", "수정", "변경", "바꿔", "바꾸", "잘못"]
+        modification_words = ["틀려", "틀렸", "다르", "다릅", "수정", "변경", "바꿔", "바꾸", "바꿀", "잘못"]
         is_modification_request = any(word in user_input for word in modification_words)
         
         # 단순 확인 응답인 경우 시나리오 흐름에 맡김
@@ -129,7 +129,7 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
         
         # pending_modifications가 있으면서 추가 수정사항을 대기 중인 특수한 경우
         # 사용자가 수정 확인 응답 대신 다른 수정 요청을 한 경우
-        if state.pending_modifications and user_input and any(word in user_input for word in ["틀", "다르", "수정", "변경", "바꿔", "바꿀"]):
+        if state.pending_modifications and user_input and any(word in user_input for word in ["틀", "다르", "수정", "변경", "바꿔", "바꾸", "바꿀"]):
             print(f"[PersonalInfoCorrection] User requesting additional modification while pending modifications exist")
             # pending_modifications를 먼저 적용하고, 새로운 수정 요청을 처리하도록 아래 로직으로 진행
             # 기존 pending_modifications 적용
@@ -151,7 +151,7 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
         elif user_input and (
             any(word in user_input for word in ["아니", "아니요", "아니야", "없어", "없습니다", "괜찮", "충분"]) or
             (user_input.strip() == "됐어" or user_input.strip() == "됐습니다")  # 단독으로 "됐어"만 있는 경우
-        ) and not any(word in user_input for word in ["잘못", "틀렸", "다르", "수정", "변경", "바꿔", "바꿀"]):
+        ) and not any(word in user_input for word in ["잘못", "틀렸", "다르", "수정", "변경", "바꿔", "바꾸", "바꿀"]):
             print(f"[PersonalInfoCorrection] User said no additional modifications needed, proceeding to next stage")
             
             # confirm_personal_info를 True로 설정하여 다음 단계로
@@ -194,7 +194,7 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
             })
         
         # 사용자가 추가 수정사항을 말한 경우 - 아래의 수정 로직으로 진행
-        elif user_input and any(word in user_input for word in ["틀", "다르", "수정", "변경", "바꿔", "바꿀"]):
+        elif user_input and any(word in user_input for word in ["틀", "다르", "수정", "변경", "바꿔", "바꾸", "바꿀"]):
             print(f"[PersonalInfoCorrection] User requesting additional modification: '{user_input}'")
             # 추가 수정사항 대기 상태를 해제하고 새로운 수정 요청을 처리
             state = state.merge_update({
@@ -209,7 +209,7 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
         print(f"[PersonalInfoCorrection] Pending modifications found: {state.pending_modifications}")
         # 사용자가 확인한 경우 - 더 정확한 매칭을 위해 수정 키워드 제외
         confirmation_words = ["네", "예", "맞아", "맞습니다", "좋아", "확인", "그래"]
-        modification_words = ["바꿔", "바꾸", "수정", "변경", "틀렸", "다르", "잘못"]
+        modification_words = ["바꿔", "바꾸", "바꿀", "수정", "변경", "틀렸", "다르", "잘못"]
         
         # 확인 키워드가 있지만 수정 키워드가 없는 경우만 확인으로 처리
         has_confirmation = any(word in user_input for word in confirmation_words)
@@ -316,7 +316,7 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
             })
         else:
             # 사용자가 다른 수정 요청을 한 경우 확인
-            if user_input and any(word in user_input for word in ["틀", "다르", "수정", "변경", "바꿔", "바꿀"]):
+            if user_input and any(word in user_input for word in ["틀", "다르", "수정", "변경", "바꿔", "바꾸", "바꿀"]):
                 print(f"[PersonalInfoCorrection] User requesting different modification, applying pending changes first")
                 # 기존 pending_modifications를 먼저 적용
                 from copy import deepcopy
@@ -358,7 +358,7 @@ async def personal_info_correction_node(state: AgentState) -> AgentState:
                 name_pattern = re.compile(r'([가-힣]{2,4})', re.IGNORECASE)
                 
                 # 수정 요청 키워드 체크
-                has_modification_request = any(keyword in user_input for keyword in ["바꿔", "바꾸", "수정", "변경", "틀렸", "다르", "잘못"])
+                has_modification_request = any(keyword in user_input for keyword in ["바꿔", "바꾸", "바꿀", "수정", "변경", "틀렸", "다르", "잘못"])
                 # 필드 언급 체크
                 has_field_mention = any(field in user_input for field in ["이메일", "메일", "전화", "번호", "이름", "성함", "주소"])
                 # 대조 표현 체크 (A에서 B로, A를 B로)

@@ -92,6 +92,7 @@ class AgentState(BaseModel):
     original_values_before_modification: Optional[Dict[str, Any]] = None  # 수정 전 원본 값 저장
     waiting_for_additional_modifications: Optional[bool] = None  # 추가 수정사항 대기 중인지 여부
     current_modification_context: Optional[str] = None  # 현재 수정 중인 필드 컨텍스트 (work_address, address 등)
+    special_response_for_modification: Optional[bool] = None  # 개인정보 수정 요청에 대한 특별 응답 플래그
     
     # --- Scenario Continuation Management ---
     scenario_ready_for_continuation: Optional[bool] = None

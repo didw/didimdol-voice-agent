@@ -53,6 +53,20 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
             "is_final_turn_response": True
         })
 
+    # Scenario stage protection - bypass LLM for specific stages
+    scenario_stages_protect = ["statement_delivery", "card_selection", "additional_services", "card_usage_alert", "security_medium_registration"]
+    if current_product_type and current_stage_id in scenario_stages_protect:
+        log_node_execution("Orchestrator", f"Scenario stage {current_stage_id} detected - routing directly to scenario_agent")
+        return state.merge_update({
+            "action_plan": ["invoke_scenario_agent"],
+            "action_plan_struct": [{
+                "action": "invoke_scenario_agent",
+                "reason": f"Processing scenario stage {current_stage_id}"
+            }],
+            "router_call_count": 0,
+            "is_final_turn_response": False
+        })
+    
     # LLM 기반 대화 처리 및 Worker 결정
     prompt_key = 'business_guidance_prompt' if not current_product_type else 'task_management_prompt'
     log_node_execution("Orchestrator", f"prompt={prompt_key}")
@@ -157,6 +171,12 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
         
         prompt_filled = prompt_template.format(**prompt_kwargs)
         
+        # Debug logging for stage-based routing issues
+        if current_stage in ["statement_delivery", "card_selection", "additional_services", "card_usage_alert", "security_medium_registration"]:
+            print(f"🔍 [DEBUG] Main Router - Current stage: '{current_stage}' is a scenario stage")
+            print(f"🔍 [DEBUG] Main Router - User input: '{user_input}'")
+            print(f"🔍 [DEBUG] Main Router - Should route to invoke_scenario_agent")
+        
         # Add retry logic for API errors
         max_retries = 3
         retry_delay = 1.0
@@ -167,6 +187,13 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
                 response = await json_llm.ainvoke([HumanMessage(content=prompt_filled)])
                 raw_content = response.content.strip().replace("```json", "").replace("```", "").strip()
                 decision = parser.parse(raw_content)
+                
+                # Debug logging for decision
+                if current_stage in ["statement_delivery", "card_selection", "additional_services", "card_usage_alert", "security_medium_registration"]:
+                    print(f"🔍 [DEBUG] Main Router - LLM Decision: {[action.tool for action in decision.actions]}")
+                    if decision.actions and decision.actions[0].tool == "personal_info_correction":
+                        print(f"❌ [DEBUG] Main Router - ERROR: LLM chose personal_info_correction for scenario stage!")
+                
                 break  # Success, exit retry loop
             except Exception as e:
                 last_error = e

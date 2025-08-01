@@ -5,6 +5,7 @@
 import json
 from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
+from ..data.deposit_account_fields import get_deposit_account_fields
 
 
 class SimpleScenarioEngine:
@@ -193,16 +194,43 @@ class SimpleScenarioEngine:
     
     def get_field_display_info(self, field_key: str) -> Dict[str, Any]:
         """필드의 표시 정보 조회"""
-        # Try both possible field names
+        # Try both possible field names in scenario JSON first
         all_fields = self.scenario_data.get("required_info_fields", []) or self.scenario_data.get("slot_fields", [])
         for field in all_fields:
             if field["key"] == field_key:
                 return field
+        
+        # If not found in scenario JSON, check deposit_account_fields.py
+        try:
+            deposit_fields = get_deposit_account_fields()
+            for field in deposit_fields:
+                if field["key"] == field_key:
+                    return field
+        except Exception as e:
+            print(f"Error loading deposit account fields: {e}")
+        
         return {}
     
     def get_all_collected_fields(self) -> List[Dict[str, Any]]:
         """모든 수집 가능한 필드 정보 반환"""
-        return self.scenario_data.get("required_info_fields", []) or self.scenario_data.get("slot_fields", [])
+        # Get fields from scenario JSON
+        scenario_fields = self.scenario_data.get("required_info_fields", []) or self.scenario_data.get("slot_fields", [])
+        
+        # Get additional fields from deposit_account_fields.py
+        try:
+            deposit_fields = get_deposit_account_fields()
+            # Combine both lists, avoiding duplicates
+            all_fields = scenario_fields.copy()
+            scenario_keys = {field["key"] for field in scenario_fields}
+            
+            for field in deposit_fields:
+                if field["key"] not in scenario_keys:
+                    all_fields.append(field)
+            
+            return all_fields
+        except Exception as e:
+            print(f"Error loading deposit account fields: {e}")
+            return scenario_fields
     
     def validate_field_value(self, field_key: str, value: Any) -> Tuple[bool, str]:
         """필드 값 유효성 검증"""

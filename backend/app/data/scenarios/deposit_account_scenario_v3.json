@@ -45,7 +45,7 @@
       "stage_id": "confirm_personal_info",
       "stage_name": "고객 정보 확인",
       "response_type": "narrative",
-      "prompt": "네, 먼저 고객님의 개인정보를 확인하겠습니다. 화면에 보이는 내용이 모두 맞으신가요?",
+      "prompt": "먼저 고객님의 개인정보를 확인하겠습니다. 화면에 보이는 내용이 모두 맞으신가요?",
       "fields_to_collect": ["personal_info_confirmed"],
       "modifiable": true,
       "modifiable_fields": ["name", "english_name", "ssn", "phone_number", "email", "address", "work_address"],
