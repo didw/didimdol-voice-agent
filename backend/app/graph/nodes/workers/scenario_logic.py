@@ -3525,7 +3525,7 @@ async def extract_field_value_with_llm(
 **사용자 입력**: "{user_input}"
 
 **선택 가능한 옵션들**:
-{chr(10).join(choice_options)}
+{'\n'.join(choice_options)}
 
 **한국어 자연어 이해 규칙**:
 1. **줄임말/구어체 인식**: "딥드림/딥드립"→Deep Dream, "아이피"→IP, "해외아이피"→해외IP, "에스라인"→S-Line
@@ -3621,6 +3621,9 @@ async def map_user_intent_to_choice_enhanced(
     
     context_hint = context_hints.get(stage_id, f"사용자의 {field_key} 관련 의도 파악")
     
+    # Join choice info before using in f-string
+    choice_info_text = '\n'.join(choice_info)
+    
     enhanced_prompt = f"""
 당신은 한국어 자연어 이해 및 의도 분류 전문 AI입니다. 사용자의 자연스러운 표현을 정확히 이해하여 적절한 선택지로 매핑하세요.
 
@@ -3630,7 +3633,7 @@ async def map_user_intent_to_choice_enhanced(
 **맥락 가이드**: {context_hint}
 
 **선택 가능한 옵션**:
-{chr(10).join(choice_info)}
+{choice_info_text}
 
 **고급 자연어 이해 규칙**:
 
@@ -3762,7 +3765,7 @@ async def extract_any_field_value_with_llm(
 필드: {field_key}
 
 선택 가능한 옵션들:
-{chr(10).join(choice_options)}
+{'\n'.join(choice_options)}
 
 응답 형식 (JSON):
 {{

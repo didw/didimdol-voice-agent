@@ -383,6 +383,9 @@ class EntityRecognitionAgent:
                 info += f"\n  가이드: {field['extraction_prompt']}"
             field_info_str.append(info)
         
+        # Join field info before using in f-string
+        field_info_text = '\n'.join(field_info_str)
+        
         flexible_prompt = f"""사용자의 발화를 이해하고 필요한 정보를 추출해주세요. 오타나 이상한 표현도 문맥상 이해해주세요.
 
 {f"이전 AI 질문: \"{last_llm_prompt}\"" if last_llm_prompt else ""}
@@ -390,7 +393,7 @@ class EntityRecognitionAgent:
 {f"의도 분석: {intent_analysis.get('interpreted_meaning', '')}" if intent_analysis else ""}
 
 추출해야 할 필드:
-{chr(10).join(field_info_str)}
+{field_info_text}
 
 추출 원칙:
 1. 사용자가 명시적으로 언급한 정보를 추출
