@@ -4,6 +4,7 @@
 """
 import json
 import yaml
+import asyncio
 import traceback
 from pathlib import Path
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -155,9 +156,42 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
             })
         
         prompt_filled = prompt_template.format(**prompt_kwargs)
-        response = await json_llm.ainvoke([HumanMessage(content=prompt_filled)])
-        raw_content = response.content.strip().replace("```json", "").replace("```", "").strip()
-        decision = parser.parse(raw_content)
+        
+        # Add retry logic for API errors
+        max_retries = 3
+        retry_delay = 1.0
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                response = await json_llm.ainvoke([HumanMessage(content=prompt_filled)])
+                raw_content = response.content.strip().replace("```json", "").replace("```", "").strip()
+                decision = parser.parse(raw_content)
+                break  # Success, exit retry loop
+            except Exception as e:
+                last_error = e
+                # Check if it's a rate limit error
+                if hasattr(e, '__class__') and e.__class__.__name__ == 'RateLimitError':
+                    if attempt < max_retries - 1:
+                        print(f"🔄 [Main Router] Rate limit hit, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        # After all retries, provide a specific error message
+                        print(f"❌ [Main Router] Rate limit exceeded after {max_retries} attempts")
+                        return state.merge_update({
+                            "error_message": "죄송합니다. 현재 서비스 이용량이 많아 잠시 후 다시 시도해주세요.",
+                            "main_agent_routing_decision": "rate_limit_error",
+                            "is_final_turn_response": True,
+                            "final_response_text_for_tts": "죄송합니다. 현재 서비스 이용량이 많아 잠시 후 다시 시도해주세요."
+                        })
+                # For non-rate-limit errors, raise immediately
+                raise e
+        else:
+            # All retries failed
+            if last_error:
+                raise last_error
 
         # 새로운 ActionModel 구조를 사용하도록 상태 업데이트
         action_plan_models = decision.actions
@@ -202,9 +236,29 @@ async def main_agent_router_node(state: AgentState) -> AgentState:
     except Exception as e:
         log_node_execution("Orchestrator", f"ERROR: {e}")
         traceback.print_exc()
-        err_msg = "Error processing request. Please try again."
+        
+        # Provide more specific error messages based on error type
+        if hasattr(e, '__class__'):
+            error_type = e.__class__.__name__
+            if error_type == 'RateLimitError':
+                err_msg = "죄송합니다. 현재 서비스 이용량이 많아 잠시 후 다시 시도해주세요."
+                final_response = "죄송합니다. 현재 서비스 이용량이 많아 잠시 후 다시 시도해주세요."
+            elif error_type == 'APIConnectionError':
+                err_msg = "네트워크 연결에 문제가 있습니다. 잠시 후 다시 시도해주세요."
+                final_response = "네트워크 연결에 문제가 있습니다. 잠시 후 다시 시도해주세요."
+            elif error_type == 'JSONDecodeError':
+                err_msg = "응답 처리 중 오류가 발생했습니다."
+                final_response = "죄송합니다. 다시 한 번 말씀해주시겠어요?"
+            else:
+                err_msg = f"처리 중 오류가 발생했습니다. ({error_type})"
+                final_response = "죄송합니다. 다시 한 번 말씀해주시겠어요?"
+        else:
+            err_msg = "처리 중 오류가 발생했습니다."
+            final_response = "죄송합니다. 다시 한 번 말씀해주시겠어요?"
+        
         return state.merge_update({
             "error_message": err_msg,
-            "main_agent_routing_decision": "unclear_input",
-            "is_final_turn_response": True
+            "main_agent_routing_decision": "error",
+            "is_final_turn_response": True,
+            "final_response_text_for_tts": final_response
         })
