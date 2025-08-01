@@ -386,34 +386,41 @@ class EntityRecognitionAgent:
         # Join field info before using in f-string
         field_info_text = '\n'.join(field_info_str)
         
-        flexible_prompt = f"""사용자의 발화를 이해하고 필요한 정보를 추출해주세요. 오타나 이상한 표현도 문맥상 이해해주세요.
-
-{f"이전 AI 질문: \"{last_llm_prompt}\"" if last_llm_prompt else ""}
-사용자 발화: "{user_input}"
-{f"의도 분석: {intent_analysis.get('interpreted_meaning', '')}" if intent_analysis else ""}
-
-추출해야 할 필드:
-{field_info_text}
-
-추출 원칙:
-1. 사용자가 명시적으로 언급한 정보를 추출
-2. 오타나 축약어도 문맥상 이해 (예: "넴" → "네", "ㅇㅇ" → "응/네", "뺴고" → "빼고")
-3. 유사한 표현도 인정 (예: "맞아요" → "네", "틀려요" → "아니요")
-4. 대명사나 지시어는 이전 AI 질문의 맥락을 참고 (예: "그걸로 해줘" → AI가 제시한 선택지)
-5. choice 필드는 의미상 가장 가까운 선택지로 매칭
-6. 애매한 경우 confidence를 낮게 설정
-
-출력 형식:
-{{
-  "extracted_entities": {{
+        # Build prompt parts to avoid nested f-string issues
+        prompt_parts = ["사용자의 발화를 이해하고 필요한 정보를 추출해주세요. 오타나 이상한 표현도 문맥상 이해해주세요.\n"]
+        
+        if last_llm_prompt:
+            prompt_parts.append(f'이전 AI 질문: "{last_llm_prompt}"\n')
+        prompt_parts.append(f'사용자 발화: "{user_input}"\n')
+        
+        if intent_analysis:
+            prompt_parts.append(f"의도 분석: {intent_analysis.get('interpreted_meaning', '')}\n")
+        
+        prompt_parts.extend([
+            "\n추출해야 할 필드:\n",
+            field_info_text,
+            "\n\n추출 원칙:\n",
+            "1. 사용자가 명시적으로 언급한 정보를 추출\n",
+            "2. 오타나 축약어도 문맥상 이해 (예: \"넴\" → \"네\", \"ㅇㅇ\" → \"응/네\", \"뺴고\" → \"빼고\")\n",
+            "3. 유사한 표현도 인정 (예: \"맞아요\" → \"네\", \"틀려요\" → \"아니요\")\n",
+            "4. 대명사나 지시어는 이전 AI 질문의 맥락을 참고 (예: \"그걸로 해줘\" → AI가 제시한 선택지)\n",
+            "5. choice 필드는 의미상 가장 가까운 선택지로 매칭\n",
+            "6. 애매한 경우 confidence를 낮게 설정\n",
+            "\n출력 형식:\n"
+        ])
+        
+        flexible_prompt = ''.join(prompt_parts)
+        # Add JSON format separately to avoid f-string issues
+        flexible_prompt += """{
+  "extracted_entities": {
     "field_key": "추출된 값",
     ...
-  }},
+  },
   "confidence": 0.0-1.0,
-  "typo_corrections": {{"원래표현": "수정된표현"}},
+  "typo_corrections": {"원래표현": "수정된표현"},
   "ambiguous_fields": ["애매한 필드들"],
   "reasoning": "추출 과정 설명"
-}}"""
+}"""
         
         try:
             result = await json_llm.ainvoke(flexible_prompt)
