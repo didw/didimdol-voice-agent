@@ -6,6 +6,7 @@ import json
 import copy
 from typing import Optional, Dict, cast, Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 from langchain_core.messages import HumanMessage, AIMessage
 from ...graph.state import AgentState
 from ...services.google_services import StreamSTTService, StreamTTSService, GOOGLE_SERVICES_AVAILABLE
@@ -185,7 +186,30 @@ async def handle_websocket_messages(
 ) -> None:
     """WebSocket 메시지 처리 루프"""
     while True:
-        data = await websocket.receive()
+        try:
+            # WebSocket 상태 확인
+            if websocket.client_state != WebSocketState.CONNECTED:
+                print(f"WebSocket not connected for session {session_id}, exiting message loop")
+                break
+                
+            data = await websocket.receive()
+            
+            # 연결이 끊어진 경우 처리
+            if "type" in data and data["type"] == "websocket.disconnect":
+                print(f"Received disconnect message for session {session_id}")
+                break
+                
+        except WebSocketDisconnect:
+            print(f"WebSocket disconnected normally for session {session_id}")
+            break
+        except Exception as e:
+            # "Cannot call receive" 에러는 무시하고 종료
+            if "Cannot call" in str(e) and "receive" in str(e):
+                print(f"WebSocket already closed for session {session_id}")
+                break
+            else:
+                print(f"Error receiving WebSocket message for {session_id}: {e}")
+                raise
         
         # 메시지 타입 파싱
         message_type, payload = parse_websocket_message(data)

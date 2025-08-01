@@ -146,42 +146,77 @@ class EntityRecognitionAgent:
         print(f"   📍 현재 단계: {current_stage}")
         print(f"   💬 현재 질문: {stage_info.get('prompt', '')[:100]}...")
         
+        # 현재 단계에서 수집할 필드 정보 구성
+        fields_to_collect = stage_info.get('fields_to_collect', [])
+        field_hints = []
+        
+        # 단계별 특수 힌트 추가
+        if current_stage == "statement_delivery":
+            field_hints.append("- statement_delivery_method: 이메일(email), 모바일/휴대폰(mobile), 홈페이지(website)")
+            field_hints.append("- statement_delivery_date: 1~31일 중 선택 (예: '16일' → \"16\", '30일' → \"30\")")
+        elif current_stage == "card_password_setting":
+            field_hints.append("- card_password_same_as_account: 동일하게/같게 → true, 다르게 → false")
+        elif current_stage == "card_usage_alert":
+            field_hints.append("- card_usage_alert: 5만원 이상(above_50000), 모든 사용(all_usage), 안함(no_alert)")
+        
+        field_hints_text = '\n'.join(field_hints) if field_hints else "현재 단계에 해당하는 필드를 추출하세요"
+        
         intent_prompt = f"""당신은 한국 은행의 친절한 상담원입니다. 고객의 말을 자연스럽게 이해하고 의도를 파악해주세요.
 
 현재 단계: {stage_info.get('stage_name', current_stage)}
 현재 질문: {stage_info.get('prompt', '')}
+수집할 필드: {fields_to_collect}
 고객 발화: "{user_input}"
 
 고객이 오타를 내거나 이상하게 표현해도 문맥상 의도를 파악해주세요.
 
 분석할 내용:
 1. 고객의 전반적인 의도
-   - 긍정: 동의, 승낙, 확인 ("네", "예", "좋아요" 등)
+   - 긍정: 동의, 승낙, 확인 ("네", "예", "좋아요", "똑같이 해줘", "그대로 해줘" 등)
    - 부정: 거부, 반대 ("아니요", "싫어요" 등)
-   - 정보제공: 구체적인 정보 제공 (이름, 금액 등)
+   - 정보제공: 구체적인 정보 제공 (이름, 금액, 날짜 등)
    - 질문: 설명 요청, 의문 표현 ("뭐예요?", "왜요?" 등)
    - 혼란: 현재 단계와 관련 없는 말, 이해 못함 표현
    - 수정요청: 정보 변경 요청
    - 기타: 분류하기 어려운 경우
-2. 고객이 제공하려는 정보
-3. 고객이 궁금해하는 점 (현재 단계와 관련된 질문인지)
+
+2. 고객이 제공하려는 정보 추출 (복수 정보 포함)
+{field_hints_text}
+   - 예시: "16일마다 이메일로" → statement_delivery_date: "16", statement_delivery_method: "email"
+   - 예시: "5만원 이상 알려줘" → card_usage_alert: "above_50000"
+   
+3. 특수 표현 처리
+   - "똑같이 해줘", "그대로 해줘" → 현재 제시된 기본값/동일하게 설정을 수락
+   - "네", "응", "어" → 현재 질문에 긍정적 답변
+
 4. 오타나 이상한 표현의 의도 추측
 5. 시나리오에서 벗어난 발화인지 판단
 
-출력 형식:
+JSON 형식으로 출력:
 {{
   "intent": "긍정/부정/정보제공/질문/혼란/수정요청/기타",
   "confidence": 0.0-1.0,
-  "extracted_info": {{}},
+  "extracted_info": {{
+    // 추출된 모든 정보를 필드명: 값 형태로 기록
+    // 날짜는 숫자만 추출 (예: "16일" → "16")
+    // 선택값은 정확한 키값으로 변환
+  }},
   "clarification_needed": false,
-  "scenario_deviation": false,  // 시나리오에서 벗어났는지 여부
-  "deviation_topic": "",  // 벗어난 경우 어떤 주제인지
+  "scenario_deviation": false,
+  "deviation_topic": "",
   "interpreted_meaning": "오타 수정 후 의도",
   "suggested_response": "자연스러운 응답 제안"
 }}"""
 
         try:
-            result = await json_llm.ainvoke(intent_prompt)
+            response = await json_llm.ainvoke(intent_prompt)
+            
+            # AIMessage 객체에서 content 추출
+            if hasattr(response, 'content'):
+                import json
+                result = json.loads(response.content)
+            else:
+                result = response
             
             print(f"   🎯 분석된 의도: {result.get('intent')}")
             print(f"   📊 신뢰도: {result.get('confidence', 0):.2f}")
@@ -190,7 +225,7 @@ class EntityRecognitionAgent:
                 print(f"   📋 추출된 정보: {result.get('extracted_info')}")
             if result.get('clarification_needed'):
                 print(f"   ⚠️ 명확한 확인 필요")
-            print(f"   🗨️ 제안 응답: {result.get('suggested_response')[:100]}...")
+            print(f"   🗨️ 제안 응답: {result.get('suggested_response', '')[:100]}...")
             print(f"🔍 [LLM_INTENT_ANALYSIS] 분석 완료\n")
             
             # 결과 저장

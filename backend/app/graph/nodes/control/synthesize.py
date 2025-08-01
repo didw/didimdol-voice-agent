@@ -334,7 +334,23 @@ def generate_fallback_response(state: AgentState) -> str:
         if prompt:
             return prompt
     
-    return "죄송합니다, 무엇을 도와드릴까요?"
+    # 사용자 입력이 있는 경우 더 구체적인 응답
+    user_input = state.user_input_text or ""
+    if user_input:
+        # 통장/계좌 관련 키워드
+        if any(keyword in user_input for keyword in ["통장", "계좌", "입출금", "잔고", "잔액"]):
+            return "통장 개설을 도와드릴까요? '네' 또는 '통장 만들어줘'라고 말씀해주세요."
+        # 대출 관련 키워드
+        elif any(keyword in user_input for keyword in ["대출", "융자", "론", "빌리"]):
+            return "어떤 대출 상품을 알아보고 계신가요? 디딤돌 대출, 전세 대출이 있습니다."
+        # 카드 관련 키워드
+        elif any(keyword in user_input for keyword in ["카드", "체크카드", "신용카드"]):
+            return "체크카드 발급을 원하시면 통장 개설과 함께 진행됩니다. 통장을 만들어드릴까요?"
+        # 기타 금융 서비스
+        else:
+            return "죄송합니다. 다시 한 번 말씀해주시겠어요? 통장 개설, 대출 상담 등을 도와드릴 수 있습니다."
+    
+    return "안녕하세요! 통장 개설, 대출 상담, 체크카드 발급을 도와드릴 수 있습니다. 무엇을 도와드릴까요?"
 
 
 def generate_qa_with_scenario_continuation(state: AgentState) -> str:

@@ -6,6 +6,7 @@ import json
 import re
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+from starlette.websockets import WebSocketState
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from ...graph.state import AgentState
 from ...data.slot_filling_groups import get_groups_for_product, get_group_id_for_stage
@@ -898,9 +899,13 @@ async def send_slot_filling_update(
         
         
         try:
-            await websocket.send_json(slot_filling_data)
-            print(f"[{session_id}] ✅ SLOT_FILLING_UPDATE SENT SUCCESSFULLY")
-            print(f"[{session_id}] - Fields count: {len(enhanced_fields)}")
+            # Check if websocket is still connected before sending
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.send_json(slot_filling_data)
+                print(f"[{session_id}] ✅ SLOT_FILLING_UPDATE SENT SUCCESSFULLY")
+                print(f"[{session_id}] - Fields count: {len(enhanced_fields)}")
+            else:
+                print(f"[{session_id}] WebSocket not connected, skipping slot filling update")
             print(f"[{session_id}] - Collected info keys: {list(collected_info.keys())}")
             print(f"[{session_id}] - Visible groups: {visible_groups}")
             
@@ -911,7 +916,8 @@ async def send_slot_filling_update(
                 "timestamp": str(datetime.now()),
                 "session_id": session_id
             }
-            await websocket.send_json(test_message)
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.send_json(test_message)
             
         except Exception as e:
             print(f"[{session_id}] ❌ WEBSOCKET SEND FAILED: {e}")
@@ -931,7 +937,8 @@ async def send_slot_filling_update(
                 "completionRate": slot_filling_data['completionRate']
             }
         }
-        await websocket.send_json(debug_message)
+        if websocket.client_state == WebSocketState.CONNECTED:
+            await websocket.send_json(debug_message)
         
     except Exception as e:
         print(f"[{session_id}] Error sending slot filling update: {e}")
@@ -1062,8 +1069,11 @@ async def _send_deposit_account_update(
             } for group in field_groups] if field_groups else []
         }
         
-        await websocket.send_json(slot_filling_data)
-        print(f"[{session_id}] Deposit account slot filling update sent: {overall_progress:.1f}% complete")
+        if websocket.client_state == WebSocketState.CONNECTED:
+            await websocket.send_json(slot_filling_data)
+            print(f"[{session_id}] Deposit account slot filling update sent: {overall_progress:.1f}% complete")
+        else:
+            print(f"[{session_id}] WebSocket not connected, skipping deposit account update")
         
     except Exception as e:
         print(f"[{session_id}] Error sending deposit account slot filling update: {e}")
