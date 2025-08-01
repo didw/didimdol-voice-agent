@@ -3737,6 +3737,12 @@ async def extract_any_field_value_with_llm(
     extraction_prompt = stage_info.get("extraction_prompt", "")
     
     # 타입별 기본 프롬프트 생성
+    json_format = """{
+    "extracted_value": "추출된 값" 또는 null,
+    "confidence": 0.0-1.0,
+    "reasoning": "추출 근거"
+}"""
+    
     if input_type == "yes_no":
         base_prompt = f"""
 사용자의 응답에서 확인/동의 여부를 판단하세요.
@@ -3748,11 +3754,7 @@ async def extract_any_field_value_with_llm(
 부정적 응답 (false): 아니요, 안 해요, 필요없어요, 거부, 싫어요, 나중에, 괜찮아요, 안 할게요 등
 
 응답 형식 (JSON):
-{{
-    "extracted_value": true/false 또는 null,
-    "confidence": 0.0-1.0,
-    "reasoning": "판단 근거"
-}}
+{json_format.replace("추출된 값", "true/false")}
 """
     
     elif input_type == "choice":
@@ -3763,7 +3765,8 @@ async def extract_any_field_value_with_llm(
                 choice_options.append(f"- '{choice.get('value', '')}': {choice.get('display', '')}")
             else:
                 choice_options.append(f"- '{choice}'")
-                
+        
+        choice_options_text = '\n'.join(choice_options)
         base_prompt = f"""
 사용자의 응답에서 가장 적절한 선택지를 찾으세요.
 
@@ -3771,14 +3774,10 @@ async def extract_any_field_value_with_llm(
 필드: {field_key}
 
 선택 가능한 옵션들:
-{'\n'.join(choice_options)}
+{choice_options_text}
 
 응답 형식 (JSON):
-{{
-    "extracted_value": "선택된 값" 또는 null,
-    "confidence": 0.0-1.0,
-    "reasoning": "선택 근거"
-}}
+{json_format.replace("추출된 값", "선택된 값")}
 """
     
     else:
@@ -3790,11 +3789,7 @@ async def extract_any_field_value_with_llm(
 필드: {field_key}
 
 응답 형식 (JSON):
-{{
-    "extracted_value": "추출된 값" 또는 null,
-    "confidence": 0.0-1.0,
-    "reasoning": "추출 근거"
-}}
+{json_format}
 """
     
     # extraction_prompt가 있으면 우선 사용
