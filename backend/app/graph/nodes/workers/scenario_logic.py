@@ -2287,6 +2287,35 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
                 print(f"💳 [CHECK_CARD] No specific selection found, set {expected_info_key} = {default_values[expected_info_key]} (user said yes)")
         
     
+    # select_services 단계에서 선택이 없는 경우 재질문
+    if current_stage_id == "select_services" and 'services_selected' not in collected_info and user_input:
+        print(f"🎯 [SELECT_SERVICES] No service selected, generating clarification response")
+        
+        # 재질문 응답 생성
+        clarification_response = await generate_choice_clarification_response(
+            user_input=user_input,
+            current_stage=current_stage_id,
+            current_stage_info=current_stage_info,
+            choices=choices,
+            is_ambiguous=True
+        )
+        
+        # 현재 단계 유지하고 재질문 응답 반환
+        update_dict = {
+            "final_response_text_for_tts": clarification_response,
+            "is_final_turn_response": True,
+            "current_scenario_stage_id": current_stage_id,  # 현재 단계 유지
+            "collected_product_info": collected_info,
+            "action_plan": [],
+            "action_plan_struct": [],
+            "scenario_awaiting_user_response": True,
+            "scenario_ready_for_continuation": True
+        }
+        
+        # last_llm_prompt 저장
+        update_dict = create_update_dict_with_last_prompt(update_dict)
+        return state.merge_update(update_dict)
+    
     # ask_withdrawal_account 단계 특별 처리
     if current_stage_id == "ask_withdrawal_account":
         print(f"🏦 [WITHDRAWAL_ACCOUNT] Processing user input: '{user_input}'")
@@ -2322,13 +2351,13 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             # select_services 처리 - services_selected 값에 따라 JSON의 next_step 분기 사용
             if current_stage_id == "select_services":
                 services_selected = collected_info.get("services_selected")
-                # services_selected가 None이면 기본값 "all" 설정
+                # services_selected가 None이면 현재 단계 유지 (재질문)
                 if services_selected is None:
-                    services_selected = "all"
-                    collected_info["services_selected"] = services_selected
-                    print(f"[V3_NEXT_STEP] select_services - Set default value 'all' for services_selected")
-                print(f"[V3_NEXT_STEP] select_services branching - services_selected: {services_selected}")
-                next_stage_id = next_step.get(services_selected, next_step.get("all", "completion"))
+                    print(f"[V3_NEXT_STEP] select_services - No service selected, staying in current stage")
+                    next_stage_id = current_stage_id  # 현재 단계 유지
+                else:
+                    print(f"[V3_NEXT_STEP] select_services branching - services_selected: {services_selected}")
+                    next_stage_id = next_step.get(services_selected, next_step.get("all", "completion"))
             # confirm_personal_info 특별 처리 - 중첩된 next_step 구조
             elif current_stage_id == "confirm_personal_info":
                 personal_info_confirmed = collected_info.get("personal_info_confirmed")

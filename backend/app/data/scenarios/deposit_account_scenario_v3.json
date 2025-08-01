@@ -13,19 +13,22 @@
         {
           "display": "입출금 계좌 + 체크카드 + 모바일 뱅킹",
           "value": "all",
-          "default": true
+          "keywords": ["모두", "전부", "다", "네", "좋아", "응"]
         },
         {
           "display": "입출금 계좌 + 모바일 뱅킹",
-          "value": "mobile_only"
+          "value": "mobile_only",
+          "keywords": ["모바일", "앱", "모바일만", "앱만"]
         },
         {
           "display": "입출금 계좌 + 체크카드",
-          "value": "card_only"
+          "value": "card_only",
+          "keywords": ["체크카드", "카드", "카드만", "체크카드만"]
         },
         {
           "display": "입출금 계좌",
-          "value": "account_only"
+          "value": "account_only",
+          "keywords": ["계좌만", "입출금만", "아니", "아니요", "아니야", "싫어", "안해", "필요없어"]
         }
       ],
       "additional_questions": [
