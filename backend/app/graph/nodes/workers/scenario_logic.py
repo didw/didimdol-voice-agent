@@ -3517,6 +3517,8 @@ async def extract_field_value_with_llm(
             choice_options.append(f"- {choice}")
     
     # 확장된 프롬프트 생성
+    choice_options_text = '\n'.join(choice_options)
+    
     enhanced_prompt = f"""
 당신은 한국어 자연어 이해 전문가입니다. 사용자의 다양한 표현을 정확히 파악하여 올바른 선택지로 매핑하세요.
 
@@ -3525,7 +3527,7 @@ async def extract_field_value_with_llm(
 **사용자 입력**: "{user_input}"
 
 **선택 가능한 옵션들**:
-{'\n'.join(choice_options)}
+{choice_options_text}
 
 **한국어 자연어 이해 규칙**:
 1. **줄임말/구어체 인식**: "딥드림/딥드립"→Deep Dream, "아이피"→IP, "해외아이피"→해외IP, "에스라인"→S-Line
@@ -3552,11 +3554,15 @@ async def extract_field_value_with_llm(
 - 애매한 경우: 0.5- (null 반환)
 
 **JSON 응답 형식**:
-{{
+"""
+    
+    # Add JSON format separately to avoid f-string issues
+    enhanced_prompt += """
+{
     "extracted_value": "매핑된_정확한_값" 또는 null,
     "confidence": 0.0-1.0,
     "reasoning": "구체적인 매핑 근거 (어떤 단어/표현에서 어떻게 추론했는지)"
-}}
+}
 """
     
     try:
