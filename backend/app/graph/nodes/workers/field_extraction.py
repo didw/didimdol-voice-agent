@@ -401,11 +401,11 @@ def _get_default_value_for_field(field_key: str, stage_info: Dict[str, Any]) -> 
     if stage_info.get("DEFAULT_SELECTION"):
         return stage_info["DEFAULT_SELECTION"]
     
-    # choices에서 is_default가 True인 항목 찾기
+    # choices에서 default가 True인 항목 찾기
     if stage_info.get("response_type") == "bullet":
         choices = stage_info.get("choices", [])
         for choice in choices:
-            if isinstance(choice, dict) and choice.get("is_default"):
+            if isinstance(choice, dict) and choice.get("default"):
                 return choice.get("value")
     
     return None

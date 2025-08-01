@@ -110,7 +110,7 @@ def get_default_choice_display(stage_info: Dict[str, Any]) -> str:
     if stage_info.get("response_type") == "bullet":
         choices = stage_info.get("choices", [])
         for choice in choices:
-            if isinstance(choice, dict) and choice.get("is_default"):
+            if isinstance(choice, dict) and choice.get("default"):
                 return choice.get("display", choice.get("value", ""))
     return ""
 

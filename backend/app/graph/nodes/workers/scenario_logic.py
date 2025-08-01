@@ -2800,8 +2800,14 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             "action_plan_struct": updated_struct
         }
         
+        # stage_response_data가 있으면 prompt 정보 추출
+        stage_prompt = stage_response_data.get("prompt", "") if stage_response_data else ""
+        
         # prompt가 있는 경우 final_response_text_for_tts에 설정 (narrative 및 bullet 타입 모두)
-        if next_stage_prompt:
+        if next_stage_prompt or stage_prompt:
+            # stage_response_data의 prompt를 우선 사용
+            effective_prompt = stage_prompt if stage_prompt else next_stage_prompt
+            
             # 사용자 입력이 있을 때 LLM 기반 자연스러운 응답 생성 시도
             if user_input and determined_next_stage_id != current_stage_id:
                 try:
@@ -2818,10 +2824,10 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
                     print(f"🎯 [NATURAL_RESPONSE] Generated: '{natural_response[:100]}...'")
                 except Exception as e:
                     print(f"🎯 [NATURAL_RESPONSE] Failed, using template: {e}")
-                    update_dict["final_response_text_for_tts"] = next_stage_prompt
+                    update_dict["final_response_text_for_tts"] = effective_prompt
             else:
-                update_dict["final_response_text_for_tts"] = next_stage_prompt
-                print(f"🎯 [STAGE_RESPONSE_WITH_TEXT] Set final_response_text_for_tts: '{next_stage_prompt[:100]}...'")
+                update_dict["final_response_text_for_tts"] = effective_prompt
+                print(f"🎯 [STAGE_RESPONSE_WITH_TEXT] Set final_response_text_for_tts: '{effective_prompt[:100]}...'")
         # 현재 단계에 머무는 경우의 prompt 처리
         elif determined_next_stage_id == current_stage_id and stage_response_data:
             current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
