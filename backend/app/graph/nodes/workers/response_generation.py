@@ -185,6 +185,12 @@ def generate_choice_confirmation_response(
     
     # 필드별 확인 메시지 템플릿
     confirmation_templates = {
+        "services_selected": {
+            "all": "네, 입출금 계좌와 체크카드, 모바일 뱅킹을 모두 신청해드리겠습니다.",
+            "mobile_only": "네, 입출금 계좌와 모바일 뱅킹만 신청해드리겠습니다.",
+            "card_only": "네, 입출금 계좌와 체크카드만 신청해드리겠습니다.",
+            "account_only": "알겠습니다. 입출금 계좌만 개설해드리겠습니다."
+        },
         "additional_services": {
             "internet_banking": "네, 인터넷뱅킹만 신청해드리겠습니다.",
             "check_card": "네, 체크카드만 신청해드리겠습니다.",

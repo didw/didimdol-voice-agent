@@ -1304,8 +1304,18 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
             # 다른 단계들의 기본 확인 응답
             else:
                 field_value = collected_info[expected_field]
+                # choice_display 찾기
+                choice_display = field_value
+                for choice in choices:
+                    if isinstance(choice, dict) and choice.get("value") == field_value:
+                        choice_display = choice.get("display", field_value)
+                        break
+                
                 confirmation_response = generate_choice_confirmation_response(
-                    user_input, field_value, current_stage_id, choices
+                    choice_value=field_value,
+                    choice_display=choice_display,
+                    field_key=expected_field,
+                    stage_info=current_stage_info
                 )
                 print(f"🎯 [DEFAULT_SELECTION_CONFIRMATION] Generated generic confirmation: {confirmation_response}")
             
@@ -1768,8 +1778,18 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                     method_display = "이메일" if choice_mapping == "email" else "휴대폰" if choice_mapping == "mobile" else "홈페이지"
                     confirmation_response = f"네, {method_display}로 매월 {date}일에 받아보시겠습니다."
                 else:
+                    # choice_display 찾기
+                    choice_display = choice_mapping
+                    for choice in choices:
+                        if isinstance(choice, dict) and choice.get("value") == choice_mapping:
+                            choice_display = choice.get("display", choice_mapping)
+                            break
+                    
                     confirmation_response = generate_choice_confirmation_response(
-                        user_input, choice_mapping, current_stage_id, choices
+                        choice_value=choice_mapping,
+                        choice_display=choice_display,
+                        field_key=expected_field,
+                        stage_info=current_stage_info
                     )
                 
                 print(f"🎯 [V3_CHOICE_CONFIRMED] Generated confirmation: {confirmation_response}")
