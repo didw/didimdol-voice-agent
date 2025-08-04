@@ -13,6 +13,7 @@
         {
           "display": "입출금 계좌 + 체크카드 + 모바일 뱅킹",
           "value": "all",
+          "default": true,
           "keywords": ["모두", "전부", "다", "네", "좋아", "응"]
         },
         {
@@ -221,6 +222,7 @@
         "statement_delivery_date": "10"
       },
       "extraction_prompt": "명세서 수령 방법을 추출하세요",
+      "visible_groups": ["card_selection", "statement_info"],
       "next_step": "card_usage_alert"
     },
     "card_usage_alert": {
@@ -245,6 +247,7 @@
       ],
       "fields_to_collect": ["card_usage_alert"],
       "extraction_prompt": "카드 사용 알림 설정을 추출하세요",
+      "visible_groups": ["card_selection", "statement_info", "card_alert"],
       "next_step": "card_password_setting"
     },
     "card_password_setting": {
@@ -255,15 +258,17 @@
       "fields_to_collect": ["card_password_same_as_account"],
       "field_type": "boolean",
       "extraction_prompt": "카드 비밀번호 설정 방법을 추출하세요:\\n- \"같게\", \"동일\", \"네\" → card_password_same_as_account: true\\n- \"다르게\", \"따로\", \"아니\" → card_password_same_as_account: false",
+      "visible_groups": ["card_selection", "statement_info", "card_alert", "card_password"],
       "next_step": "final_confirmation"
     },
     "final_confirmation": {
       "stage_id": "final_confirmation",
       "stage_name": "최종 확인",
       "response_type": "narrative",
-      "prompt": "동적으로 생성됨 - collected_product_info 기반",
+      "dynamic_prompt": "지금까지 신청하신 내용을 확인해드리겠습니다.\n\n{summary}\n\n위 내용이 맞으신가요? 수정하실 부분이 있으면 말씀해주세요.",
       "fields_to_collect": [],
       "extraction_prompt": "최종 확인에 대한 응답을 추출하세요:\\n- \"네\", \"예\", \"진행\", \"맞습니다\" → final_confirmation: true\\n- \"아니요\", \"수정\", \"다시\" → final_confirmation: false",
+      "visible_groups": ["personal_info", "security_medium", "additional_services", "card_selection", "statement_info", "card_alert", "card_password"],
       "next_step": "completion"
     },
     "completion": {

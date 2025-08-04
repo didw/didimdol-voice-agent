@@ -223,8 +223,30 @@ def generate_choice_confirmation_response(
     if choice_value in field_templates:
         return field_templates[choice_value]
     
-    # 기본 응답
-    return f"네, {choice_display}(으)로 확인했습니다."
+    # 기본 응답 - 자연스러운 조사 처리
+    if choice_display.endswith(('로', '으로')):
+        return f"네, {choice_display} 확인했습니다."
+    else:
+        # 마지막 한국어 문자 찾기
+        last_korean_char = None
+        for char in reversed(choice_display):
+            if '가' <= char <= '힣':  # 한글인 경우
+                last_korean_char = char
+                break
+        
+        if last_korean_char:
+            # 받침 있는지 확인 (유니코드 계산)
+            code = ord(last_korean_char) - ord('가')
+            final_consonant = code % 28
+            if final_consonant == 0:  # 받침 없음
+                return f"네, {choice_display}로 확인했습니다."
+            elif final_consonant == 8:  # ㄹ로 끝나는 경우 (특수 처리)
+                return f"네, {choice_display}로 확인했습니다."
+            else:  # 기타 받침 있음
+                return f"네, {choice_display}으로 확인했습니다."
+        else:
+            # 한글이 없는 경우 기본값
+            return f"네, {choice_display}로 확인했습니다."
 
 
 def generate_confirmation_message(

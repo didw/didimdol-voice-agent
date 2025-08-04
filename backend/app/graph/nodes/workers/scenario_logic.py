@@ -94,6 +94,66 @@ async def process_scenario_logic_node(state: AgentState) -> AgentState:
     current_stage_info = active_scenario_data.get("stages", {}).get(str(current_stage_id), {})
     collected_info = state.collected_product_info.copy()
     
+    # 기존 추상값 정리 (stale abstract values cleanup) - 강화된 버전
+    abstract_values = ["기본값", "발급", "그것", "그걸로", "디폴트", "기본", "추천", "제안", "기본값 수락"]
+    cleaned_fields = []
+    for field_key, field_value in list(collected_info.items()):
+        if isinstance(field_value, str):
+            # 정확히 일치하거나 추상값을 포함하는 경우 체크
+            is_abstract = field_value in abstract_values or any(
+                abstract in field_value for abstract in abstract_values
+            )
+            if is_abstract:
+                # 스테이지별 default choice로 매핑 시도
+                stage_id = None
+                if field_key == "card_selection":
+                    stage_id = "card_selection"
+                elif field_key == "security_medium":
+                    stage_id = "security_medium_registration"
+                elif field_key == "statement_delivery_method":
+                    stage_id = "statement_delivery"
+                elif field_key == "card_usage_alert":
+                    stage_id = "card_usage_alert"
+                elif field_key == "services_selected":
+                    stage_id = "select_services"
+                
+                if stage_id:
+                    stage_info = active_scenario_data.get("stages", {}).get(stage_id, {})
+                    # choice_groups나 choices에서 default choice 찾기
+                    default_value = None
+                    if stage_info.get("choice_groups"):
+                        for group in stage_info.get("choice_groups", []):
+                            for choice in group.get("choices", []):
+                                if choice.get("default", False):
+                                    default_value = choice.get("value")
+                                    break
+                            if default_value:
+                                break
+                    elif stage_info.get("choices"):
+                        for choice in stage_info.get("choices", []):
+                            if isinstance(choice, dict) and choice.get("default", False):
+                                default_value = choice.get("value")
+                                break
+                    
+                    if default_value:
+                        collected_info[field_key] = default_value
+                        cleaned_fields.append(f"{field_key}: '{field_value}' → '{default_value}'")
+                    else:
+                        # default choice가 없으면 필드 제거
+                        del collected_info[field_key]
+                        cleaned_fields.append(f"{field_key}: '{field_value}' → REMOVED (no default)")
+                elif field_key == "transit_function" and "기본" in field_value:
+                    # transit_function이 기본값이면 True로 설정 (default는 보통 후불교통 활성화)
+                    collected_info[field_key] = True
+                    cleaned_fields.append(f"{field_key}: '{field_value}' → True")
+                else:
+                    # 알려지지 않은 필드의 추상값은 제거
+                    del collected_info[field_key]
+                    cleaned_fields.append(f"{field_key}: '{field_value}' → REMOVED")
+    
+    if cleaned_fields:
+        print(f"🧹 [CLEANUP_ABSTRACT] Cleaned stale abstract values: {', '.join(cleaned_fields)}")
+    
     scenario_output = state.scenario_agent_output
     user_input = state.stt_result or ""
     
@@ -233,9 +293,11 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
 
         # final_confirmation 단계에서 최종 확인 메시지 생성
         if current_stage_id == "final_confirmation":
-            confirmation_prompt = generate_final_confirmation_prompt(collected_info)
+            from .stage_response import generate_confirmation_summary
+            summary = generate_confirmation_summary(collected_info)
+            confirmation_prompt = f"지금까지 신청하신 내용을 확인해드리겠습니다.\n\n{summary}\n\n위 내용이 맞으신가요? 수정하실 부분이 있으면 말씀해주세요."
             current_stage_info["prompt"] = confirmation_prompt
-            print(f"🎯 [FINAL_CONFIRMATION] Generated dynamic prompt: {confirmation_prompt}")
+            print(f"🎯 [FINAL_CONFIRMATION] Generated dynamic prompt with summary: {confirmation_prompt[:200]}...")
             
             # 사용자 응답이 있으면 final_confirmation 필드 설정
             if user_input:
@@ -1173,23 +1235,145 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
             if intent_analysis.get("extracted_info"):
                 print(f"🎯 [MULTI_FIELD_EXTRACTION] Extracted info: {intent_analysis['extracted_info']}")
                 
+                # additional_services 단계에서 "~만" 패턴 특별 처리
+                if current_stage_id == "additional_services" and "만" in user_input:
+                    boolean_fields = ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
+                    extracted_info = intent_analysis.get("extracted_info", {})
+                    
+                    # "~만" 패턴이 감지되면 언급되지 않은 boolean 필드를 False로 설정
+                    mentioned_fields = set(extracted_info.keys())
+                    if mentioned_fields:  # 최소 하나의 필드가 추출된 경우
+                        print(f"🎯 [ONLY_PATTERN] Detected '~만' pattern in additional_services")
+                        for field in boolean_fields:
+                            if field not in mentioned_fields and field in fields_to_collect:
+                                # 언급되지 않은 필드는 False로 설정
+                                intent_analysis["extracted_info"][field] = False
+                                print(f"✅ [ONLY_PATTERN] Set unmentioned field {field} = False")
+                
                 # 각 필드를 확인하고 저장
                 for field_key, field_value in intent_analysis["extracted_info"].items():
+                    # None 값은 건너뛰기
+                    if field_value is None:
+                        continue
+                    
                     # 현재 단계에서 수집 가능한 필드인지 확인
                     if field_key in fields_to_collect:
-                        extracted_fields[field_key] = field_value
-                        print(f"✅ [MULTI_FIELD_STORED] {field_key}: '{field_value}'")
+                        # Abstract value 체크 및 매핑
+                        abstract_values = ["기본값", "발급", "그것", "그걸로", "디폴트", "기본", "추천", "제안", "기본값 수락"]
+                        if isinstance(field_value, str) and any(abstract in field_value for abstract in abstract_values):
+                            # card_selection의 경우 default choice로 매핑
+                            if field_key == "card_selection" and choices:
+                                default_choice_value = None
+                                for choice in choices:
+                                    if isinstance(choice, dict) and choice.get("default"):
+                                        default_choice_value = choice.get("value")
+                                        break
+                                if default_choice_value:
+                                    extracted_fields[field_key] = default_choice_value
+                                    extracted_fields["_default_mapping_occurred"] = True  # 플래그 설정
+                                    print(f"✅ [MULTI_FIELD_MAPPED] {field_key}: '{field_value}' → '{default_choice_value}' (abstract to default)")
+                                    
+                                    # default choice의 metadata도 extracted_fields에 추가
+                                    for choice in choices:
+                                        if isinstance(choice, dict) and choice.get("value") == default_choice_value:
+                                            metadata = choice.get("metadata", {})
+                                            if metadata.get("receipt_method") and "card_receipt_method" in fields_to_collect:
+                                                extracted_fields["card_receipt_method"] = metadata["receipt_method"]
+                                                print(f"✅ [MULTI_FIELD_METADATA] card_receipt_method: '{metadata['receipt_method']}' (from metadata)")
+                                            if "transit_enabled" in metadata and "transit_function" in fields_to_collect:
+                                                extracted_fields["transit_function"] = metadata["transit_enabled"]
+                                                print(f"✅ [MULTI_FIELD_METADATA] transit_function: {metadata['transit_enabled']} (from metadata)")
+                                            break
+                                else:
+                                    # default가 없으면 원래 값 저장 (후속 처리에서 매핑될 것)
+                                    extracted_fields[field_key] = field_value
+                                    print(f"✅ [MULTI_FIELD_STORED] {field_key}: '{field_value}' (abstract, no default found)")
+                            else:
+                                # 다른 필드는 원래 값 저장 (후속 처리에서 매핑될 것)
+                                extracted_fields[field_key] = field_value
+                                print(f"✅ [MULTI_FIELD_STORED] {field_key}: '{field_value}' (abstract, will be mapped later)")
+                        else:
+                            # 일반 값은 그대로 저장
+                            extracted_fields[field_key] = field_value
+                            print(f"✅ [MULTI_FIELD_STORED] {field_key}: '{field_value}'")
             
-            # statement_delivery 단계에서 LLM이 실패한 경우 간단한 패턴 매칭 시도
-            if current_stage_id == "statement_delivery" and not extracted_fields:
+            # 추출된 필드 값을 정의된 choice 값으로 매핑
+            if extracted_fields and choices:
+                for field_key, field_value in list(extracted_fields.items()):
+                    if isinstance(field_value, str):
+                        # choices에서 매칭되는 항목 찾기
+                        for choice in choices:
+                            if isinstance(choice, dict):
+                                choice_display = choice.get("display", "")
+                                choice_value = choice.get("value", "")
+                                
+                                # 사용자 입력과 choice display 매칭 확인
+                                if field_value and choice_display:
+                                    # 부분 매칭: "딥드림 일반" → "신한 Deep Dream 체크카드 (일반)"
+                                    field_value_clean = field_value.lower().replace(" ", "")
+                                    choice_display_clean = choice_display.lower().replace(" ", "")
+                                    
+                                    # 키워드 매칭
+                                    field_keywords = field_value_clean.split()
+                                    choice_keywords = choice_display_clean.split()
+                                    
+                                    # 특정 카드 이름 매칭 (더 정확한 매핑)
+                                    card_name_mapping = {
+                                        "헤이영": "heyyoung_regular",
+                                        "hey young": "heyyoung_regular", 
+                                        "heyoung": "heyyoung_regular",
+                                        "딥드림일반": "deepdream_regular",
+                                        "딥드림 일반": "deepdream_regular",
+                                        "딥드림후불교통": "deepdream_transit", 
+                                        "딥드림 후불교통": "deepdream_transit",
+                                        "에스라인일반": "sline_regular",
+                                        "에스라인 일반": "sline_regular", 
+                                        "s-line일반": "sline_regular",
+                                        "에스라인후불교통": "sline_transit",
+                                        "에스라인 후불교통": "sline_transit",
+                                        "s-line후불교통": "sline_transit"
+                                    }
+                                    
+                                    # 직접 매핑 확인
+                                    if field_value_clean in card_name_mapping:
+                                        mapped_value = card_name_mapping[field_value_clean]
+                                        extracted_fields[field_key] = mapped_value
+                                        print(f"✅ [MULTI_FIELD_DIRECT_MAPPED] {field_key}: '{field_value}' → '{mapped_value}' (direct mapping)")
+                                        break
+                                    
+                                    # "딥드림" + "일반" 모두 포함되는지 확인
+                                    elif (len(field_keywords) >= 2 and 
+                                        all(keyword in choice_display_clean for keyword in field_keywords) and
+                                        len([k for k in field_keywords if k in choice_display_clean]) >= 2):
+                                        
+                                        extracted_fields[field_key] = choice_value
+                                        print(f"✅ [MULTI_FIELD_CHOICE_MAPPED] {field_key}: '{field_value}' → '{choice_value}' (matched with '{choice_display}')")
+                                        break
+                                    
+                                    # 간단한 부분 매칭도 시도
+                                    elif field_value_clean in choice_display_clean or choice_display_clean in field_value_clean:
+                                        if len(field_value_clean) >= 3:  # 너무 짧은 매칭 방지
+                                            extracted_fields[field_key] = choice_value
+                                            print(f"✅ [MULTI_FIELD_CHOICE_MAPPED] {field_key}: '{field_value}' → '{choice_value}' (partial match with '{choice_display}')")
+                                            break
+            
+            # statement_delivery 단계에서 LLM이 실패하거나 날짜가 비어있는 경우 간단한 패턴 매칭 시도
+            if current_stage_id == "statement_delivery" and (not extracted_fields or 
+                                                             extracted_fields.get("statement_delivery_date") == "" or
+                                                             not extracted_fields.get("statement_delivery_date")):
                 import re
-                # 날짜 추출
+                # 날짜 추출 - "5일", "5일마다", "5일에" 등 다양한 패턴 처리
                 date_match = re.search(r'(\d+)일', user_input)
                 if date_match:
                     date_value = date_match.group(1)
                     if 1 <= int(date_value) <= 31:
                         extracted_fields["statement_delivery_date"] = date_value
-                        print(f"✅ [FALLBACK_EXTRACTION] statement_delivery_date: '{date_value}'")
+                        print(f"✅ [FALLBACK_EXTRACTION] statement_delivery_date: '{date_value}' (from pattern matching)")
+                else:
+                    # 날짜가 명시되지 않은 경우 기본값 사용
+                    default_date = current_stage_info.get("default_values", {}).get("statement_delivery_date", "10")
+                    extracted_fields["statement_delivery_date"] = default_date
+                    print(f"✅ [FALLBACK_DEFAULT] statement_delivery_date: '{default_date}' (using default)")
                 
                 # 배송 방법 추출
                 if "이메일" in user_input:
@@ -1437,7 +1621,13 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
             # additional_services 단계에서는 항상 extracted_fields 처리
             if current_stage_id == "additional_services" or is_modification_intent or len(extracted_fields) > 0:
                 # extracted_fields의 모든 값을 collected_info에 저장
+                default_mapping_occurred = extracted_fields.pop("_default_mapping_occurred", False)  # 플래그 확인 및 제거
                 for field_key, field_value in extracted_fields.items():
+                    # 빈 문자열은 건너뛰기
+                    if field_value == "" or field_value is None:
+                        print(f"🎯 [V3_EXTRACTED_SKIPPED] {field_key}: empty value, skipping")
+                        continue
+                    
                     if field_key in fields_to_collect:
                         # security_medium_registration 단계에서 긍정 응답으로 이미 디폴트 값이 설정된 경우 유지
                         if (current_stage_id == "security_medium_registration" and 
@@ -1446,19 +1636,127 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                             print(f"🎯 [V3_EXTRACTED_SKIPPED] {field_key}: keeping default value '{collected_info[field_key]}' (ignoring extracted '{field_value}')")
                             continue
                         
+                        # Boolean 필드 특별 처리 (additional_services 등)
+                        if current_stage_info.get("response_type") == "boolean":
+                            # boolean 필드는 True/False만 가능
+                            if isinstance(field_value, bool):
+                                collected_info[field_key] = field_value
+                                print(f"✅ [V3_BOOLEAN_STORED] {field_key}: {field_value}")
+                            elif isinstance(field_value, str):
+                                # 문자열 "True"/"False"를 boolean으로 변환 (한국어 포함)
+                                if field_value.lower() in ["true", "yes", "1", "네", "예", "응", "맞아", "그래"]:
+                                    collected_info[field_key] = True
+                                    print(f"✅ [V3_BOOLEAN_CONVERTED] {field_key}: '{field_value}' → True")
+                                elif field_value.lower() in ["false", "no", "0", "아니", "아니요", "아니야", "싫어", "안해"]:
+                                    collected_info[field_key] = False
+                                    print(f"✅ [V3_BOOLEAN_CONVERTED] {field_key}: '{field_value}' → False")
+                                else:
+                                    # 기본값 사용 (보통 True)
+                                    default_value = True
+                                    for choice in choices or []:
+                                        if isinstance(choice, dict) and choice.get("key") == field_key:
+                                            default_value = choice.get("default", True)
+                                            break
+                                    collected_info[field_key] = default_value
+                                    print(f"✅ [V3_BOOLEAN_DEFAULT] {field_key}: using default {default_value}")
+                            continue  # boolean 필드는 여기서 처리 완료
+                        
                         # 추출된 값이 유효한 choice인지 확인
+                        print(f"🔍 [V3_CHOICE_CHECK] {field_key}: Checking choices... choices_count={len(choices) if choices else 0}")
                         if choices:
                             valid_choice_values = []
+                            default_choice_value = None
                             for choice in choices:
                                 if isinstance(choice, dict):
-                                    valid_choice_values.append(choice.get("value", ""))
+                                    choice_value = choice.get("value", "")
+                                    valid_choice_values.append(choice_value)
+                                    # default choice 찾기
+                                    if choice.get("default", False):
+                                        default_choice_value = choice_value
                                 else:
                                     valid_choice_values.append(str(choice))
                             
-                            # 추출된 값이 유효한 choice가 아니고, 이미 값이 있으면 기존 값 유지
-                            if (field_value not in valid_choice_values and 
-                                field_key in collected_info):
-                                print(f"🎯 [V3_EXTRACTED_INVALID] {field_key}: '{field_value}' is not a valid choice, keeping existing value '{collected_info[field_key]}'")
+                            print(f"🔍 [V3_CHOICE_VALIDATION] {field_key}: field_value='{field_value}', valid_choices={valid_choice_values}, default_choice='{default_choice_value}'")
+                            
+                            # 추출된 값이 유효한 choice가 아닌 경우
+                            if field_value not in valid_choice_values:
+                                # 추상적인 값(기본값 수락, 그것, 그걸로 등)을 default choice로 매핑
+                                abstract_values = ["기본값 수락", "그것", "그걸로", "그것으로", "디폴트", "기본", "추천", "제안", "발급", "등록", "등록해", "등록해줘", "선택", "선택해줘"]
+                                # field_value가 문자열인 경우에만 abstract value 체크
+                                if isinstance(field_value, str) and any(abstract in field_value for abstract in abstract_values) and default_choice_value:
+                                    collected_info[field_key] = default_choice_value
+                                    default_mapping_occurred = True  # default mapping 발생 표시
+                                    print(f"✅ [V3_DEFAULT_MAPPED] {field_key}: '{field_value}' → '{default_choice_value}' (mapped to default)")
+                                    
+                                    # default choice의 metadata도 자동으로 채우기
+                                    for choice in choices:
+                                        if isinstance(choice, dict) and choice.get("value") == default_choice_value:
+                                            metadata = choice.get("metadata", {})
+                                            for meta_key, meta_value in metadata.items():
+                                                # 필드명 매핑
+                                                if meta_key == "receipt_method" and "card_receipt_method" in fields_to_collect:
+                                                    collected_info["card_receipt_method"] = "즉시발급" if meta_value == "즉시발급" else "배송"
+                                                    print(f"✅ [V3_METADATA_MAPPED] card_receipt_method: '{meta_value}'")
+                                                elif meta_key == "transit_enabled" and "transit_function" in fields_to_collect:
+                                                    collected_info["transit_function"] = meta_value
+                                                    print(f"✅ [V3_METADATA_MAPPED] transit_function: {meta_value}")
+                                                elif meta_key == "transfer_limit_once" and "transfer_limit_once" in fields_to_collect:
+                                                    collected_info["transfer_limit_once"] = meta_value
+                                                    print(f"✅ [V3_METADATA_MAPPED] transfer_limit_once: {meta_value}")
+                                                elif meta_key == "transfer_limit_daily" and "transfer_limit_daily" in fields_to_collect:
+                                                    collected_info["transfer_limit_daily"] = meta_value
+                                                    print(f"✅ [V3_METADATA_MAPPED] transfer_limit_daily: {meta_value}")
+                                    continue
+                                
+                                # 이미 값이 있으면 기존 값 유지
+                                elif field_key in collected_info:
+                                    print(f"🎯 [V3_EXTRACTED_INVALID] {field_key}: '{field_value}' is not a valid choice, keeping existing value '{collected_info[field_key]}'")
+                                    continue
+                                else:
+                                    # 유사한 값을 올바른 choice 값으로 매핑 시도
+                                    mapped_value = None
+                                    
+                                    # card_usage_alert 특별 매핑
+                                    if field_key == "card_usage_alert":
+                                        alert_mapping = {
+                                            "above_50000": "over_50000_free",
+                                            "over_50000": "over_50000_free",
+                                            "5만원이상": "over_50000_free",
+                                            "5만원 이상": "over_50000_free",
+                                            "all_usage": "all_transactions_200won",
+                                            "all": "all_transactions_200won",
+                                            "모든": "all_transactions_200won",
+                                            "모든내역": "all_transactions_200won",
+                                            "no": "no_alert",
+                                            "없음": "no_alert",
+                                            "안함": "no_alert"
+                                        }
+                                        if str(field_value).lower() in alert_mapping:
+                                            mapped_value = alert_mapping[str(field_value).lower()]
+                                            collected_info[field_key] = mapped_value
+                                            print(f"✅ [V3_EXTRACTED_MAPPED] {field_key}: '{field_value}' → '{mapped_value}' (similar value mapping)")
+                                            continue
+                                    
+                                    # 매핑 실패 시 그냥 저장 (fallback)
+                                    if not mapped_value:
+                                        print(f"⚠️ [V3_EXTRACTED_FALLBACK] {field_key}: '{field_value}' is not a valid choice but no existing value, storing anyway")
+                            
+                        
+                        # 이미 default mapping으로 올바른 값이 설정된 경우 덮어쓰지 않음
+                        if field_key in collected_info:
+                            existing_value = collected_info[field_key]
+                            # 기존 값이 추상적인 값이 아니라면 덮어쓰지 않음
+                            abstract_values = ["기본값", "발급", "그것", "그걸로", "디폴트", "기본", "추천", "제안", "기본값 수락"]
+                            # 정확히 일치하거나 단어 경계가 있는 경우만 추상적 값으로 판단
+                            is_abstract = str(existing_value) in abstract_values or any(
+                                abstract == str(existing_value) or 
+                                str(existing_value).startswith(abstract + " ") or 
+                                str(existing_value).endswith(" " + abstract) or
+                                " " + abstract + " " in str(existing_value)
+                                for abstract in abstract_values
+                            )
+                            if not is_abstract:
+                                print(f"🔒 [V3_EXTRACTED_PROTECTED] {field_key}: keeping existing value '{existing_value}' (not overwriting with '{field_value}')")
                                 continue
                         
                         collected_info[field_key] = field_value
@@ -1481,11 +1779,16 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                         print(f"✅ [V3_EXTRACTED_STORED] Set default statement_delivery_method: mobile")
                 
                 # 확인 응답 생성
-                if current_stage_id == "statement_delivery" and "statement_delivery_date" in collected_info:
-                    date = collected_info["statement_delivery_date"]
+                if current_stage_id == "statement_delivery":
+                    date = collected_info.get("statement_delivery_date", "")
+                    # 날짜가 비어있으면 기본값 사용
+                    if not date or date == "":
+                        date = current_stage_info.get("default_values", {}).get("statement_delivery_date", "10")
+                        collected_info["statement_delivery_date"] = date
+                        print(f"✅ [V3_DEFAULT_DATE] Using default date: {date}")
                     method = collected_info.get("statement_delivery_method", "mobile")
                     method_display = "이메일" if method == "email" else "휴대폰" if method == "mobile" else "홈페이지"
-                    confirmation_response = f"네, 카드 명세서를 매월 {date}일에 {method_display}로 받아보시도록 변경해드리겠습니다."
+                    confirmation_response = f"네, {method_display}로 매월 {date}일에 받아보시겠습니다."
                 elif current_stage_id == "additional_services":
                     # 모든 서비스가 False인지 확인
                     all_false = all(
@@ -1522,23 +1825,29 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                     if "transfer_limit_once" in collected_info or "transfer_limit_daily" in collected_info:
                         limit_parts = []
                         
-                        if "transfer_limit_once" in collected_info:
-                            once_limit = int(collected_info["transfer_limit_once"])
-                            if once_limit >= 10000:
-                                once_limit_str = f"{once_limit // 10000}만원"
-                            else:
-                                once_limit_str = f"{once_limit:,}원"
-                            limit_parts.append(f"1회 {once_limit_str}")
+                        if "transfer_limit_once" in collected_info and collected_info["transfer_limit_once"] is not None:
+                            try:
+                                once_limit = int(collected_info["transfer_limit_once"])
+                                if once_limit >= 10000:
+                                    once_limit_str = f"{once_limit // 10000}만원"
+                                else:
+                                    once_limit_str = f"{once_limit:,}원"
+                                limit_parts.append(f"1회 {once_limit_str}")
+                            except (ValueError, TypeError):
+                                pass  # 변환 실패 시 무시
                         
-                        if "transfer_limit_daily" in collected_info:
-                            daily_limit = int(collected_info["transfer_limit_daily"]) 
-                            if daily_limit >= 100000000:
-                                daily_limit_str = f"{daily_limit // 100000000}억원"
-                            elif daily_limit >= 10000:
-                                daily_limit_str = f"{daily_limit // 10000}만원"
-                            else:
-                                daily_limit_str = f"{daily_limit:,}원"
-                            limit_parts.append(f"1일 {daily_limit_str}")
+                        if "transfer_limit_daily" in collected_info and collected_info["transfer_limit_daily"] is not None:
+                            try:
+                                daily_limit = int(collected_info["transfer_limit_daily"]) 
+                                if daily_limit >= 100000000:
+                                    daily_limit_str = f"{daily_limit // 100000000}억원"
+                                elif daily_limit >= 10000:
+                                    daily_limit_str = f"{daily_limit // 10000}만원"
+                                else:
+                                    daily_limit_str = f"{daily_limit:,}원"
+                                limit_parts.append(f"1일 {daily_limit_str}")
+                            except (ValueError, TypeError):
+                                pass  # 변환 실패 시 무시
                         
                         if limit_parts:
                             confirmations.append(f"{', '.join(limit_parts)} 한도")
@@ -1547,8 +1856,37 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                         confirmation_response = f"{confirmations[0]}해드리겠습니다." + (f" {confirmations[1]}로 설정됩니다." if len(confirmations) > 1 else "")
                     else:
                         confirmation_response = "네, 설정해드리겠습니다."
+                elif current_stage_id == "card_selection":
+                    # 카드 선택 관련 응답
+                    selected_card = collected_info.get("card_selection", "")
+                    from ....data.deposit_account_fields import CHOICE_VALUE_DISPLAY_MAPPING
+                    card_display = CHOICE_VALUE_DISPLAY_MAPPING.get(selected_card, selected_card)
+                    
+                    if default_mapping_occurred:
+                        # 기본값 수락한 경우
+                        receipt_method = collected_info.get("card_receipt_method", "")
+                        if receipt_method == "즉시발급":
+                            confirmation_response = f"네, 지금 바로 수령할 수 있는 {card_display}로 발급해드리겠습니다."
+                        elif receipt_method == "배송":
+                            confirmation_response = f"네, {card_display}로 발급해서 배송해드리겠습니다."
+                        else:
+                            confirmation_response = f"네, {card_display}로 발급해드리겠습니다."
+                    else:
+                        # 직접 선택한 경우
+                        confirmation_response = f"네, {card_display}로 선택하셨습니다."
+                elif current_stage_id == "card_usage_alert":
+                    # 카드 사용 알림 관련 응답
+                    alert_type = collected_info.get("card_usage_alert", "")
+                    if alert_type == "over_50000_free":
+                        confirmation_response = "네, 5만원 이상 결제 시 무료로 문자 알림을 보내드리겠습니다."
+                    elif alert_type == "all_transactions_200won":
+                        confirmation_response = "네, 모든 사용 내역을 문자로 알려드리겠습니다. 건당 200원이며 포인트에서 우선 차감됩니다."
+                    elif alert_type == "no_alert":
+                        confirmation_response = "네, 카드 사용 알림은 받지 않으시는 것으로 설정하겠습니다."
+                    else:
+                        confirmation_response = "네, 카드 사용 알림을 설정했습니다."
                 else:
-                    confirmation_response = "네, 변경해드리겠습니다."
+                    confirmation_response = "네, 확인했습니다."
                 
                 print(f"🎯 [V3_EXTRACTED_CONFIRMED] Generated confirmation: {confirmation_response}")
                 
@@ -1756,25 +2094,85 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                             collected_info["statement_delivery_date"] = "10"
                             print(f"✅ [V3_CHOICE_STORED] Set default statement_delivery_date: 10")
                         
-                # card_selection 단계의 특별 처리 - 이미 handle_card_selection_mapping에서 처리됨
+                # card_selection 단계의 특별 처리
                 elif current_stage_id == "card_selection":
-                    # 카드 선택은 이미 handle_card_selection_mapping에서 여러 필드가 설정됨
-                    print(f"✅ [V3_CHOICE_STORED] Card selection fields already set by handle_card_selection_mapping")
+                    # choice_mapping만 반환되므로 collected_info에 저장하고 metadata도 채우기
+                    collected_info[expected_field] = choice_mapping
+                    print(f"✅ [V3_CHOICE_STORED] {expected_field}: '{choice_mapping}'")
+                    
+                    # metadata에서 추가 필드 채우기
+                    if choices:
+                        for choice in choices:
+                            if isinstance(choice, dict) and choice.get("value") == choice_mapping:
+                                metadata = choice.get("metadata", {})
+                                for meta_key, meta_value in metadata.items():
+                                    if meta_key == "receipt_method" and "card_receipt_method" in fields_to_collect:
+                                        collected_info["card_receipt_method"] = "즉시발급" if meta_value == "즉시발급" else "배송"
+                                        print(f"✅ [V3_METADATA_MAPPED] card_receipt_method: '{meta_value}'")
+                                    elif meta_key == "transit_enabled" and "transit_function" in fields_to_collect:
+                                        collected_info["transit_function"] = meta_value
+                                        print(f"✅ [V3_METADATA_MAPPED] transit_function: {meta_value}")
+                                break
+                    
+                    # 추출된 다른 필드들도 저장 (단, 이미 choice mapping으로 올바르게 설정된 값은 덮어쓰지 않음)
+                    for field_key, field_value in extracted_fields.items():
+                        if field_key != expected_field and field_key in fields_to_collect:
+                            # 이미 choice mapping으로 올바른 값이 설정된 경우 덮어쓰지 않음
+                            if field_key in collected_info:
+                                existing_value = collected_info[field_key]
+                                # 기존 값이 추상적인 값(기본값, 발급 등)이 아니라면 덮어쓰지 않음
+                                abstract_values = ["기본값", "발급", "그것", "그걸로", "디폴트", "기본", "추천", "제안", "기본값 수락"]
+                                # 정확히 일치하거나 단어 경계가 있는 경우만 추상적 값으로 판단
+                                is_abstract = str(existing_value) in abstract_values or any(
+                                    abstract == str(existing_value) or 
+                                    str(existing_value).startswith(abstract + " ") or 
+                                    str(existing_value).endswith(" " + abstract) or
+                                    " " + abstract + " " in str(existing_value)
+                                    for abstract in abstract_values
+                                )
+                                if not is_abstract:
+                                    print(f"🔒 [V3_CHOICE_PROTECTED] {field_key}: keeping existing value '{existing_value}' (not overwriting with '{field_value}')")
+                                    continue
+                            
+                            collected_info[field_key] = field_value
+                            print(f"✅ [V3_CHOICE_STORED] {field_key}: '{field_value}' (from multi-field extraction)")
                 else:
                     # 일반적인 필드 저장
                     collected_info[expected_field] = choice_mapping
                     print(f"✅ [V3_CHOICE_STORED] {expected_field}: '{choice_mapping}'")
                     
-                    # 추출된 다른 필드들도 저장
+                    # 추출된 다른 필드들도 저장 (단, 이미 choice mapping으로 올바르게 설정된 값은 덮어쓰지 않음)
                     for field_key, field_value in extracted_fields.items():
                         if field_key != expected_field and field_key in fields_to_collect:
+                            # 이미 choice mapping으로 올바른 값이 설정된 경우 덮어쓰지 않음
+                            if field_key in collected_info:
+                                existing_value = collected_info[field_key]
+                                # 기존 값이 추상적인 값(기본값, 발급 등)이 아니라면 덮어쓰지 않음
+                                abstract_values = ["기본값", "발급", "그것", "그걸로", "디폴트", "기본", "추천", "제안", "기본값 수락"]
+                                # 정확히 일치하거나 단어 경계가 있는 경우만 추상적 값으로 판단
+                                is_abstract = str(existing_value) in abstract_values or any(
+                                    abstract == str(existing_value) or 
+                                    str(existing_value).startswith(abstract + " ") or 
+                                    str(existing_value).endswith(" " + abstract) or
+                                    " " + abstract + " " in str(existing_value)
+                                    for abstract in abstract_values
+                                )
+                                if not is_abstract:
+                                    print(f"🔒 [V3_CHOICE_PROTECTED] {field_key}: keeping existing value '{existing_value}' (not overwriting with '{field_value}')")
+                                    continue
+                            
                             collected_info[field_key] = field_value
                             print(f"✅ [V3_CHOICE_STORED] {field_key}: '{field_value}' (from multi-field extraction)")
                 
                 # 자연스러운 확인 응답 생성
                 # statement_delivery 단계에서는 날짜도 함께 확인
-                if current_stage_id == "statement_delivery" and "statement_delivery_date" in collected_info:
-                    date = collected_info["statement_delivery_date"]
+                if current_stage_id == "statement_delivery":
+                    date = collected_info.get("statement_delivery_date", "")
+                    # 날짜가 비어있으면 기본값 사용
+                    if not date or date == "":
+                        date = current_stage_info.get("default_values", {}).get("statement_delivery_date", "10")
+                        collected_info["statement_delivery_date"] = date
+                        print(f"✅ [V3_CHOICE_DEFAULT_DATE] Using default date: {date}")
                     method_display = "이메일" if choice_mapping == "email" else "휴대폰" if choice_mapping == "mobile" else "홈페이지"
                     confirmation_response = f"네, {method_display}로 매월 {date}일에 받아보시겠습니다."
                 else:
@@ -2482,8 +2880,13 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
             stage_response_data = generate_stage_response(next_stage_info, collected_info, active_scenario_data)
             print(f"🎯 [V3_STAGE_RESPONSE] Generated stage response data for {determined_next_stage_id}")
         
-        # 응답 프롬프트 준비
-        next_stage_prompt = next_stage_info.get("prompt", "")
+        # 응답 프롬프트 준비 (dynamic_prompt도 고려)
+        if next_stage_info.get("dynamic_prompt"):
+            # dynamic_prompt가 있는 경우 stage_response_data에서 가져오기 (이미 변수 치환됨)
+            next_stage_prompt = stage_response_data.get("prompt", "") if stage_response_data else ""
+            print(f"🎯 [V3_DYNAMIC_PROMPT_TRANSITION] Using dynamic prompt for {determined_next_stage_id}: '{next_stage_prompt[:100]}...'")
+        else:
+            next_stage_prompt = next_stage_info.get("prompt", "")
         
         # Action plan 정리
         updated_plan = state.get("action_plan", []).copy()
@@ -2533,17 +2936,67 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
         expected_field_keys = get_expected_field_keys(current_stage_info)
         main_field_key = expected_field_keys[0] if expected_field_keys else None
         if main_field_key and main_field_key not in collected_info:
-            # LLM 기반 자연어 필드 값 추출
-            extracted_value = await extract_any_field_value_with_llm(
-                user_input,
-                main_field_key,
-                current_stage_info,
-                current_stage_id
-            )
+            # LLM 기반 자연어 필드 값 추출 - 단일 필드 처리
+            if main_field_key == "card_password_same_as_account":
+                # Boolean 필드 특별 처리
+                user_lower = user_input.lower().strip()
+                if any(word in user_lower for word in ["네", "예", "응", "어", "그래", "좋아", "맞아", "알겠", "동일", "같게", "똑같이"]):
+                    extracted_value = True
+                    print(f"🎯 [BOOLEAN_EXTRACTION] {main_field_key}: '{user_input}' -> True (positive)")
+                elif any(word in user_lower for word in ["아니", "다르게", "따로", "별도", "안", "싫어"]):
+                    extracted_value = False
+                    print(f"🎯 [BOOLEAN_EXTRACTION] {main_field_key}: '{user_input}' -> False (negative)")
+                else:
+                    # LLM으로 fallback
+                    try:
+                        from app.agents.entity_agent import EntityRecognitionAgent
+                        entity_agent = EntityRecognitionAgent()
+                        intent_result = await entity_agent.analyze_user_intent(
+                            user_input,
+                            current_stage_id,
+                            current_stage_info,
+                            collected_info
+                        )
+                        if intent_result.get("intent") in ["긍정", "동일_비밀번호"]:
+                            extracted_value = True
+                        elif intent_result.get("intent") in ["다른_비밀번호", "부정"]:
+                            extracted_value = False
+                        else:
+                            extracted_value = None
+                        print(f"🎯 [LLM_BOOLEAN_EXTRACTION] {main_field_key}: '{user_input}' -> {extracted_value} (intent: {intent_result.get('intent')})")
+                    except Exception as e:
+                        print(f"❌ [LLM_BOOLEAN_EXTRACTION] Failed: {e}")
+                        extracted_value = None
+            else:
+                # 일반 필드는 기존 방식으로 처리
+                # 현재 스테이지 필드 정보 생성
+                stage_fields = []
+                if current_stage_info.get("fields_to_collect"):
+                    for field_key in current_stage_info.get("fields_to_collect", []):
+                        stage_field = {
+                            "key": field_key,
+                            "display_name": field_key,
+                            "type": current_stage_info.get("field_type", "text")
+                        }
+                        # extraction_prompt가 있으면 description으로 사용
+                        if current_stage_info.get("extraction_prompt"):
+                            stage_field["description"] = current_stage_info.get("extraction_prompt")
+                        stage_fields.append(stage_field)
+                
+                if stage_fields:
+                    extracted_dict = await extract_any_field_value_with_llm(
+                        user_input,
+                        stage_fields,
+                        collected_info,
+                        current_stage_id
+                    )
+                    extracted_value = extracted_dict.get(main_field_key)
+                else:
+                    extracted_value = None
             
             if extracted_value is not None:
                 collected_info[main_field_key] = extracted_value
-                print(f"🎯 [LLM_FIELD_EXTRACTION] {main_field_key}: '{user_input}' -> {extracted_value}")
+                print(f"🎯 [FIELD_EXTRACTION_SUCCESS] {main_field_key}: '{user_input}' -> {extracted_value}")
             
             # 여전히 정보가 수집되지 않았으면 현재 스테이지 유지
             if main_field_key not in collected_info:
@@ -2769,7 +3222,14 @@ You MUST respond in JSON format with a single key "is_confirmed" (boolean). Exam
     
     if determined_next_stage_id and not str(determined_next_stage_id).startswith("END"):
         next_stage_info = active_scenario_data.get("stages", {}).get(str(determined_next_stage_id), {})
-        next_stage_prompt = next_stage_info.get("prompt", "")
+        # dynamic_prompt가 있는 경우 처리 (final_confirmation 등)
+        if next_stage_info.get("dynamic_prompt"):
+            # dynamic_prompt가 있는 경우 generate_stage_response에서 처리된 결과 사용
+            temp_stage_response = generate_stage_response(next_stage_info, collected_info, active_scenario_data)
+            next_stage_prompt = temp_stage_response.get("prompt", "") if temp_stage_response else ""
+            print(f"🎯 [DYNAMIC_PROMPT_FALLBACK] Generated dynamic prompt for {determined_next_stage_id}: '{next_stage_prompt[:100]}...'")
+        else:
+            next_stage_prompt = next_stage_info.get("prompt", "")
         
         # final_summary 단계인 경우 템플릿 변수 치환
         if determined_next_stage_id == "final_summary":
