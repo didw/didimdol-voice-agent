@@ -1411,9 +1411,9 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                 elif "계좌만" in user_lower or "통장만" in user_lower or "입출금만" in user_lower:
                     choice_mapping = "account_only"
                     print(f"🎯 [DIRECT_MAPPING] '계좌만/통장만/입출금만' detected -> account_only")
-                elif "모바일만" in user_lower or "앱만" in user_lower:
+                elif "뱅킹만" in user_lower or "모바일만" in user_lower or "앱만" in user_lower or "모바일뱅킹만" in user_lower or "인터넷뱅킹만" in user_lower:
                     choice_mapping = "mobile_only"
-                    print(f"🎯 [DIRECT_MAPPING] '모바일만/앱만' detected -> mobile_only")
+                    print(f"🎯 [DIRECT_MAPPING] '뱅킹만/모바일만/앱만/모바일뱅킹만/인터넷뱅킹만' detected -> mobile_only")
                 elif any(word in user_lower for word in ["다", "모두", "전부", "함께"]):
                     choice_mapping = "all"
                     print(f"🎯 [DIRECT_MAPPING] '다/모두/전부/함께' detected -> all")
@@ -1716,6 +1716,37 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                                     # 유사한 값을 올바른 choice 값으로 매핑 시도
                                     mapped_value = None
                                     
+                                    # 순서 표현 매핑 (첫번째, 두번째, 세번째, 네번째)
+                                    ordinal_mapping = {
+                                        "첫번째": 0, "1번째": 0, "첫 번째": 0, "1번": 0, "첫째": 0,
+                                        "두번째": 1, "2번째": 1, "두 번째": 1, "2번": 1, "둘째": 1,
+                                        "세번째": 2, "3번째": 2, "세 번째": 2, "3번": 2, "셋째": 2,
+                                        "네번째": 3, "4번째": 3, "네 번째": 3, "4번": 3, "넷째": 3,
+                                        "다섯번째": 4, "5번째": 4, "다섯 번째": 4, "5번": 4, "다섯째": 4
+                                    }
+                                    
+                                    # 순서 표현 처리
+                                    if str(field_value).strip() in ordinal_mapping:
+                                        index = ordinal_mapping[str(field_value).strip()]
+                                        # choice_groups가 있는 경우 모든 choices를 평면화한 상태이므로
+                                        # 그대로 인덱스 사용
+                                        if 0 <= index < len(choices):
+                                            target_choice = choices[index]
+                                            if isinstance(target_choice, dict):
+                                                mapped_value = target_choice.get("value")
+                                                collected_info[field_key] = mapped_value
+                                                print(f"✅ [V3_ORDINAL_MAPPED] {field_key}: '{field_value}' → '{mapped_value}' (ordinal position {index+1})")
+                                                
+                                                # metadata도 자동으로 채우기
+                                                metadata = target_choice.get("metadata", {})
+                                                if metadata.get("transfer_limit_once") and "transfer_limit_once" in fields_to_collect:
+                                                    collected_info["transfer_limit_once"] = metadata["transfer_limit_once"]
+                                                    print(f"✅ [V3_METADATA_MAPPED] transfer_limit_once: {metadata['transfer_limit_once']}")
+                                                if metadata.get("transfer_limit_daily") and "transfer_limit_daily" in fields_to_collect:
+                                                    collected_info["transfer_limit_daily"] = metadata["transfer_limit_daily"]
+                                                    print(f"✅ [V3_METADATA_MAPPED] transfer_limit_daily: {metadata['transfer_limit_daily']}")
+                                                continue
+                                    
                                     # card_usage_alert 특별 매핑
                                     if field_key == "card_usage_alert":
                                         alert_mapping = {
@@ -1818,8 +1849,21 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                     if "security_medium" in collected_info:
                         from ....data.deposit_account_fields import CHOICE_VALUE_DISPLAY_MAPPING
                         security_medium = collected_info["security_medium"]
-                        display_name = CHOICE_VALUE_DISPLAY_MAPPING.get(security_medium, security_medium)
-                        confirmations.append(f"{display_name}로 설정")
+                        
+                        # 순서 표현이 잘못 저장된 경우 처리
+                        ordinal_names = {
+                            "첫번째": "첫 번째 보안매체",
+                            "두번째": "두 번째 보안매체", 
+                            "세번째": "세 번째 보안매체",
+                            "네번째": "네 번째 보안매체"
+                        }
+                        
+                        if security_medium in ordinal_names:
+                            # 순서 표현이 잘못 저장된 경우
+                            confirmations.append(f"{ordinal_names[security_medium]}로 설정")
+                        else:
+                            display_name = CHOICE_VALUE_DISPLAY_MAPPING.get(security_medium, security_medium)
+                            confirmations.append(f"{display_name}로 설정")
                     
                     # 이체한도 정보
                     if "transfer_limit_once" in collected_info or "transfer_limit_daily" in collected_info:
