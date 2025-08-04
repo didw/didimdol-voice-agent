@@ -38,6 +38,23 @@ async def map_user_intent_to_choice(
                         return handle_additional_services_mapping(choice_value, field_key)
                     return choice_value
     
+    # ordinal_keywords 기반 매칭 시도
+    user_input_trimmed = user_input.strip()
+    for choice in choices:
+        if isinstance(choice, dict):
+            # 일반 keywords 확인
+            keywords = choice.get("keywords", [])
+            for keyword in keywords:
+                if keyword in user_input.lower():
+                    print(f"🎯 [KEYWORD_MATCH] Found '{keyword}' in '{user_input}' -> '{choice.get('value')}'")
+                    return choice.get("value")
+            
+            # ordinal_keywords 확인
+            ordinal_keywords = choice.get("ordinal_keywords", [])
+            if user_input_trimmed in ordinal_keywords:
+                print(f"🎯 [ORDINAL_MATCH] Found '{user_input_trimmed}' in ordinal_keywords -> '{choice.get('value')}'")
+                return choice.get("value")
+    
     # LLM 기반 의미 매칭
     try:
         # 선택지 정보 준비

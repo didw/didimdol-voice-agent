@@ -1716,7 +1716,30 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                                     # 유사한 값을 올바른 choice 값으로 매핑 시도
                                     mapped_value = None
                                     
-                                    # 순서 표현 매핑 (첫번째, 두번째, 세번째, 네번째)
+                                    # JSON에 정의된 ordinal_keywords를 먼저 확인
+                                    field_value_str = str(field_value).strip()
+                                    for choice in choices:
+                                        if isinstance(choice, dict):
+                                            ordinal_keywords = choice.get("ordinal_keywords", [])
+                                            if field_value_str in ordinal_keywords:
+                                                mapped_value = choice.get("value")
+                                                collected_info[field_key] = mapped_value
+                                                print(f"✅ [V3_ORDINAL_MAPPED] {field_key}: '{field_value}' → '{mapped_value}' (ordinal keyword match)")
+                                                
+                                                # metadata도 자동으로 채우기
+                                                metadata = choice.get("metadata", {})
+                                                if metadata.get("transfer_limit_once") and "transfer_limit_once" in fields_to_collect:
+                                                    collected_info["transfer_limit_once"] = metadata["transfer_limit_once"]
+                                                    print(f"✅ [V3_METADATA_MAPPED] transfer_limit_once: {metadata['transfer_limit_once']}")
+                                                if metadata.get("transfer_limit_daily") and "transfer_limit_daily" in fields_to_collect:
+                                                    collected_info["transfer_limit_daily"] = metadata["transfer_limit_daily"]
+                                                    print(f"✅ [V3_METADATA_MAPPED] transfer_limit_daily: {metadata['transfer_limit_daily']}")
+                                                break
+                                    
+                                    if mapped_value:
+                                        continue
+                                    
+                                    # 하드코딩된 매핑 (fallback)
                                     ordinal_mapping = {
                                         "첫번째": 0, "1번째": 0, "첫 번째": 0, "1번": 0, "첫째": 0,
                                         "두번째": 1, "2번째": 1, "두 번째": 1, "2번": 1, "둘째": 1,
@@ -1725,9 +1748,9 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                                         "다섯번째": 4, "5번째": 4, "다섯 번째": 4, "5번": 4, "다섯째": 4
                                     }
                                     
-                                    # 순서 표현 처리
-                                    if str(field_value).strip() in ordinal_mapping:
-                                        index = ordinal_mapping[str(field_value).strip()]
+                                    # 순서 표현 처리 (fallback)
+                                    if field_value_str in ordinal_mapping:
+                                        index = ordinal_mapping[field_value_str]
                                         # choice_groups가 있는 경우 모든 choices를 평면화한 상태이므로
                                         # 그대로 인덱스 사용
                                         if 0 <= index < len(choices):

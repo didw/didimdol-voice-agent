@@ -14,22 +14,26 @@
           "display": "입출금 계좌 + 체크카드 + 모바일 뱅킹",
           "value": "all",
           "default": true,
-          "keywords": ["모두", "전부", "다", "네", "좋아", "응"]
+          "keywords": ["모두", "전부", "다", "네", "좋아", "응"],
+          "ordinal_keywords": ["첫번째", "1번째", "첫 번째", "1번", "첫째", "하나", "일번"]
         },
         {
           "display": "입출금 계좌 + 모바일 뱅킹",
           "value": "mobile_only",
-          "keywords": ["모바일", "앱", "모바일만", "앱만", "뱅킹", "뱅킹만", "모바일뱅킹", "모바일뱅킹만", "인터넷뱅킹", "인터넷뱅킹만"]
+          "keywords": ["모바일", "앱", "모바일만", "앱만", "뱅킹", "뱅킹만", "모바일뱅킹", "모바일뱅킹만", "인터넷뱅킹", "인터넷뱅킹만"],
+          "ordinal_keywords": ["두번째", "2번째", "두 번째", "2번", "둘째", "둘", "이번"]
         },
         {
           "display": "입출금 계좌 + 체크카드",
           "value": "card_only",
-          "keywords": ["체크카드", "카드", "카드만", "체크카드만"]
+          "keywords": ["체크카드", "카드", "카드만", "체크카드만"],
+          "ordinal_keywords": ["세번째", "3번째", "세 번째", "3번", "셋째", "셋", "삼번"]
         },
         {
           "display": "입출금 계좌",
           "value": "account_only",
-          "keywords": ["계좌만", "입출금만", "아니", "아니요", "아니야", "싫어", "안해", "필요없어"]
+          "keywords": ["계좌만", "입출금만", "아니", "아니요", "아니야", "싫어", "안해", "필요없어"],
+          "ordinal_keywords": ["네번째", "4번째", "네 번째", "4번", "넷째", "넷", "사번"]
         }
       ],
       "additional_questions": [
@@ -85,6 +89,7 @@
               "display": "미래테크 19284019384",
               "value": "futuretech_19284019384",
               "default": true,
+              "ordinal_keywords": ["첫번째", "1번째", "첫 번째", "1번", "첫째", "하나", "일번"],
               "metadata": {
                 "transfer_limit_once": "50000000",
                 "transfer_limit_daily": "100000000"
@@ -93,6 +98,7 @@
             {
               "display": "코마스(RSA) 12930295",
               "value": "comas_rsa_12930295",
+              "ordinal_keywords": ["두번째", "2번째", "두 번째", "2번", "둘째", "둘", "이번"],
               "metadata": {
                 "transfer_limit_once": "50000000",
                 "transfer_limit_daily": "100000000"
@@ -105,11 +111,13 @@
           "choices": [
             {
               "display": "보안카드",
-              "value": "security_card"
+              "value": "security_card",
+              "ordinal_keywords": ["세번째", "3번째", "세 번째", "3번", "셋째", "셋", "삼번"]
             },
             {
               "display": "신한OTP (10,000원)",
               "value": "shinhan_otp",
+              "ordinal_keywords": ["네번째", "4번째", "네 번째", "4번", "넷째", "넷", "사번"],
               "metadata": {
                 "fee": "10000"
               }
@@ -137,15 +145,18 @@
         {
           "display": "쏠편한 입출금통장(저축예금)\\n110-OOO-883827\\n잔액 999,999,999원",
           "value": "account_110_883827",
-          "default": true
+          "default": true,
+          "ordinal_keywords": ["첫번째", "1번째", "첫 번째", "1번", "첫째", "하나", "일번"]
         },
         {
           "display": "쏠편한 입출금통장(저축예금)\\n110-OOO-883828\\n잔액 999,999,999원",
-          "value": "account_110_883828"
+          "value": "account_110_883828",
+          "ordinal_keywords": ["두번째", "2번째", "두 번째", "2번", "둘째", "둘", "이번"]
         },
         {
           "display": "쏠편한 입출금통장(저축예금)\\n110-OOO-883829\\n잔액 999,999,999원",
-          "value": "account_110_883829"
+          "value": "account_110_883829",
+          "ordinal_keywords": ["세번째", "3번째", "세 번째", "3번", "셋째", "셋", "삼번"]
         }
       ],
       "fields_to_collect": ["otp_payment_account"],
@@ -181,6 +192,7 @@
           "display": "S-Line 체크카드 (후불교통)",
           "value": "sline_transit",
           "default": true,
+          "ordinal_keywords": ["첫번째", "1번째", "첫 번째", "1번", "첫째", "하나", "일번"],
           "metadata": {
             "receipt_method": "즉시발급",
             "transit_enabled": true
@@ -189,6 +201,7 @@
         {
           "display": "S-Line 체크카드 (일반)",
           "value": "sline_regular",
+          "ordinal_keywords": ["두번째", "2번째", "두 번째", "2번", "둘째", "둘", "이번"],
           "metadata": {
             "receipt_method": "즉시발급",
             "transit_enabled": false
@@ -197,6 +210,7 @@
         {
           "display": "신한 Deep Dream 체크카드 (후불교통)",
           "value": "deepdream_transit",
+          "ordinal_keywords": ["세번째", "3번째", "세 번째", "3번", "셋째", "셋", "삼번"],
           "metadata": {
             "receipt_method": "배송",
             "transit_enabled": true
@@ -205,6 +219,7 @@
         {
           "display": "신한 Deep Dream 체크카드 (일반)",
           "value": "deepdream_regular",
+          "ordinal_keywords": ["네번째", "4번째", "네 번째", "4번", "넷째", "넷", "사번"],
           "metadata": {
             "receipt_method": "배송",
             "transit_enabled": false
@@ -213,6 +228,7 @@
         {
           "display": "신한카드 Hey Young 체크카드 (일반)",
           "value": "heyyoung_regular",
+          "ordinal_keywords": ["다섯번째", "5번째", "다섯 번째", "5번", "다섯째", "다섯", "오번"],
           "metadata": {
             "receipt_method": "배송",
             "transit_enabled": false
@@ -236,15 +252,18 @@
         {
           "display": "휴대폰",
           "value": "mobile",
-          "default": true
+          "default": true,
+          "ordinal_keywords": ["첫번째", "1번째", "첫 번째", "1번", "첫째", "하나", "일번"]
         },
         {
           "display": "이메일",
-          "value": "email"
+          "value": "email",
+          "ordinal_keywords": ["두번째", "2번째", "두 번째", "2번", "둘째", "둘", "이번"]
         },
         {
           "display": "홈페이지",
-          "value": "website"
+          "value": "website",
+          "ordinal_keywords": ["세번째", "3번째", "세 번째", "3번", "셋째", "셋", "삼번"]
         }
       ],
       "fields_to_collect": ["statement_delivery_method", "statement_delivery_date"],
@@ -264,15 +283,18 @@
         {
           "display": "5만원 이상 결제시 발송 (무료)",
           "value": "over_50000_free",
-          "default": true
+          "default": true,
+          "ordinal_keywords": ["첫번째", "1번째", "첫 번째", "1번", "첫째", "하나", "일번"]
         },
         {
           "display": "모든 내역 발송 (200원, 포인트 우선 차감)",
-          "value": "all_transactions_200won"
+          "value": "all_transactions_200won",
+          "ordinal_keywords": ["두번째", "2번째", "두 번째", "2번", "둘째", "둘", "이번"]
         },
         {
           "display": "문자 받지 않음",
-          "value": "no_alert"
+          "value": "no_alert",
+          "ordinal_keywords": ["세번째", "3번째", "세 번째", "3번", "셋째", "셋", "삼번"]
         }
       ],
       "fields_to_collect": ["card_usage_alert"],
