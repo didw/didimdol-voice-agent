@@ -217,7 +217,18 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
     
     # 선택지가 있는 경우
     if response_type in ["bullet", "boolean"]:
-        response_data["choices"] = stage_info.get("choices", [])
+        # choices 처리 - display_lines가 있으면 포함
+        choices = []
+        for choice in stage_info.get("choices", []):
+            if isinstance(choice, dict):
+                processed_choice = choice.copy()
+                # display_lines가 있으면 포함
+                if "display_lines" in choice:
+                    processed_choice["displayLines"] = choice["display_lines"]
+                choices.append(processed_choice)
+            else:
+                choices.append(choice)
+        response_data["choices"] = choices
         # choice_groups가 있는 경우 추가 (frontend 형식으로 변환)
         if stage_info.get("choice_groups"):
             print(f"🎯 [CHOICE_GROUPS] Found choice_groups in stage_info: {stage_info.get('choice_groups')}")
@@ -232,6 +243,9 @@ def generate_stage_response(stage_info: Dict[str, Any], collected_info: Dict[str
                         "display": choice.get("display", choice.get("label", "")),
                         "default": choice.get("default", False)
                     }
+                    # display_lines가 있으면 포함
+                    if choice.get("display_lines"):
+                        transformed_choice["displayLines"] = choice.get("display_lines")
                     # metadata가 있으면 포함
                     if choice.get("metadata"):
                         transformed_choice["metadata"] = choice.get("metadata")
