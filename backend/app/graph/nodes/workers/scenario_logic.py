@@ -1060,9 +1060,26 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
             pass
     
     # 사용자가 '네' 응답을 한 경우 기본값 처리 (모든 bullet/choice 단계)
+    # 단, 순서 표현(첫번째, 두번째 등)이 포함된 경우는 제외
     if user_input and current_stage_info.get("response_type") in ["bullet", "boolean"]:
         user_lower = user_input.lower().strip()
-        if any(word in user_lower for word in ["네", "예", "응", "어", "그래", "좋아", "맞아", "알겠", "할게"]):
+        
+        # 순서 표현이 포함되어 있는지 체크
+        ordinal_expressions = [
+            "첫번째", "1번째", "첫 번째", "1번", "첫째", "하나", "일번",
+            "두번째", "2번째", "두 번째", "2번", "둘째", "둘", "이번",
+            "세번째", "3번째", "세 번째", "3번", "셋째", "셋", "삼번",
+            "네번째", "4번째", "네 번째", "4번", "넷째", "넷", "사번",
+            "다섯번째", "5번째", "다섯 번째", "5번", "다섯째", "다섯", "오번"
+        ]
+        # "네번째꺼로", "네번째로" 같은 변형도 처리
+        is_ordinal = any(ord_expr in user_input for ord_expr in ordinal_expressions)
+        
+        if is_ordinal:
+            print(f"🎯 [ORDINAL_DETECTED] User input contains ordinal expression, skipping DEFAULT_SELECTION")
+        
+        # 순서 표현이 아닌 경우에만 긍정 응답으로 처리
+        if not is_ordinal and any(word in user_lower for word in ["네", "예", "응", "어", "그래", "좋아", "맞아", "알겠", "할게"]):
             # V3 시나리오: fields_to_collect를 사용하는 경우
             fields_to_collect = current_stage_info.get("fields_to_collect", [])
             if fields_to_collect:
