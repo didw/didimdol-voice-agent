@@ -157,7 +157,7 @@ class EntityRecognitionAgent:
         elif current_stage == "card_password_setting":
             field_hints.append("- card_password_same_as_account: 동일하게/같게 → true, 다르게 → false")
         elif current_stage == "card_usage_alert":
-            field_hints.append("- card_usage_alert: 5만원 이상(above_50000), 모든 사용(all_usage), 안함(no_alert)")
+            field_hints.append("- card_usage_alert: 5만원 이상(over_50000_free), 모든 사용(all_transactions_200won), 안함(no_alert)")
         
         field_hints_text = '\n'.join(field_hints) if field_hints else "현재 단계에 해당하는 필드를 추출하세요"
         
@@ -184,6 +184,9 @@ class EntityRecognitionAgent:
 {field_hints_text}
    - 예시: "16일마다 이메일로" → statement_delivery_date: "16", statement_delivery_method: "email"
    - 예시: "5만원 이상 알려줘" → card_usage_alert: "above_50000"
+   - 특별 규칙: "~만" 표현이 있고 boolean 필드들이 있으면, 언급된 것만 true, 나머지는 false
+     예: "해외아이피만 해줘" → overseas_ip_restriction: true, important_transaction_alert: false, withdrawal_alert: false
+     예: "중요거래만" → important_transaction_alert: true, withdrawal_alert: false, overseas_ip_restriction: false
    
 3. 특수 표현 처리
    - "똑같이 해줘", "그대로 해줘" → 현재 제시된 기본값/동일하게 설정을 수락
@@ -298,6 +301,9 @@ JSON 형식으로 출력:
    - 긍정: 네/예/응/어/그래/좋아/알겠/등록/추가/신청/할게/해줘/해주세요/맞아/확인 → true
    - 부정: 아니/아니요/안/싫/필요없/안할/안해 → false
    - withdrawal_account_registration의 경우 "등록해줘", "추가해줘" 등도 true로 처리
+   - 특별 규칙: "~만" 표현이 있으면 언급된 항목만 true, 나머지 boolean 필드는 false
+     예: "해외아이피만 해줘" → overseas_ip_restriction: true, important_transaction_alert: false, withdrawal_alert: false
+     예: "중요거래만 알려줘" → important_transaction_alert: true, withdrawal_alert: false, overseas_ip_restriction: false
 4. number 타입: 한국어 숫자 정확히 변환
    - "오백만원" → 500 (만원 단위)
    - "일일" 또는 "1일" → 1일 이체한도
@@ -440,7 +446,9 @@ JSON 형식으로 출력:
             "3. 유사한 표현도 인정 (예: \"맞아요\" → \"네\", \"틀려요\" → \"아니요\")\n",
             "4. 대명사나 지시어는 이전 AI 질문의 맥락을 참고 (예: \"그걸로 해줘\" → AI가 제시한 선택지)\n",
             "5. choice 필드는 의미상 가장 가까운 선택지로 매칭\n",
-            "6. 애매한 경우 confidence를 낮게 설정\n",
+            "6. \"~만\" 표현이 있고 boolean 필드들이 있으면, 언급된 것만 true/해당값, 나머지는 false\n",
+            "   예: \"해외아이피만\" → overseas_ip_restriction: true, 다른 boolean 필드들: false\n",
+            "7. 애매한 경우 confidence를 낮게 설정\n",
             "\n출력 형식:\n"
         ])
         
