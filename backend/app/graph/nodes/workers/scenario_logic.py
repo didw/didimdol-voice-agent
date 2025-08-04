@@ -1411,9 +1411,9 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                 elif "계좌만" in user_lower or "통장만" in user_lower or "입출금만" in user_lower:
                     choice_mapping = "account_only"
                     print(f"🎯 [DIRECT_MAPPING] '계좌만/통장만/입출금만' detected -> account_only")
-                elif "모바일만" in user_lower or "앱만" in user_lower:
+                elif "뱅킹만" in user_lower or "모바일만" in user_lower or "앱만" in user_lower or "모바일뱅킹만" in user_lower or "인터넷뱅킹만" in user_lower:
                     choice_mapping = "mobile_only"
-                    print(f"🎯 [DIRECT_MAPPING] '모바일만/앱만' detected -> mobile_only")
+                    print(f"🎯 [DIRECT_MAPPING] '뱅킹만/모바일만/앱만/모바일뱅킹만/인터넷뱅킹만' detected -> mobile_only")
                 elif any(word in user_lower for word in ["다", "모두", "전부", "함께"]):
                     choice_mapping = "all"
                     print(f"🎯 [DIRECT_MAPPING] '다/모두/전부/함께' detected -> all")

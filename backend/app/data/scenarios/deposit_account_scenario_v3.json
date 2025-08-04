@@ -19,7 +19,7 @@
         {
           "display": "입출금 계좌 + 모바일 뱅킹",
           "value": "mobile_only",
-          "keywords": ["모바일", "앱", "모바일만", "앱만"]
+          "keywords": ["모바일", "앱", "모바일만", "앱만", "뱅킹", "뱅킹만", "모바일뱅킹", "모바일뱅킹만", "인터넷뱅킹", "인터넷뱅킹만"]
         },
         {
           "display": "입출금 계좌 + 체크카드",
@@ -37,7 +37,7 @@
         "한도가 어느정도 제한되는지 알려줘"
       ],
       "fields_to_collect": ["services_selected"],
-      "extraction_prompt": "사용자가 선택한 서비스를 추출하세요:\\n- \"모두\", \"전부\", \"다\" → \"all\"\\n- \"모바일\", \"앱\" → \"mobile_only\"\\n- \"체크카드\", \"카드\" → \"card_only\"\\n- \"계좌만\", \"아니\", \"아니요\" \"입출금만\" → \"account_only\"",
+      "extraction_prompt": "사용자가 선택한 서비스를 추출하세요:\\n- \"모두\", \"전부\", \"다\" → \"all\"\\n- \"모바일\", \"앱\", \"뱅킹\", \"뱅킹만\", \"모바일뱅킹\", \"인터넷뱅킹\" → \"mobile_only\"\\n- \"체크카드\", \"카드\" → \"card_only\"\\n- \"계좌만\", \"입출금만\", \"아니\", \"아니요\" → \"account_only\"",
       "next_step": {
         "all": "confirm_personal_info",
         "mobile_only": "confirm_personal_info",
@@ -358,7 +358,7 @@
       "required": true,
       "stage": "select_services",
       "valid_values": ["all", "mobile_only", "card_only", "account_only"],
-      "extraction_prompt": "사용자가 선택한 서비스를 추출하세요:\\n- \"모두\", \"전부\", \"다\" → \"all\"\\n- \"모바일\", \"앱\" → \"mobile_only\"\\n- \"체크카드\", \"카드\" → \"card_only\"\\n- \"계좌만\", \"입출금만\" → \"account_only\""
+      "extraction_prompt": "사용자가 선택한 서비스를 추출하세요:\\n- \"모두\", \"전부\", \"다\" → \"all\"\\n- \"모바일\", \"앱\", \"뱅킹\", \"뱅킹만\", \"모바일뱅킹\", \"인터넷뱅킹\" → \"mobile_only\"\\n- \"체크카드\", \"카드\" → \"card_only\"\\n- \"계좌만\", \"입출금만\" → \"account_only\""
     },
     {
       "key": "personal_info_confirmed",
