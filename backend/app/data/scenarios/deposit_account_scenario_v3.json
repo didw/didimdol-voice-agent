@@ -155,14 +155,14 @@
           "ordinal_keywords": ["첫번째", "1번째", "첫 번째", "1번", "첫째", "하나", "일번"]
         },
         {
-          "display": "쏠편한 입출금통장\n110-OOO-883828\n잔액 888,888,888원",
+          "display": "신한 입출금통장\n110-OOO-883828\n잔액 888,888,888원",
           "display_lines": [
-            "쏠편한 입출금통장",
+            "신한 입출금통장",
             "110-OOO-883828",
             "잔액 888,888,888원"
           ],
           "value": "account_110_883828",
-          "keywords": ["쏠편한", "883828", "28", "두번째꺼", "두번째계좌"],
+          "keywords": ["신한", "883828", "28", "두번째꺼", "두번째계좌"],
           "ordinal_keywords": ["두번째", "2번째", "두 번째", "2번", "둘째", "둘", "이번"]
         },
         {
@@ -498,6 +498,23 @@
       "extraction_prompt": "사용자가 선택한 체크카드를 추출하세요"
     },
     {
+      "key": "card_receipt_method",
+      "display_name": "카드 수령 방법",
+      "type": "string",
+      "required": true,
+      "stage": "card_selection",
+      "valid_values": ["즉시발급", "배송"],
+      "extraction_prompt": "카드 수령 방법을 추출하세요 (즉시발급 또는 배송)"
+    },
+    {
+      "key": "transit_function",
+      "display_name": "후불 교통 기능",
+      "type": "boolean",
+      "required": false,
+      "stage": "card_selection",
+      "extraction_prompt": "후불 교통 기능 여부를 추출하세요"
+    },
+    {
       "key": "statement_delivery_method",
       "display_name": "명세서 수령 방법",
       "type": "string",
@@ -531,6 +548,8 @@
     "withdrawal_alert": "출금 알림",
     "overseas_ip_restriction": "해외 IP 이체 제한",
     "card_selection": "체크카드 선택",
+    "card_receipt_method": "카드 수령 방법",
+    "transit_function": "후불 교통 기능",
     "statement_delivery_method": "명세서 수령 방법",
     "card_password_same_as_account": "카드 비밀번호 동일 설정"
   }

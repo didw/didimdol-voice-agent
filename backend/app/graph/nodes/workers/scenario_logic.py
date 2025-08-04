@@ -95,7 +95,7 @@ async def process_scenario_logic_node(state: AgentState) -> AgentState:
     collected_info = state.collected_product_info.copy()
     
     # 기존 추상값 정리 (stale abstract values cleanup) - 강화된 버전
-    abstract_values = ["기본값", "발급", "그것", "그걸로", "디폴트", "기본", "추천", "제안", "기본값 수락"]
+    abstract_values = ["기본값", "그것", "그걸로", "디폴트", "기본", "추천", "제안", "기본값 수락"]
     cleaned_fields = []
     for field_key, field_value in list(collected_info.items()):
         if isinstance(field_value, str):
@@ -1276,7 +1276,7 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                     # 현재 단계에서 수집 가능한 필드인지 확인
                     if field_key in fields_to_collect:
                         # Abstract value 체크 및 매핑
-                        abstract_values = ["기본값", "발급", "그것", "그걸로", "디폴트", "기본", "추천", "제안", "기본값 수락"]
+                        abstract_values = ["기본값", "그것", "그걸로", "디폴트", "기본", "추천", "제안", "기본값 수락"]
                         if isinstance(field_value, str) and any(abstract in field_value for abstract in abstract_values):
                             # card_selection의 경우 default choice로 매핑
                             if field_key == "card_selection" and choices:
@@ -1678,6 +1678,18 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                                     print(f"✅ [V3_BOOLEAN_DEFAULT] {field_key}: using default {default_value}")
                             continue  # boolean 필드는 여기서 처리 완료
                         
+                        # metadata 필드는 choice validation 스킵 (card_receipt_method, transit_function 등)
+                        metadata_fields = ["card_receipt_method", "transit_function", "transfer_limit_once", "transfer_limit_daily"]
+                        if field_key in metadata_fields:
+                            # 이미 올바른 값이 설정되어 있으면 유지 (메타데이터로부터 설정된 값)
+                            if field_key in collected_info and collected_info[field_key] not in ["기본값", "기본", "디폴트"]:
+                                print(f"✅ [V3_METADATA_FIELD_KEPT] {field_key}: keeping existing value '{collected_info[field_key]}' (already set from metadata)")
+                            else:
+                                # metadata 필드는 그대로 저장
+                                collected_info[field_key] = field_value
+                                print(f"✅ [V3_METADATA_FIELD_STORED] {field_key}: '{field_value}' (metadata field, no choice validation)")
+                            continue
+                        
                         # 추출된 값이 유효한 choice인지 확인
                         print(f"🔍 [V3_CHOICE_CHECK] {field_key}: Checking choices... choices_count={len(choices) if choices else 0}")
                         if choices:
@@ -1698,9 +1710,26 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                             # 추출된 값이 유효한 choice가 아닌 경우
                             if field_value not in valid_choice_values:
                                 # 추상적인 값(기본값 수락, 그것, 그걸로 등)을 default choice로 매핑
-                                abstract_values = ["기본값 수락", "그것", "그걸로", "그것으로", "디폴트", "기본", "추천", "제안", "발급", "등록", "등록해", "등록해줘", "선택", "선택해줘"]
+                                # "발급" 제거: "즉시발급", "배송" 같은 구체적 값과 충돌 방지
+                                abstract_values = ["기본값 수락", "그것", "그걸로", "그것으로", "디폴트", "기본", "추천", "제안", "등록", "등록해", "등록해줘", "선택", "선택해줘"]
+                                # "발급" 단독으로는 추상값으로 처리 (즉시발급과 구분)
+                                abstract_single_values = ["발급"]
+                                
                                 # field_value가 문자열인 경우에만 abstract value 체크
-                                if isinstance(field_value, str) and any(abstract in field_value for abstract in abstract_values) and default_choice_value:
+                                is_abstract = False
+                                if isinstance(field_value, str):
+                                    # 1. 기존 abstract_values 체크 (부분 문자열 포함)
+                                    if any(abstract in field_value for abstract in abstract_values):
+                                        is_abstract = True
+                                    # 2. 단독 abstract 값 체크 (정확히 일치)
+                                    elif field_value.strip() in abstract_single_values:
+                                        is_abstract = True
+                                    # 3. 원본 user_input도 체크 (그걸로 발급해줘 같은 경우)
+                                    elif user_input and any(abstract in user_input for abstract in abstract_values):
+                                        is_abstract = True
+                                        print(f"🎯 [V3_ABSTRACT_FROM_INPUT] Found abstract value in user_input: '{user_input}'")
+                                
+                                if is_abstract and default_choice_value:
                                     collected_info[field_key] = default_choice_value
                                     default_mapping_occurred = True  # default mapping 발생 표시
                                     print(f"✅ [V3_DEFAULT_MAPPED] {field_key}: '{field_value}' → '{default_choice_value}' (mapped to default)")
@@ -1817,7 +1846,7 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                         if field_key in collected_info:
                             existing_value = collected_info[field_key]
                             # 기존 값이 추상적인 값이 아니라면 덮어쓰지 않음
-                            abstract_values = ["기본값", "발급", "그것", "그걸로", "디폴트", "기본", "추천", "제안", "기본값 수락"]
+                            abstract_values = ["기본값", "그것", "그걸로", "디폴트", "기본", "추천", "제안", "기본값 수락"]
                             # 정확히 일치하거나 단어 경계가 있는 경우만 추상적 값으로 판단
                             is_abstract = str(existing_value) in abstract_values or any(
                                 abstract == str(existing_value) or 
@@ -1995,7 +2024,7 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                         else:
                             print(f"[V3_NEXT_STEP] Required fields not collected, staying at {current_stage_id}")
                     else:
-                        # next_step이 dict인 경우 - additional_services의 경우 services_selected 값에 따라 분기
+                        # next_step이 dict인 경우 - 단계별 분기 처리
                         if current_stage_id == "additional_services":
                             # 모든 필드가 수집되었는지 확인
                             required_fields = ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
@@ -2008,6 +2037,15 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                             else:
                                 next_stage_id = current_stage_id
                                 print(f"[V3_NEXT_STEP] additional_services not all fields collected, staying at {current_stage_id}")
+                        elif current_stage_id == "security_medium_registration":
+                            # security_medium 값에 따라 다음 단계 결정
+                            security_medium = collected_info.get("security_medium")
+                            if security_medium:
+                                next_stage_id = next_step.get(security_medium, current_stage_id)
+                                print(f"[V3_NEXT_STEP] security_medium_registration completed, security_medium='{security_medium}' -> {next_stage_id}")
+                            else:
+                                next_stage_id = current_stage_id
+                                print(f"[V3_NEXT_STEP] security_medium_registration - no security_medium, staying at {current_stage_id}")
                         else:
                             next_stage_id = current_stage_id
                 
@@ -2205,7 +2243,7 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                             if field_key in collected_info:
                                 existing_value = collected_info[field_key]
                                 # 기존 값이 추상적인 값(기본값, 발급 등)이 아니라면 덮어쓰지 않음
-                                abstract_values = ["기본값", "발급", "그것", "그걸로", "디폴트", "기본", "추천", "제안", "기본값 수락"]
+                                abstract_values = ["기본값", "그것", "그걸로", "디폴트", "기본", "추천", "제안", "기본값 수락"]
                                 # 정확히 일치하거나 단어 경계가 있는 경우만 추상적 값으로 판단
                                 is_abstract = str(existing_value) in abstract_values or any(
                                     abstract == str(existing_value) or 
@@ -2232,7 +2270,7 @@ async def process_single_info_collection(state: AgentState, active_scenario_data
                             if field_key in collected_info:
                                 existing_value = collected_info[field_key]
                                 # 기존 값이 추상적인 값(기본값, 발급 등)이 아니라면 덮어쓰지 않음
-                                abstract_values = ["기본값", "발급", "그것", "그걸로", "디폴트", "기본", "추천", "제안", "기본값 수락"]
+                                abstract_values = ["기본값", "그것", "그걸로", "디폴트", "기본", "추천", "제안", "기본값 수락"]
                                 # 정확히 일치하거나 단어 경계가 있는 경우만 추상적 값으로 판단
                                 is_abstract = str(existing_value) in abstract_values or any(
                                     abstract == str(existing_value) or 
