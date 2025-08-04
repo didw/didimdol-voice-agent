@@ -108,6 +108,14 @@ def format_field_value(field_key: str, value: Any, field_type: str) -> str:
 def get_default_choice_display(stage_info: Dict[str, Any]) -> str:
     """기본 선택지의 표시 텍스트 가져오기"""
     if stage_info.get("response_type") == "bullet":
+        # choice_groups 구조 처리 (V3 시나리오)
+        if stage_info.get("choice_groups"):
+            for group in stage_info.get("choice_groups", []):
+                for choice in group.get("choices", []):
+                    if isinstance(choice, dict) and choice.get("default"):
+                        return choice.get("display", choice.get("value", ""))
+        
+        # 기존 choices 구조 처리 (V1/V2 시나리오)
         choices = stage_info.get("choices", [])
         for choice in choices:
             if isinstance(choice, dict) and choice.get("default"):

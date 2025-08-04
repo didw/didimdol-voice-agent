@@ -8,7 +8,8 @@ from ...state import AgentState
 from ...models import ActionModel
 from ...utils import ALL_SCENARIOS_DATA
 from ...logger import node_log as log_node_execution, log_execution_time
-from ..workers.scenario_logic import generate_stage_response, get_default_choice_display
+from ..workers.scenario_logic import generate_stage_response
+from ..workers.scenario_utils import get_default_choice_display
 
 
 @log_execution_time

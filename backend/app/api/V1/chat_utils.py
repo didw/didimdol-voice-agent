@@ -128,7 +128,7 @@ def evaluate_single_condition(condition: str, collected_info: Dict[str, Any]) ->
 
 
 def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, current_stage: str) -> List[Dict]:
-    """현재 대화 단계에 맞는 필드들만 점진적으로 표시"""
+    """현재 대화 단계에 맞는 필드들만 표시 (간소화된 버전)"""
     if not scenario_data:
         return []
     
@@ -138,196 +138,21 @@ def get_contextual_visible_fields(scenario_data: Dict, collected_info: Dict, cur
         print(f"[get_contextual_visible_fields] Using {len(required_fields)} deposit_account fields")
     else:
         required_fields = scenario_data.get("required_info_fields", [])
+    
     visible_fields = []
-    stages = scenario_data.get("stages", {})
     
-    
-    # 현재 단계에서 요구하는 필드 확인
-    current_stage_info = stages.get(current_stage, {})
-    expected_info_key = current_stage_info.get("expected_info_key")
-    
-    # 단계별 표시 정책 - 시나리오 데이터와 완전 일치
-    stage_groups = {
-        # 기본 정보 수집 단계
-        "customer_info": ["customer_name", "phone_number", "address", "confirm_personal_info"],
-        # 이체한도 설정 단계  
-        "transfer_limit": ["transfer_limit_per_time", "transfer_limit_per_day"],
-        # 알림설정 단계
-        "notification": ["important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"],
-        # 체크카드 관련 단계 (모든 하위 필드 포함)
-        "check_card": ["use_check_card", "card_type", "card_receive_method", "card_delivery_location", 
-                      "postpaid_transport", "card_usage_alert", "statement_method"],
-        # 인터넷뱅킹 관련 단계 (모든 하위 필드 포함)
-        "internet_banking": ["use_internet_banking", "security_medium", "initial_password", "other_otp_info",
-                            "transfer_limit_per_time", "transfer_limit_per_day",
-                            "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction"]
-    }
-    
-    # 현재 단계에 따른 필드 그룹 결정
-    allowed_fields = set()
-    
-    # 1. 단계별로 필요한 필드만 표시 (처음부터 모든 필드를 보여주지 않음)
-    # limit_account_guide 단계에서는 아무것도 표시하지 않음
-    if current_stage == "limit_account_guide":
-        # 빈 리스트를 반환하여 아무것도 표시하지 않음
-        return []
-    elif current_stage == "limit_account_agreement":
-        # 한도계좌 동의 단계
-        allowed_fields.add("limit_account_agreement")
-    elif current_stage == "customer_info_check":
-        # 고객정보 확인 단계 - 모든 기본 개인정보 필드 표시 (confirm_personal_info 제외)
-        allowed_fields.update([
-            "limit_account_agreement", "customer_name", "english_name", "resident_number", 
-            "phone_number", "email", "address", "work_address"
-        ])
-    
-    # 기본 정보가 확인된 이후에는 기본 필드들 표시 (특정 단계가 아닌 경우)
-    if (collected_info.get("confirm_personal_info") and 
-        current_stage not in ["limit_account_guide", "limit_account_agreement", "customer_info_check"]):
-        basic_fields = ["limit_account_agreement", "customer_name", "phone_number", "address", 
-                       "confirm_personal_info"]
-        allowed_fields.update(basic_fields)
-    
-    # 2. 현재 단계의 필드 추가
-    if expected_info_key:
-        allowed_fields.add(expected_info_key)
-    
-    # 평생계좌 사용 여부 단계
-    if current_stage == "ask_lifelong_account":
-        allowed_fields.add("use_lifelong_account")
-        # 기본 정보도 함께 표시
-        allowed_fields.update(["customer_name", "phone_number", "address"])
-    
-    # 2-1. 현재 단계가 인터넷뱅킹이나 체크카드면 해당 메인 필드도 추가
-    
-    if current_stage == "ask_internet_banking":
-        # ask_internet_banking 단계에서는 use_internet_banking만 표시
-        allowed_fields.add("use_internet_banking")
-    elif current_stage == "internet_banking":
-        allowed_fields.add("use_internet_banking")
-    
-    if current_stage == "ask_check_card":
-        # ask_check_card 단계에서 체크카드 관련 필드들 모두 표시
-        check_card_fields = ["use_check_card", "card_type", "card_receive_method", "card_delivery_location", 
-                           "postpaid_transport", "card_usage_alert", "statement_method", "card_password_same_as_account"]
-        allowed_fields.update(check_card_fields)
-    elif current_stage in ["check_card", "ask_check_card"]:
-        allowed_fields.add("use_check_card")
-    elif current_stage == "ask_notification_settings":
-        # 알림 설정 단계에서 모든 알림 관련 필드 표시
-        # 인터넷뱅킹 기본 필드도 포함
-        notification_fields = ["use_internet_banking", "security_medium", "transfer_limit_per_time", 
-                              "transfer_limit_per_day", "important_transaction_alert", 
-                              "withdrawal_alert", "overseas_ip_restriction"]
-        allowed_fields.update(notification_fields)
-    
-    # 3. 진행 상황에 따른 추가 필드 결정 (단계별 표시로 변경되어 대부분 불필요)
-    # 특정 단계가 아닌 경우에만 점진적 공개 적용
-    if current_stage not in ["limit_account_guide", "limit_account_agreement", "customer_info_check", 
-                           "ask_lifelong_account", "ask_internet_banking", "ask_check_card", 
-                           "ask_notification_settings"]:
-        if collected_info.get("confirm_personal_info"):
-            # 개인정보 확인 후 기본 필드 유지
-            pass
-    
-    # 4. 출금계좌 등록 단계 처리
-    if current_stage == "ask_withdrawal_account":
-        allowed_fields.add("withdrawal_account_registration")
-        # 기본 정보도 함께 표시 (이미 수집된 정보들)
-        allowed_fields.update([
-            "limit_account_agreement", "customer_name", "english_name", "resident_number", 
-            "phone_number", "email", "address", "work_address", "confirm_personal_info"
-        ])
-    
-    # 5. 추가 서비스 선택 후 하위 필드들 표시 (개인정보 단계와 동일한 방식)
-    # 인터넷뱅킹 관련 모든 단계에서 필드 표시
-    internet_banking_stages = ["ask_security_medium", "ask_transfer_limit", 
-                              "ask_notification_settings", "ask_internet_banking", "ask_withdrawal_account"]
-    
-    # use_internet_banking이 true이거나 인터넷뱅킹 관련 단계에서는 항상 모든 필드 표시
-    # 또는 security_medium이 이미 수집되었으면 계속 표시
-    if (current_stage in internet_banking_stages or 
-        collected_info.get("use_internet_banking") == True or
-        expected_info_key == "security_medium" or
-        "security_medium" in collected_info):
-        internet_banking_sub = ["use_internet_banking", "security_medium", "initial_password", 
-                               "transfer_limit_per_time", "transfer_limit_per_day", 
-                               "important_transaction_alert", "withdrawal_alert", "overseas_ip_restriction", 
-                               "withdrawal_account_registration"]
-        allowed_fields.update(internet_banking_sub)
-    
-    # 체크카드 단계이거나 선택했을 때 모든 관련 하위 필드들을 표시
-    # 체크카드 관련 모든 단계에서 하위 필드 표시
-    check_card_stages = ["check_card", "ask_check_card", "ask_card_receive_method", "ask_card_delivery_location",
-                        "ask_card_type", "ask_postpaid_transport", "ask_statement_method", "ask_card_usage_alert", "ask_card_password"]
-    
-    if current_stage in check_card_stages or collected_info.get("use_check_card") == True:
-        # use_check_card 필드도 포함
-        check_card_fields = ["use_check_card", "card_type", "card_receive_method", "card_delivery_location", 
-                            "postpaid_transport", "card_usage_alert", "statement_method", "card_password_same_as_account"]
-        allowed_fields.update(check_card_fields)
-        
-    # final_summary 단계에서는 모든 그룹의 필드들을 표시 (시나리오 visible_groups 기준)
-    if current_stage == "final_summary":
-        # 시나리오에서 정의한 visible_groups 기준으로 모든 필드 허용
-        stage_info = stages.get(current_stage, {})
-        visible_groups = stage_info.get("visible_groups", [])
-        field_groups = scenario_data.get("field_groups", [])
-        
-        for group in field_groups:
-            if group.get("id") in visible_groups:
-                group_fields = group.get("fields", [])
-                allowed_fields.update(group_fields)
-        
-        
-    # 5. 추가 조건부 필드들 (보험 등)
-    # 여기에 더 많은 서비스별 하위 필드들을 추가할 수 있음
-    
-    # 이미 수집된 필드들도 항상 표시 (stage가 바뀌어도 유지)
-    for field_key in collected_info:
-        if field_key not in allowed_fields and collected_info[field_key] is not None:
-            allowed_fields.add(field_key)
-    
-    
-    # 조건 검사 및 계층 구조 적용
+    # 간소화된 로직: 시나리오 JSON의 show_when 조건과 수집된 정보만 기반으로 필드 표시
     for field in required_fields:
         field_key = field.get("key")
-        
-        # 1. 단계별 허용 필드 체크 (매우 관대한 정책 - 개인정보 단계와 동일)
-        is_allowed = field_key in allowed_fields
-        
-        if not is_allowed:
-            # show_when 조건이 있는 필드는 조건만 확인하면 표시 허용
-            show_when = field.get("show_when")
-            if show_when:
-                # 조건부 필드는 조건 평가로 넘어감 (부모 필드 체크 생략)
-                pass  # 조건 평가로 넘어감
-            else:
-                # 조건이 없는 필드만 제한
-                continue
-        else:
-            pass
-            
         show_when = field.get("show_when")
         
-        
-        # 2. show_when 조건 확인 (개인정보 단계와 동일 - 더 관대한 표시)
-        if show_when and not is_allowed:  # allowed 필드는 조건 체크 없이 바로 표시
+        # show_when 조건 확인
+        if show_when:
             is_visible = evaluate_show_when(show_when, collected_info)
-            
-            # 조건이 만족되지 않아도 부모 필드가 선택되었다면 미리 표시 (값은 "미입력"으로)
-            parent_field = field.get("parent_field")
-            if not is_visible and parent_field:
-                parent_value = collected_info.get(parent_field)
-                if parent_value == True:  # 부모가 선택되었다면 하위 필드들 미리 표시
-                    # 미리 표시하되 조건 미충족 상태로 마킹
-                    pass
-                else:
-                    continue
-            elif not is_visible:
+            if not is_visible:
                 continue
         
-        # 3. 계층 정보 추가
+        # 계층 정보 추가
         field_with_hierarchy = field.copy()
         field_with_hierarchy["depth"] = calculate_field_depth(field, required_fields)
         field_with_hierarchy["is_visible"] = True
@@ -909,15 +734,6 @@ async def send_slot_filling_update(
             print(f"[{session_id}] - Collected info keys: {list(collected_info.keys())}")
             print(f"[{session_id}] - Visible groups: {visible_groups}")
             
-            # 즉시 테스트 메시지 전송하여 WebSocket 연결 확인
-            test_message = {
-                "type": "test_websocket_connection",
-                "message": "This is a test message to verify WebSocket is working",
-                "timestamp": str(datetime.now()),
-                "session_id": session_id
-            }
-            if websocket.client_state == WebSocketState.CONNECTED:
-                await websocket.send_json(test_message)
             
         except Exception as e:
             print(f"[{session_id}] ❌ WEBSOCKET SEND FAILED: {e}")
@@ -925,20 +741,6 @@ async def send_slot_filling_update(
             raise
         
         
-        # 프론트엔드에서 수신 확인을 위한 디버그 메시지도 함께 전송
-        debug_message = {
-            "type": "debug_slot_filling",
-            "timestamp": json.dumps({"timestamp": str(datetime.now())}),
-            "data_hash": hash(json.dumps(slot_filling_data, sort_keys=True)),
-            "summary": {
-                "productType": slot_filling_data['productType'],
-                "fieldsCount": len(slot_filling_data['requiredFields']),
-                "collectedCount": len(slot_filling_data['collectedInfo']),
-                "completionRate": slot_filling_data['completionRate']
-            }
-        }
-        if websocket.client_state == WebSocketState.CONNECTED:
-            await websocket.send_json(debug_message)
         
     except Exception as e:
         print(f"[{session_id}] Error sending slot filling update: {e}")

@@ -13,8 +13,6 @@ from ...models import next_stage_decision_parser
 from ...logger import log_node_execution
 from ...simple_scenario_engine import SimpleScenarioEngine
 from ....agents.entity_agent import entity_agent
-from ....agents.internet_banking_agent import internet_banking_agent
-from ....agents.check_card_agent import check_card_agent
 from ....config.prompt_loader import load_yaml_file
 from pathlib import Path
 from .scenario_helpers import (
@@ -474,161 +472,11 @@ async def process_multiple_info_collection(state: AgentState, active_scenario_da
                     # 다음 그룹으로 넘어가는 경우
                     response_text = generate_group_specific_prompt(next_stage_id, collected_info)
                     
-        elif current_stage_id == "collect_internet_banking_info":
-            # 인터넷뱅킹 정보 수집 처리 - 전용 Agent 사용
-            
-            # InternetBankingAgent로 정보 분석 및 추출
-            ib_analysis_result = {}
-            if user_input:
-                try:
-                    ib_analysis_result = await internet_banking_agent.analyze_internet_banking_info(
-                        user_input, collected_info, required_fields
-                    )
-                    
-                    # 추출된 정보를 collected_info에 통합
-                    if ib_analysis_result.get("extracted_info"):
-                        collected_info.update(ib_analysis_result["extracted_info"])
-                        
-                except Exception as e:
-                    print(f"[ERROR] Internet Banking Agent failed: {e}")
-                    ib_analysis_result = {"error": str(e)}
-            
-            # 완료 여부 재확인
-            is_ib_complete, missing_ib_fields = check_internet_banking_completion(collected_info, required_fields)
-            
-            if is_ib_complete:
-                next_stage_id = "ask_check_card"
-                # 다음 스테이지의 프롬프트를 가져와서 함께 표시
-                next_stage_prompt = active_scenario_data.get("stages", {}).get("ask_check_card", {}).get("prompt", "체크카드를 신청하시겠어요?")
-                response_text = f"인터넷뱅킹 설정이 완료되었습니다. {next_stage_prompt}"
-            else:
-                # 분석 결과에 안내 메시지가 있으면 사용, 없으면 기본 메시지
-                if ib_analysis_result.get("guidance_message"):
-                    response_text = ib_analysis_result["guidance_message"]
-                else:
-                    response_text = generate_internet_banking_prompt(missing_ib_fields)
-                
-                # 정보 추출이 있었다면 현재 스테이지 유지, 없으면 ask_remaining으로 이동
-                if ib_analysis_result.get("extracted_info"):
-                    next_stage_id = "collect_internet_banking_info"  # 같은 스테이지 유지
-                else:
-                    next_stage_id = "ask_remaining_ib_info"
             
             
-        elif current_stage_id == "ask_remaining_ib_info":
-            # 부족한 인터넷뱅킹 정보 재요청 - 전용 Agent 사용
-            
-            # InternetBankingAgent로 정보 분석 및 추출
-            ib_analysis_result = {}
-            if user_input:
-                try:
-                    ib_analysis_result = await internet_banking_agent.analyze_internet_banking_info(
-                        user_input, collected_info, required_fields
-                    )
-                    
-                    # 추출된 정보를 collected_info에 통합
-                    if ib_analysis_result.get("extracted_info"):
-                        collected_info.update(ib_analysis_result["extracted_info"])
-                        
-                except Exception as e:
-                    print(f"[ERROR] Internet Banking Agent failed (remaining): {e}")
-                    ib_analysis_result = {"error": str(e)}
-            
-            # 완료 여부 재확인
-            is_ib_complete, missing_ib_fields = check_internet_banking_completion(collected_info, required_fields)
-            
-            if is_ib_complete:
-                next_stage_id = "ask_check_card"
-                # 다음 스테이지의 프롬프트를 가져와서 함께 표시
-                next_stage_prompt = active_scenario_data.get("stages", {}).get("ask_check_card", {}).get("prompt", "체크카드를 신청하시겠어요?")
-                response_text = f"인터넷뱅킹 설정이 완료되었습니다. {next_stage_prompt}"
-            else:
-                next_stage_id = "ask_remaining_ib_info"
-                
-                # 분석 결과에 안내 메시지가 있으면 사용, 없으면 기본 메시지
-                if ib_analysis_result.get("guidance_message"):
-                    response_text = ib_analysis_result["guidance_message"]
-                else:
-                    response_text = generate_internet_banking_prompt(missing_ib_fields)
-            
-        elif current_stage_id == "collect_check_card_info":
-            # 체크카드 정보 수집 처리 - 전용 Agent 사용
-            
-            # CheckCardAgent로 정보 분석 및 추출
-            cc_analysis_result = {}
-            if user_input:
-                try:
-                    cc_analysis_result = await check_card_agent.analyze_check_card_info(
-                        user_input, collected_info, required_fields
-                    )
-                    
-                    # 추출된 정보를 collected_info에 통합
-                    if cc_analysis_result.get("extracted_info"):
-                        for field_key, value in cc_analysis_result["extracted_info"].items():
-                            collected_info[field_key] = value
-                    
-                except Exception as e:
-                    print(f"[ERROR] Check Card Agent error: {e}")
-            
-            # 완료 여부 재확인
-            is_cc_complete, missing_cc_fields = check_check_card_completion(collected_info, required_fields)
-            
-            if is_cc_complete:
-                next_stage_id = "final_summary"
-                # final_summary 프롬프트를 가져와서 변수들을 치환
-                summary_prompt = active_scenario_data.get("stages", {}).get("final_summary", {}).get("prompt", "")
-                summary_prompt = replace_template_variables(summary_prompt, collected_info)
-                response_text = f"체크카드 설정이 완료되었습니다.\n\n{summary_prompt}"
-            else:
-                # 분석 결과에 안내 메시지가 있으면 사용, 없으면 기본 메시지
-                if cc_analysis_result.get("guidance_message"):
-                    response_text = cc_analysis_result["guidance_message"]
-                else:
-                    response_text = generate_check_card_prompt(missing_cc_fields)
-                
-                # 사용자가 일부 정보를 제공한 경우 같은 스테이지 유지
-                if cc_analysis_result.get("extracted_info"):
-                    next_stage_id = "collect_check_card_info"
-                else:
-                    next_stage_id = "ask_remaining_card_info"
             
             
-        elif current_stage_id == "ask_remaining_card_info":
-            # 부족한 체크카드 정보 재요청 - 전용 Agent 사용
             
-            # CheckCardAgent로 정보 분석 및 추출
-            cc_analysis_result = {}
-            if user_input:
-                try:
-                    cc_analysis_result = await check_card_agent.analyze_check_card_info(
-                        user_input, collected_info, required_fields
-                    )
-                    
-                    # 추출된 정보를 collected_info에 통합
-                    if cc_analysis_result.get("extracted_info"):
-                        for field_key, value in cc_analysis_result["extracted_info"].items():
-                            collected_info[field_key] = value
-                    
-                except Exception as e:
-                    print(f"[ERROR] Check Card Agent error: {e}")
-            
-            # 완료 여부 재확인
-            is_cc_complete, missing_cc_fields = check_check_card_completion(collected_info, required_fields)
-            
-            if is_cc_complete:
-                next_stage_id = "final_summary"
-                # final_summary 프롬프트를 가져와서 변수들을 치환
-                summary_prompt = active_scenario_data.get("stages", {}).get("final_summary", {}).get("prompt", "")
-                summary_prompt = replace_template_variables(summary_prompt, collected_info)
-                response_text = f"체크카드 설정이 완료되었습니다.\n\n{summary_prompt}"
-            else:
-                next_stage_id = "ask_remaining_card_info"
-                
-                # 분석 결과에 안내 메시지가 있으면 사용, 없으면 기본 메시지
-                if cc_analysis_result.get("guidance_message"):
-                    response_text = cc_analysis_result["guidance_message"]
-                else:
-                    response_text = generate_check_card_prompt(missing_cc_fields)
             
         elif current_stage_id == "ask_security_medium":
             # ask_security_medium 단계 처리
