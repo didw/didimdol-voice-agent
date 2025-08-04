@@ -121,6 +121,36 @@
       "fields_to_collect": ["security_medium", "transfer_limit_once", "transfer_limit_daily"],
       "modifiable_fields": ["transfer_limit_once", "transfer_limit_daily"],
       "extraction_prompt": "보안매체 선택과 이체한도 정보를 추출하세요:\\n- 보안매체명 추출\\n- 이체한도 금액 추출 (숫자만)",
+      "next_step": {
+        "shinhan_otp": "otp_payment_account",
+        "futuretech_19284019384": "additional_services",
+        "comas_rsa_12930295": "additional_services",
+        "security_card": "additional_services"
+      }
+    },
+    "otp_payment_account": {
+      "stage_id": "otp_payment_account",
+      "stage_name": "OTP 수수료 출금 계좌 선택",
+      "response_type": "bullet",
+      "prompt": "네, 신한 OTP로 진행할게요. 발급 수수료는 1만원입니다.\\n어떤 계좌에서 출금할까요?",
+      "choices": [
+        {
+          "display": "쏠편한 입출금통장(저축예금)\\n110-OOO-883827\\n잔액 999,999,999원",
+          "value": "account_110_883827",
+          "default": true
+        },
+        {
+          "display": "쏠편한 입출금통장(저축예금)\\n110-OOO-883828\\n잔액 999,999,999원",
+          "value": "account_110_883828"
+        },
+        {
+          "display": "쏠편한 입출금통장(저축예금)\\n110-OOO-883829\\n잔액 999,999,999원",
+          "value": "account_110_883829"
+        }
+      ],
+      "fields_to_collect": ["otp_payment_account"],
+      "extraction_prompt": "OTP 수수료 출금 계좌를 추출하세요",
+      "visible_groups": ["security_medium"],
       "next_step": "additional_services"
     },
     "additional_services": {
@@ -268,7 +298,7 @@
       "dynamic_prompt": "지금까지 신청하신 내용을 확인해드리겠습니다.\n\n{summary}\n\n위 내용이 맞으신가요? 수정하실 부분이 있으면 말씀해주세요.",
       "fields_to_collect": [],
       "extraction_prompt": "최종 확인에 대한 응답을 추출하세요:\\n- \"네\", \"예\", \"진행\", \"맞습니다\" → final_confirmation: true\\n- \"아니요\", \"수정\", \"다시\" → final_confirmation: false",
-      "visible_groups": ["personal_info", "security_medium", "additional_services", "card_selection", "statement_info", "card_alert", "card_password"],
+      "visible_groups": ["personal_info", "security_medium", "otp_payment", "additional_services", "card_selection", "statement_info", "card_alert", "card_password"],
       "next_step": "completion"
     },
     "completion": {
@@ -302,6 +332,14 @@
         {"field_id": "security_medium", "field_name": "보안매체", "field_type": "text"},
         {"field_id": "transfer_limit_once", "field_name": "1회 이체한도", "field_type": "text"},
         {"field_id": "transfer_limit_daily", "field_name": "1일 이체한도", "field_type": "text"}
+      ]
+    },
+    {
+      "group_id": "otp_payment",
+      "group_name": "OTP 수수료 출금",
+      "stage_ids": ["otp_payment_account"],
+      "fields": [
+        {"field_id": "otp_payment_account", "field_name": "출금 계좌", "field_type": "text"}
       ]
     },
     {
@@ -378,6 +416,15 @@
       "extraction_prompt": "사용자가 선택한 보안매체를 추출하세요:\\n- 미래테크 → \"futuretech_19284019384\"\\n- 코마스/RSA → \"comas_rsa_12930295\"\\n- 보안카드 → \"security_card\"\\n- 신한OTP → \"shinhan_otp\""
     },
     {
+      "key": "otp_payment_account",
+      "display_name": "OTP 수수료 출금 계좌",
+      "type": "string",
+      "required": false,
+      "stage": "otp_payment_account",
+      "valid_values": ["account_110_883827", "account_110_883828", "account_110_883829"],
+      "extraction_prompt": "OTP 수수료 출금 계좌를 추출하세요"
+    },
+    {
       "key": "important_transaction_alert",
       "display_name": "중요거래 알림",
       "type": "boolean",
@@ -439,6 +486,7 @@
     "services_selected": "선택 서비스",
     "personal_info_confirmed": "개인정보 확인",
     "security_medium_selected": "보안매체",
+    "otp_payment_account": "OTP 수수료 출금 계좌",
     "important_transaction_alert": "중요거래 알림",
     "withdrawal_alert": "출금 알림",
     "overseas_ip_restriction": "해외 IP 이체 제한",

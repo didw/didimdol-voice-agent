@@ -119,6 +119,10 @@ def get_expected_field_keys(stage_info: Dict[str, Any]) -> List[str]:
     """스테이지에서 기대되는 필드 키 목록 반환"""
     field_keys = []
     
+    # V3 시나리오: fields_to_collect이 있는 경우 우선 사용
+    if stage_info.get("fields_to_collect"):
+        return stage_info["fields_to_collect"]
+    
     # expected_info_key가 있는 경우
     if stage_info.get("expected_info_key"):
         field_keys.append(stage_info["expected_info_key"])
